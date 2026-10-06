@@ -483,7 +483,7 @@ def _activate_regeneration(game,user):
     for position,permanent in enumerate(game.player(user).battlefield,1):
         card=game.card(permanent.uid); target=_activation_beneficiary(game,permanent)
         _,activation_effect,_,_=game._activation_profile(permanent)
-        if activation_effect=="regenerate" and target is not None and not target.regeneration_shields and _regeneration_threatened(game,next(player.user_id for player in game.players.values() if target in player.battlefield),target) and game.can_activate(user,position):
+        if activation_effect in ("regenerate","corpse_regenerate") and target is not None and not target.regeneration_shields and _regeneration_threatened(game,next(player.user_id for player in game.players.values() if target in player.battlefield),target) and game.can_activate(user,position):
             candidates.append((game.card(target.uid).cost,position))
     if not candidates: return None
     _,position=max(candidates); game.activate_ability(user,position); return "activate"

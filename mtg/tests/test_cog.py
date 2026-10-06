@@ -406,6 +406,13 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game._damage_permanent(fungusaur,1); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Fungusaur",rendered); self.assertIn("+1/+1 counters: 2",rendered); self.assertIn("Fungusaur ability",rendered)
 
+    async def test_public_embed_shows_scavenging_ghoul_counters_and_end_step_trigger(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:126"; game.player(10).battlefield=[permanent_type(uid,"lea:126",sick=False,corpse_counters=2)]
+        game._begin_end_step(); rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Scavenging Ghoul",rendered); self.assertIn("Corpse counters: 2",rendered); self.assertIn("Scavenging Ghoul ability",rendered)
+
     async def test_public_embed_shows_sengir_counter_and_death_trigger(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

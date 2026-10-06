@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from mtg.art import ArtError
-from mtg.cards import ALPHA_ACTIVATED_CREATURES, ALPHA_COMBAT_REQUIREMENTS, ALPHA_COMBAT_TRIGGERS, ALPHA_DAMAGE_COUNTER_CREATURES, ALPHA_DAMAGE_TRIGGERS, ALPHA_ARTIFACTS, ALPHA_ENCHANTMENTS, ALPHA_GLOBAL_ENCHANTMENTS, ALPHA_TAP_ENCHANTMENTS, ALPHA_CHARACTERISTIC_CREATURES, ALPHA_ISLAND_DEPENDENT_CREATURES, ALPHA_KEYWORDS, ALPHA_LORDS, ALPHA_MANA_CREATURES, ALPHA_OPTIONAL_TRIGGERS, ALPHA_PROTECTIONS, ALPHA_UPKEEP_CREATURES, ALPHA_LAND_KEYS, ALPHA_SPELLS, BASE_CARDS, CARDS, PACK_POOLS, starter
+from mtg.cards import ALPHA_ACTIVATED_CREATURES, ALPHA_COMBAT_REQUIREMENTS, ALPHA_COMBAT_TRIGGERS, ALPHA_DAMAGE_COUNTER_CREATURES, ALPHA_DEATH_COUNTER_CREATURES, ALPHA_DAMAGE_TRIGGERS, ALPHA_ARTIFACTS, ALPHA_ENCHANTMENTS, ALPHA_GLOBAL_ENCHANTMENTS, ALPHA_TAP_ENCHANTMENTS, ALPHA_CHARACTERISTIC_CREATURES, ALPHA_ISLAND_DEPENDENT_CREATURES, ALPHA_KEYWORDS, ALPHA_LORDS, ALPHA_MANA_CREATURES, ALPHA_OPTIONAL_TRIGGERS, ALPHA_PROTECTIONS, ALPHA_UPKEEP_CREATURES, ALPHA_LAND_KEYS, ALPHA_SPELLS, BASE_CARDS, CARDS, PACK_POOLS, starter
 from mtg.catalog import ALPHA_BY_KEY, ALPHA_CARDS, ALPHA_SET, PLAYABLE_ALPHA, REFERENCE_ALPHA, search_alpha
 from mtg.engine import Game, Permanent
 from mtg.mtg import MTG
@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),271)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),271)
+        self.assertEqual(len(CARDS),272)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),272)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,15 +42,15 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),211)
-        self.assertEqual(len(REFERENCE_ALPHA),84)
+        self.assertEqual(len(PLAYABLE_ALPHA),212)
+        self.assertEqual(len(REFERENCE_ALPHA),83)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
             "digital_adaptation_required":1,
         })
         promoted_abilities={card.key for card in PLAYABLE_ALPHA if card.support_family=="creature_ability"}
-        self.assertEqual(promoted_abilities,set(ALPHA_KEYWORDS)|set(ALPHA_PROTECTIONS)|set(ALPHA_LORDS)|set(ALPHA_MANA_CREATURES)|set(ALPHA_CHARACTERISTIC_CREATURES)|set(ALPHA_ACTIVATED_CREATURES)|set(ALPHA_COMBAT_TRIGGERS)|set(ALPHA_UPKEEP_CREATURES)|set(ALPHA_ISLAND_DEPENDENT_CREATURES)|set(ALPHA_COMBAT_REQUIREMENTS)|set(ALPHA_OPTIONAL_TRIGGERS)|set(ALPHA_DAMAGE_COUNTER_CREATURES)|{"lea:159"})
+        self.assertEqual(promoted_abilities,set(ALPHA_KEYWORDS)|set(ALPHA_PROTECTIONS)|set(ALPHA_LORDS)|set(ALPHA_MANA_CREATURES)|set(ALPHA_CHARACTERISTIC_CREATURES)|set(ALPHA_ACTIVATED_CREATURES)|set(ALPHA_COMBAT_TRIGGERS)|set(ALPHA_UPKEEP_CREATURES)|set(ALPHA_ISLAND_DEPENDENT_CREATURES)|set(ALPHA_COMBAT_REQUIREMENTS)|set(ALPHA_OPTIONAL_TRIGGERS)|set(ALPHA_DAMAGE_COUNTER_CREATURES)|set(ALPHA_DEATH_COUNTER_CREATURES)|{"lea:159"})
         self.assertEqual({key:CARDS[key].protection_colors for key in ALPHA_PROTECTIONS},ALPHA_PROTECTIONS)
         self.assertEqual(CARDS["lea:43"].keywords,("first_strike",))
         self.assertEqual(CARDS["lea:227"].keywords,("trample",))
@@ -60,6 +60,9 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("Protection From B",CARDS["lea:43"].ability_text)
         self.assertEqual(CARDS["lea:186"].ability_text,"Flying, Produces W/U/B/R/G")
         self.assertEqual(CARDS["lea:210"].ability_text,"Produces G")
+        self.assertTrue(CARDS["lea:126"].end_step_corpse_counters)
+        self.assertEqual(CARDS["lea:126"].activation_effect,"corpse_regenerate")
+        self.assertIn("Remove a corpse counter: Regenerate this creature",CARDS["lea:126"].ability_text)
         self.assertEqual({key:CARDS[key].characteristic_pt for key in ALPHA_CHARACTERISTIC_CREATURES},ALPHA_CHARACTERISTIC_CREATURES)
         for key,ability in ALPHA_ACTIVATED_CREATURES.items():
             self.assertEqual(CARDS[key].activation_cost,ability.get("activation_cost",""))
@@ -183,7 +186,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("271 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("272 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

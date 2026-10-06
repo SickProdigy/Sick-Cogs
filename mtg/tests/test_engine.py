@@ -48,15 +48,15 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("lands_played_this_turn")
-            for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("damage_source_uids")
+            for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
-        self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage)
+        self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
         self.assertTrue(all(player.damage_prevention==0 and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
-        self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 and permanent.damage_source_uids==[] for player in restored.players.values() for permanent in player.battlefield))
+        self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
     def test_time_walk_queue_persists_and_gives_a_full_extra_turn(self):
@@ -629,7 +629,7 @@ class AlphaActivatedPumpTests(unittest.TestCase):
         self.activate_resolve(game,10,1)
         self.assertEqual(game.current_stats(whelp),(6,3)); self.assertTrue(whelp.sacrifice_at_end_step)
         restored=Game.from_raw(game.to_raw()); restored.phase="postcombat_main"; restored._advance()
-        self.assertIn(whelp.uid,restored.end_step_sacrifices)
+        self.assertEqual(restored.stack[-1].ability_effect,"end_step_sacrifice")
         restored=Game.from_raw(restored.to_raw())
         restored.pass_priority(10); restored.pass_priority(20)
         self.assertNotIn(whelp.uid,[x.uid for x in restored.player(10).battlefield])
@@ -644,7 +644,7 @@ class AlphaActivatedPumpTests(unittest.TestCase):
         self.assertIn(whelp.uid,[x.uid for x in game.player(10).battlefield])
         self.assertTrue(next(x for x in game.player(10).battlefield if x.uid==whelp.uid).sacrifice_at_end_step)
         game.phase="postcombat_main"; game._advance()
-        self.assertIn(whelp.uid,game.end_step_sacrifices)
+        self.assertEqual(game.stack[-1].ability_effect,"end_step_sacrifice")
         game.pass_priority(game.active_user); game.pass_priority(game.opponent(game.active_user))
         self.assertIn(whelp.uid,game.player(10).graveyard)
 
@@ -1958,6 +1958,56 @@ class AlphaSengirVampireTests(unittest.TestCase):
         game._sba(); self.assertIn(sengir.uid,game.player(10).graveyard); self.assertIn(victim.uid,game.player(20).graveyard)
         self.assertEqual(sum(item.ability_effect=="damaged_creature_death_counter" for item in game.stack),1)
         self.resolve_top(game); self.assertIn("source was gone",game.log[-1])
+
+
+class AlphaScavengingGhoulTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_deaths_persist_and_end_step_triggers_count_at_resolution_in_apnap_order(self):
+        game=ready(); active=self.add(game,10,"lea:126"); nonactive=self.add(game,20,"lea:126"); first=self.add(game,20,"bear")
+        game._destroy(game.player(20),first,allow_regeneration=False); self.assertEqual(game.creatures_died_this_turn,1)
+        game._begin_end_step(); self.assertEqual([(x.owner,x.ability_effect) for x in game.stack],[(10,"end_step_corpse_counters"),(20,"end_step_corpse_counters")])
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored); self.assertEqual(restored.find_permanent(nonactive.uid)[1].corpse_counters,1)
+        second=self.add(restored,10,"bear"); restored._destroy(restored.player(10),second,allow_regeneration=False); self.assertEqual(restored.creatures_died_this_turn,2)
+        self.resolve_top(restored); self.assertEqual(restored.find_permanent(active.uid)[1].corpse_counters,2)
+
+    def test_regeneration_exile_and_noncreatures_do_not_increment_death_count(self):
+        game=ready(); creature=self.add(game,10,"bear"); creature.regeneration_shields=1
+        self.assertFalse(game._destroy(game.player(10),creature)); self.assertEqual(game.creatures_died_this_turn,0)
+        exiled=self.add(game,20,"bear"); exiled.exile_on_death=True; game._destroy(game.player(20),exiled,allow_regeneration=False)
+        land=self.add(game,10,"forest"); game._destroy(game.player(10),land,allow_regeneration=False)
+        self.assertEqual(game.creatures_died_this_turn,0)
+
+    def test_token_and_zero_toughness_deaths_count_and_cleanup_resets_only_turn_count(self):
+        game=ready(); ghoul=self.add(game,10,"lea:126"); ghoul.corpse_counters=2
+        token=self.add(game,20,"token:wasp"); game._destroy(game.player(20),token,allow_regeneration=False)
+        victim=self.add(game,20,"bear"); victim.toughness_bonus=-2; game._sba()
+        self.assertEqual(game.creatures_died_this_turn,2); self.assertNotIn(token.uid,game.cards)
+        restored=Game.from_raw(game.to_raw()); restored._cleanup()
+        self.assertEqual(restored.creatures_died_this_turn,0); self.assertEqual(restored.find_permanent(ghoul.uid)[1].corpse_counters,2)
+
+    def test_corpse_counter_is_paid_immediately_for_persisted_regeneration(self):
+        game=ready(); ghoul=self.add(game,10,"lea:126"); ghoul.corpse_counters=1
+        game.activate_ability(10,1); self.assertEqual(ghoul.corpse_counters,0); self.assertEqual(game.stack[-1].ability_effect,"corpse_regenerate")
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored); saved=restored.find_permanent(ghoul.uid)[1]
+        self.assertEqual(saved.regeneration_shields,1); self.assertFalse(restored._destroy(restored.player(10),saved)); self.assertIn(saved,restored.player(10).battlefield)
+        with self.assertRaisesRegex(GameError,"no corpse counters"): restored.activate_ability(10,1)
+
+    def test_removed_ghoul_spends_counter_but_regeneration_fizzles(self):
+        game=ready(); ghoul=self.add(game,10,"lea:126"); ghoul.corpse_counters=1; game.activate_ability(10,1)
+        game.player(10).battlefield.remove(ghoul); game.player(10).graveyard.append(ghoul.uid); self.resolve_top(game)
+        self.assertIn("source was gone",game.log[-1])
+
+    def test_whelp_sacrifice_resolves_before_same_controller_ghoul_trigger(self):
+        game=ready(); ghoul=self.add(game,10,"lea:126"); whelp=self.add(game,10,"lea:141"); whelp.sacrifice_at_end_step=True
+        game._begin_end_step(); self.assertEqual([x.ability_effect for x in game.stack],["end_step_corpse_counters","end_step_sacrifice"])
+        self.resolve_top(game); self.assertIn(whelp.uid,game.player(10).graveyard); self.assertEqual(game.creatures_died_this_turn,1)
+        self.resolve_top(game); self.assertEqual(ghoul.corpse_counters,1)
 
 
 class AlphaCombatRequirementTests(unittest.TestCase):

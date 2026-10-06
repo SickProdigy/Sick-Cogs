@@ -656,6 +656,12 @@ class SoloAITests(unittest.TestCase):
         game.pass_priority(HUMAN); advance_solo(game)
         self.assertTrue(statue.animated_until_end_combat); self.assertFalse(game.stack)
 
+    def test_ai_uses_scavenging_ghoul_corpse_counter_for_regeneration(self):
+        game=solo(); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
+        attacker=self.add(game,HUMAN,"giant"); ghoul=self.add(game,AI,"lea:126"); ghoul.corpse_counters=1
+        game.active_index=0; game.phase="after_blockers"; game.attackers=[attacker.uid]; game.blocks={attacker.uid:ghoul.uid}; game.blocked_attackers=[attacker.uid]; game.priority_user=AI
+        advance_solo(game); self.assertEqual(ghoul.corpse_counters,0); self.assertEqual(game.stack[-1].ability_effect,"corpse_regenerate")
+
     def test_ai_casts_sengir_vampire_through_generic_creature_path(self):
         game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         spell=self.add(game,AI,"lea:127","hand"); [self.add(game,AI,"swamp") for _ in range(5)]

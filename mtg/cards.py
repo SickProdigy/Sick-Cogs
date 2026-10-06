@@ -108,6 +108,7 @@ class Card:
     enchantment_cast_draw: bool = False
     dealt_damage_plus_counter: bool = False
     damaged_creature_death_counter: bool = False
+    end_step_corpse_counters: bool = False
     attack_requires_defender_land_type: str = ""
     sacrifice_without_land_type: str = ""
     attacks_each_combat: bool = False
@@ -141,7 +142,9 @@ class Card:
             if self.sacrifice_after_activations:
                 effects.append(f"Sacrifice at the next end step after activation {self.sacrifice_after_activations}")
             if self.activation_text: effects.append(self.activation_text)
+            if self.activation_effect=="corpse_regenerate": effects.append("Regenerate this creature")
             costs=[self.activation_cost] if self.activation_cost else []
+            if self.activation_effect=="corpse_regenerate": costs.append("Remove a corpse counter")
             if self.activation_tap: costs.append("{T}")
             abilities.append(", ".join(costs)+": "+"; ".join(effects))
         aura=[]
@@ -184,6 +187,7 @@ class Card:
         if self.enchantment_cast_draw: abilities.append("Whenever you cast an enchantment spell, you may draw a card")
         if self.dealt_damage_plus_counter: abilities.append("Whenever dealt damage, put a +1/+1 counter on this creature")
         if self.damaged_creature_death_counter: abilities.append("Whenever a creature dealt damage by this creature this turn dies, put a +1/+1 counter on this creature")
+        if self.end_step_corpse_counters: abilities.append("At each end step, put a corpse counter on this creature for each creature that died this turn")
         if self.attack_requires_defender_land_type: abilities.append(f"Can't attack unless defending player controls a {self.attack_requires_defender_land_type.title()}")
         if self.sacrifice_without_land_type: abilities.append(f"When you control no {self.sacrifice_without_land_type.title()}s, sacrifice this creature")
         if self.attacks_each_combat: abilities.append("Attacks each combat if able")
@@ -345,6 +349,10 @@ ALPHA_ACTIVATED_CREATURES = {
 ALPHA_DAMAGE_COUNTER_CREATURES = {
     "lea:127": {"damaged_creature_death_counter":True},
     "lea:195": {"dealt_damage_plus_counter":True},
+}
+
+ALPHA_DEATH_COUNTER_CREATURES = {
+    "lea:126": {"end_step_corpse_counters":True, "activation_effect":"corpse_regenerate"},
 }
 
 ALPHA_OPTIONAL_TRIGGERS = {
@@ -534,7 +542,7 @@ for reference in PLAYABLE_ALPHA:
         activated_toughness=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activated_toughness",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_toughness",0)),
         activated_keyword=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_keyword",""),
         sacrifice_after_activations=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("sacrifice_after_activations",0),
-        activation_effect=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_effect",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_effect",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_effect",""))),
+        activation_effect=ALPHA_DEATH_COUNTER_CREATURES.get(reference.key,{}).get("activation_effect",ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_effect",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_effect",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_effect","")))),
         activation_tap=ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_tap",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_tap",False)),
         activation_text=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_text",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_text",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_text",""))),
         activation_amount=ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_amount",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_amount",0)),
@@ -582,6 +590,7 @@ for reference in PLAYABLE_ALPHA:
         enchantment_cast_draw=ALPHA_OPTIONAL_TRIGGERS.get(reference.key,{}).get("enchantment_cast_draw",False),
         dealt_damage_plus_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("dealt_damage_plus_counter",False),
         damaged_creature_death_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("damaged_creature_death_counter",False),
+        end_step_corpse_counters=ALPHA_DEATH_COUNTER_CREATURES.get(reference.key,{}).get("end_step_corpse_counters",False),
         attack_requires_defender_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("attack_requires_defender_land_type",""),
         sacrifice_without_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("sacrifice_without_land_type",""),
         attacks_each_combat=ALPHA_COMBAT_REQUIREMENTS.get(reference.key,{}).get("attacks_each_combat",False),
@@ -606,7 +615,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | set(ALPHA_COMBAT_REQUIREMENTS) | set(ALPHA_OPTIONAL_TRIGGERS) | set(ALPHA_DAMAGE_COUNTER_CREATURES) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | set(ALPHA_COMBAT_REQUIREMENTS) | set(ALPHA_OPTIONAL_TRIGGERS) | set(ALPHA_DAMAGE_COUNTER_CREATURES) | set(ALPHA_DEATH_COUNTER_CREATURES) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:
