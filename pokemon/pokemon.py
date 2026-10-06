@@ -85,7 +85,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.19.6";__author__="SickProdigy"
+    __version__="0.20.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -265,6 +265,18 @@ class Pokemon(commands.Cog):
     def battle_embed(self,b):
         player=SPECIES[b.player.species_id];wild=SPECIES[b.wild_species_id]
         gym=GYMS.get(b.gym_key) if b.battle_kind=="gym" else None
+        if b.state!="active":
+            if b.state=="caught":title=f"{wild.name} was caught!"
+            elif b.state=="won":title=f"Victory over {wild.name}!" if not gym else f"Gym Leader {gym.leader} was defeated!"
+            elif b.state=="lost":title="Battle over"
+            else:title="Encounter ended"
+            e=discord.Embed(title=title,description=b.result or b.last_action,color=discord.Color.gold())
+            e.set_thumbnail(url=sprite(wild.id))
+            if b.state=="caught":e.add_field(name="Caught Pokémon",value=f"{wild.name} · Lv. {b.wild_level}",inline=True)
+            e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
+            needed=b.player.level*b.player.level*10 if b.player.level<100 else 0
+            e.add_field(name="Experience",value="MAX" if not needed else f"{b.player.experience}/{needed} XP",inline=True)
+            return e
         title=f"Gym Leader {gym.leader} · {wild.name} Lv. {b.wild_level}" if gym else f"Wild {wild.name} · Lv. {b.wild_level}"
         e=discord.Embed(title=title,description=b.result or b.last_action or f"Turn {b.turn}",color=discord.Color.gold() if gym else discord.Color.blurple())
         e.set_thumbnail(url=sprite(wild.id))

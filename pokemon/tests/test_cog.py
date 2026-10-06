@@ -142,6 +142,13 @@ class CogPolicyTests(unittest.TestCase):
             self.assertEqual(PokemonCatalog(path).load(), 1)
             self.assertEqual(SPECIES[25], item)
 
+    def test_terminal_battle_embed_hides_active_controls(self):
+        current=battle();current.state="won";current.result="The wild Pokémon fainted. Gained 80 XP."
+        embed=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
+        self.assertIn("Victory",embed.title)
+        self.assertNotIn("Moves",[field.name for field in embed.fields])
+        self.assertIsNone(embed.footer.text)
+
     def test_expected_command_surfaces_are_separate_and_documented(self):
         player_names={command.qualified_name for command in Pokemon.pokemon.walk_commands()}
         self.assertEqual(set(Pokemon.pokemon.aliases),{"pkmn","poke"})
