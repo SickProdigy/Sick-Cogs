@@ -4102,4 +4102,32 @@ class AlphaBandingTests(unittest.TestCase):
         game.activate_ability(10,1,"10:2"); game.pass_priority(20); game.pass_priority(10); self.assertIn("banding",game.current_keywords(target)); self.assertTrue(helm.tapped)
         game._cleanup(); self.assertNotIn("banding",game.current_keywords(target))
 
+class AlphaMultiTargetXSpellTests(unittest.TestCase):
+    def add(self,game,user,key,attached_to=None):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; permanent=Permanent(uid,key,owner=user,sick=False,attached_to=attached_to); game.player(user).battlefield.append(permanent); return permanent
+    def hand(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(user).hand.insert(0,uid); return uid
+
+    def test_fireball_extra_cost_persistence_and_resolution_legal_division(self):
+        game=ready(); first=self.add(game,20,"bear"); second=self.add(game,20,"giant"); spell=self.hand(game,10,"lea:149")
+        for _ in range(8): self.add(game,10,"mountain")
+        game.phase="precombat_main"; game.priority_user=10; game.play(10,1,"20,20:1,20:2",5); self.assertEqual(game.stack[-1].target,f"20,20:{first.uid},20:{second.uid}"); self.assertEqual(Game.from_raw(game.to_raw()).stack[-1].target,game.stack[-1].target)
+        game.player(20).battlefield.remove(first); game.player(20).graveyard.append(first.uid); game.pass_priority(20); game.pass_priority(10)
+        self.assertEqual(game.player(20).life,18); self.assertEqual(second.damage,2); self.assertIn(spell,game.player(10).graveyard)
+        short=ready(); self.hand(short,10,"lea:149"); self.add(short,20,"bear"); self.add(short,20,"bear")
+        for _ in range(7): self.add(short,10,"mountain")
+        short.phase="precombat_main"; short.priority_user=10
+        with self.assertRaisesRegex(GameError,"cannot pay"): short.play(10,1,"20,20:1,20:2",5)
+
+    def test_volcanic_eruption_counts_only_mountains_put_in_graveyard(self):
+        game=ready(); doomed=self.add(game,20,"mountain"); saved=self.add(game,20,"mountain"); warded=self.add(game,20,"bear"); self.add(game,20,"lea:8",warded.uid); own=self.add(game,10,"bear"); self.add(game,20,"lea:14",saved.uid); spell=self.hand(game,10,"lea:88")
+        for _ in range(5): self.add(game,10,"island")
+        game.phase="precombat_main"; game.priority_user=10; game.play(10,1,"20:1,20:2",2); game.pass_priority(20); game.pass_priority(10)
+        self.assertIn(doomed.uid,game.player(20).graveyard); self.assertIsNotNone(game.find_permanent(saved.uid)[1]); self.assertEqual(warded.damage,0); self.assertEqual(own.damage,1); self.assertEqual(game.player(10).life,19); self.assertEqual(game.player(20).life,19); self.assertIn(spell,game.player(10).graveyard)
+
+    def test_multi_target_validation_and_zero_target_casts(self):
+        game=ready(); self.hand(game,10,"lea:149"); self.add(game,20,"bear"); self.add(game,10,"mountain"); game.phase="precombat_main"; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"distinct"): game.play(10,1,"20:1,20:1",0)
+        game.play(10,1,None,0); self.assertEqual(game.stack[-1].target,"")
+
 if __name__=="__main__": unittest.main()

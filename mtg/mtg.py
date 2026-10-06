@@ -224,6 +224,13 @@ class MTG(commands.Cog):
                 if item.color_override: label+=f" [{item.color_override}]"
                 if (not item.ability_effect and "{X}" in g.card(item.uid).mana_cost) or g.card(item.uid).activation_x_choice: label+=f" (X={item.x_value})"
                 if item.ability_effect=="add_power_counters": label+=f" (add {item.choice_value})"
+                if not item.ability_effect and g.card(item.uid).effect in ("fireball","volcanic_eruption"):
+                    targets=[]
+                    for stable in (item.target or "").split(",") if item.target else []:
+                        if ":" in stable:
+                            _,target=g.find_permanent(int(stable.split(":")[1])); targets.append(g.card(target.uid).name if target is not None else "departed permanent")
+                        else: targets.append(names.get(int(stable),stable))
+                    label+=" (targets: "+(", ".join(targets) if targets else "none")+")"
                 if not item.ability_effect and g.card(item.uid).effect=="sacrifice_mana": label+=f" (adds {{{g.card(item.uid).sacrifice_mana_color}}}×{item.choice_value})"
                 if item.ability_effect=="upkeep_untapped_land_damage": label+=f" ({item.choice_value} damage snapshot)"
                 if item.ability_effect=="prevent_source_damage" and item.target:
@@ -601,7 +608,7 @@ class MTG(commands.Cog):
         await self.mutate_ctx(ctx,lambda g:g.activate_ability(ctx.author.id,position,normalized,x_value,choice_value),"activate")
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None,x_value:int=None):
-        """Play/cast a hand position with optional target and X; modal choices include tap:/untap: for Twiddle, life:/prevent: for Healing Salve, a source as S:POSITION or USER_ID:POSITION for Reverse Damage, TYPE:USER_ID:POSITION for Phantasmal Terrain, and sacrifice:FIELD_POSITION for Sacrifice."""
+        """Play/cast a hand position with optional target and X; comma-separated multi-target choices support Fireball and Volcanic Eruption; modal choices include tap:/untap: for Twiddle, life:/prevent: for Healing Salve, a source as S:POSITION or USER_ID:POSITION for Reverse Damage, TYPE:USER_ID:POSITION for Phantasmal Terrain, and sacrifice:FIELD_POSITION for Sacrifice."""
         normalized=None if target and target.casefold() in {"-","none"} else target
         await self.mutate_ctx(ctx,lambda g:g.play(ctx.author.id,position,normalized,x_value),"play")
     @mtg.command(name="attack")

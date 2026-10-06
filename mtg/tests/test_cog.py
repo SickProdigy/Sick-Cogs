@@ -765,5 +765,10 @@ class NaturalSelectionRenderingTests(unittest.IsolatedAsyncioTestCase):
         interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock())); await cog.send_natural_selection(interaction,1); kwargs=interaction.followup.send.await_args.kwargs; self.assertTrue(kwargs["ephemeral"]); self.assertIn("Hill Giant",interaction.followup.send.await_args.args[0]); self.assertEqual(len(next(item for item in kwargs["view"].children if hasattr(item,"options")).options),7)
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("privately arranging",rendered); self.assertNotIn("Hill Giant",rendered); self.assertNotIn("Bear Cub",rendered)
 
+class MultiTargetSpellRenderingTests(unittest.TestCase):
+    def test_stack_lists_x_and_public_targets(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=f"Player {user_id}")); game=Game(1,[10,20],1); creature=Permanent(99,"bear",owner=20,sick=False); game.cards[99]="bear"; game.player(20).battlefield=[creature]; spell=100; game.cards[spell]="lea:149"; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; game.stack=[spell_type(10,spell,"lea:149",f"20,20:{creature.uid}",x_value=5)]
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Fireball (X=5)",rendered); self.assertIn("Player 20, Bear Cub",rendered)
+
 if __name__ == "__main__":
     unittest.main()

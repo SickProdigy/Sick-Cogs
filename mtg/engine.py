@@ -1045,13 +1045,14 @@ class Game:
             sacrificed=p.battlefield[sacrifice_position-1]
             if not self.is_creature(sacrificed): raise GameError(f"{c.name} requires a creature you control.")
             target=None
-        target=self._target_for_cast(c,user,target)
+        target=self._target_for_cast(c,user,target,x_value)
         if c.effect=="counter_mana_value_x":
             target_uid=int(target.split(":",1)[1]); target_spell=next((item for item in self.stack if item.uid==target_uid and not item.ability_effect),None)
             if target_spell is None or self.spell_mana_value(target_spell)!=x_value: raise GameError(f"{c.name} X must equal the target spell mana value.")
         protected=self._stable_target_permanent(target)
         if protected is not None and self._protected_from(protected,c): raise GameError(f"{c.name} cannot target a permanent with protection from its color.")
-        payment=self._mana_payment(p,c,x_value)
+        payment_cost=c.mana_cost+(f"{{{max(0,len(target.split(chr(44)))-1)}}}" if c.effect=="fireball" and target else "")
+        payment=self._mana_payment(p,c,x_value,mana_cost=payment_cost if c.effect=="fireball" else None)
         if payment is None: raise GameError(f"You cannot pay {c.mana_cost or c.cost} with your available mana.")
         sources,remaining,choices=payment; pending_triggers=[]
         for permanent in sources: self._tap_permanent(user,permanent,choices[permanent.uid],pending_triggers=pending_triggers)
@@ -1106,7 +1107,30 @@ class Game:
         if creature_only and not self.card(uid).creature: raise GameError("Target graveyard card is not a creature.")
         return str(uid)
 
-    def _target_for_cast(self,c,user,target):
+    def _target_for_cast(self,c,user,target,x_value=0):
+        if c.effect in ("fireball","volcanic_eruption"):
+            raw=[] if not target else [item.strip() for item in str(target).split(",") if item.strip()]
+            if len(raw)!=len(set(raw)): raise GameError(f"{c.name} targets must be distinct.")
+            if c.effect=="volcanic_eruption" and len(raw)!=x_value: raise GameError(f"{c.name} requires exactly X Mountain targets.")
+            stable=[]
+            for item in raw:
+                if c.effect=="fireball" and ":" not in item:
+                    try: target_user=int(item)
+                    except ValueError as error: raise GameError("Fireball targets must be player IDs or USER_ID:POSITION, separated by commas.") from error
+                    self.player(target_user); stable.append(str(target_user)); continue
+                if ":" not in item: raise GameError("Volcanic Eruption targets must be USER_ID:POSITION, separated by commas.")
+                try: target_user,pos=(int(value) for value in item.split(":"))
+                except ValueError as error: raise GameError(f"{c.name} targets must use USER_ID:POSITION.") from error
+                battlefield=self.player(target_user).battlefield
+                if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+                permanent=battlefield[pos-1]
+                if c.effect=="fireball":
+                    if not self.is_creature(permanent): raise GameError("Fireball permanent targets must be creatures.")
+                elif not self.has_current_land_type(permanent,"mountain"): raise GameError("Volcanic Eruption must target Mountains.")
+                if self._protected_from(permanent,c): raise GameError(f"{c.name} cannot target a permanent with protection from its color.")
+                stable.append(f"{target_user}:{permanent.uid}")
+            if len(stable)!=len(set(stable)): raise GameError(f"{c.name} targets must be distinct.")
+            return ",".join(stable)
         if c.aura_reanimate:
             if not target: raise GameError("Animate Dead target must be G:POSITION or USER_ID:G:POSITION.")
             parts=target.upper().split(":")
@@ -2525,6 +2549,36 @@ class Game:
             for permanent in target_player.battlefield:
                 if self.card(permanent.uid).land: self._tap_permanent(target_player.user_id,permanent,pending_triggers=pending)
             target_player.mana_pool.clear(); p.graveyard.append(s.uid); self.stack.extend(pending)
+        elif c.effect=="fireball":
+            chosen=(s.target or "").split(",") if s.target else []
+            legal=[]
+            for item in chosen:
+                if ":" not in item:
+                    if int(item) in self.players: legal.append(("player",int(item),None))
+                    continue
+                target_user,target_uid=(int(value) for value in item.split(":")); permanent=next((x for x in self.player(target_user).battlefield if x.uid==target_uid),None)
+                if permanent is not None and self.is_creature(permanent) and not self._protected_from(permanent,c,self.spell_colors(s)): legal.append(("creature",target_user,permanent))
+            if chosen and not legal:
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because all its targets were gone or illegal."); return
+            amount=s.x_value//len(legal) if legal else 0; damage_batch=self.next_uid
+            for kind,target_user,permanent in legal:
+                if kind=="player": self._damage_player(target_user,amount,source_uid=s.uid)
+                else: self._damage_permanent(permanent,amount,c,self.spell_colors(s),damage_batch,s.uid)
+            p.graveyard.append(s.uid)
+        elif c.effect=="volcanic_eruption":
+            chosen=(s.target or "").split(",") if s.target else []; legal=[]
+            for item in chosen:
+                target_user,target_uid=(int(value) for value in item.split(":")); permanent=next((x for x in self.player(target_user).battlefield if x.uid==target_uid),None)
+                if permanent is not None and self.has_current_land_type(permanent,"mountain") and not self._protected_from(permanent,c,self.spell_colors(s)): legal.append((self.player(target_user),permanent))
+            if chosen and not legal:
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because all its targets were gone or illegal."); return
+            trigger_batch=self.next_uid; death_sources=self._death_trigger_sources(); destroyed=sum(self._destroy(controller,permanent,trigger_batch=trigger_batch,death_sources=death_sources) for controller,permanent in legal)
+            damage_batch=self.next_uid
+            for player in self.players.values():
+                for permanent in list(player.battlefield):
+                    if self.is_creature(permanent): self._damage_permanent(permanent,destroyed,c,self.spell_colors(s),damage_batch,s.uid)
+            for target_user in self.order: self._damage_player(target_user,destroyed,source_uid=s.uid)
+            p.graveyard.append(s.uid)
         elif c.effect in ("damage","damage_any","damage_x_exile","drain_life_x"):
             amount=s.x_value if c.effect in ("damage_x_exile","drain_life_x") else c.amount
             life_cap=dealt=0

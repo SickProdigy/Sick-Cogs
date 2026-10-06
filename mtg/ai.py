@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory","false_orders"}
+TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory","false_orders","fireball","volcanic_eruption"}
 
 
 def _target(game, user, card):
@@ -73,6 +73,7 @@ def _target(game, user, card):
                 position,_=max(targets,key=lambda item:(game.card(item[1].uid).cost,sum(game.current_stats(item[1])) if game.is_creature(item[1]) else 0))
                 return f"{game.opponent(user)}:{position}"
         return None
+    if card.effect=="fireball": return str(game.opponent(user))
     if card.effect in ("damage","damage_any","damage_x_exile","drain_life_x"):
         return str(game.opponent(user))
     if card.effect in ("draw_target","draw_target_x","life_target_x"):
@@ -241,6 +242,10 @@ def _play_one(game, user, difficulty):
         x_value=game.max_payable_x(user,card) if "{X}" in card.mana_cost else None
         if card.effect=="discard_random_x" and x_value is not None:
             x_value=min(x_value,len(game.player(game.opponent(user)).hand))
+        volcanic_target=None
+        if card.effect=="volcanic_eruption" and x_value is not None:
+            mountains=[f"{target_user}:{position}" for target_user in (game.opponent(user),user) for position,permanent in enumerate(game.player(target_user).battlefield,1) if game.has_current_land_type(permanent,"mountain") and _can_target(game,card,permanent)]
+            x_value=min(x_value,len(mountains)); volcanic_target=",".join(mountains[:x_value]) if x_value else None
         forced_target=None
         if card.effect=="counter_mana_value_x":
             forced_target=_target(game,user,card)
@@ -259,7 +264,7 @@ def _play_one(game, user, difficulty):
             continue
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
             continue
-        target = forced_target if card.effect=="counter_mana_value_x" else _target(game, user, card)
+        target = forced_target if card.effect=="counter_mana_value_x" else (volcanic_target if card.effect=="volcanic_eruption" else _target(game,user,card))
         if card.effect in TARGETED_EFFECTS and target is None:
             continue
         score = 0
@@ -349,8 +354,12 @@ def _play_one(game, user, difficulty):
             score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+scaling+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)+3*bool(card.aura_animate_mana_value or card.aura_indestructible)+2*bool(card.aura_controller_upkeep_life)
         elif card.effect in ("damage","damage_any"):
             score = 12 + card.amount - card.self_damage
-        elif card.effect=="damage_x_exile":
+        elif card.effect in ("damage_x_exile","fireball"):
             score=12+(x_value or 0)
+        elif card.effect=="volcanic_eruption":
+            own=sum(game.is_creature(permanent) for permanent in player.battlefield); enemy=sum(game.is_creature(permanent) for permanent in game.player(game.opponent(user)).battlefield)
+            if player.life<=x_value or own>enemy: continue
+            score=10+2*(x_value or 0)+enemy-own
         elif card.effect=="drain_life_x":
             score=14+2*(x_value or 0)
         elif card.effect=="sacrifice_mana":

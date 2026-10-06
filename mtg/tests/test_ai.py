@@ -978,5 +978,15 @@ class SoloAITests(unittest.TestCase):
         spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:212"; game.stack=[spell_type(AI,spell,"lea:212",str(AI),decision_pending=True,choice_owner=AI)]; game.priority_user=AI; game.phase="precombat_main"
         advance_solo(game); self.assertEqual(game.card(game.player(AI).library[-1]).name,"Hill Giant"); self.assertTrue(any(event["action"]=="ai_natural_selection" for event in game.history))
 
+    def test_ai_casts_multi_target_x_spells_through_shared_play_path(self):
+        fire=solo(order=(AI,HUMAN)); fire.player(AI).kept=fire.player(HUMAN).kept=True; fire.player(AI).hand=[]
+        uid=fire.next_uid; fire.next_uid+=1; fire.cards[uid]="lea:149"; fire.player(AI).hand=[uid]
+        for _ in range(4): self.add(fire,AI,"mountain")
+        fire.active_index=0; fire.phase="precombat_main"; fire.priority_user=AI; advance_solo(fire); self.assertEqual(fire.card(fire.stack[0].uid).effect,"fireball"); self.assertEqual(fire.stack[0].target,str(HUMAN))
+        eruption=solo(order=(AI,HUMAN)); eruption.player(AI).kept=eruption.player(HUMAN).kept=True; eruption.player(AI).hand=[]
+        uid=eruption.next_uid; eruption.next_uid+=1; eruption.cards[uid]="lea:88"; eruption.player(AI).hand=[uid]
+        for _ in range(5): self.add(eruption,AI,"island")
+        mountain=self.add(eruption,HUMAN,"mountain"); self.add(eruption,HUMAN,"bear"); eruption.active_index=0; eruption.phase="precombat_main"; eruption.priority_user=AI; advance_solo(eruption); self.assertEqual(eruption.card(eruption.stack[0].uid).effect,"volcanic_eruption"); self.assertEqual(eruption.stack[0].target,f"{HUMAN}:{mountain.uid}")
+
 if __name__ == "__main__":
     unittest.main()

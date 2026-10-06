@@ -559,6 +559,8 @@ ALPHA_SPELLS = {
     "lea:178": {"effect":"destroy_wall"},
     "lea:6": {"effect":"blaze_of_glory"},
     "lea:147": {"effect":"false_orders"},
+    "lea:149": {"effect":"fireball"},
+    "lea:88": {"effect":"volcanic_eruption"},
     "lea:220": {"effect":"destroy_all_enchantments"},
     "lea:193": {"effect":"prevent_combat_damage"},
     "lea:50": {"effect":"draw_target_x"},
