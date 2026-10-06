@@ -99,7 +99,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.31.1";__author__="SickProdigy"
+    __version__="0.31.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -888,10 +888,13 @@ class Pokemon(commands.Cog):
     @pokemon_set.command(name="channel")
     async def set_channel(self,ctx,channel:discord.TextChannel):
         """Enable wild encounters in a channel."""
-        channels=await self.config.guild(ctx.guild).channels()
-        if channel.id not in channels:channels.append(channel.id)
-        await self.config.guild(ctx.guild).channels.set(channels);await self.config.guild(ctx.guild).enabled.set(True)
-        await ctx.send(f"Wild encounters enabled in {channel.mention}.")
+        section=self.config.guild(ctx.guild);channels=await section.channels();was_enabled=await section.enabled();already=channel.id in channels
+        if not already:channels.append(channel.id)
+        await section.channels.set(channels);await section.enabled.set(True)
+        if already and was_enabled:message=f"Wild encounters were already enabled in {channel.mention}."
+        elif already:message=f"Wild encounters re-enabled in {channel.mention}."
+        else:message=f"Wild encounters enabled in {channel.mention}."
+        await ctx.send(message)
     @pokemon_set.command(name="removechannel")
     async def remove_channel(self,ctx,channel:discord.TextChannel):
         """Stop wild encounters in a channel."""
@@ -910,23 +913,33 @@ class Pokemon(commands.Cog):
         await self.config.guild(ctx.guild).center_channel.set(None)
         await ctx.send("This server's Pokémon Center was removed.")
 
-    @pokemon_set.command(name="status")
+    @pokemon_set.command(name="status",aliases=["settings"])
     async def spawn_status(self,ctx):
-        """Show effective server encounter settings."""
+        """Show channels, spawn progress, and effective server settings."""
         conf=await self.config.guild(ctx.guild).all();policy=await self.config.all()
         minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
-        generations=effective_generations(conf["generations"],policy["allowed_generations"])
-        channels=", ".join(f"<#{value}>" for value in conf["channels"]) or "None"
+        target=max(minimum,int(conf.get("threshold",minimum)));activity=max(0,int(self.activity.get(ctx.guild.id,conf.get("activity",0))))
+        remaining=0
+        if conf.get("last_spawn_at"):
+            try:last=datetime.fromisoformat(conf["last_spawn_at"])
+            except (TypeError,ValueError):last=None
+            if last:remaining=max(0,round((last+timedelta(seconds=cooldown)-datetime.now(timezone.utc)).total_seconds()))
+        channels=", ".join(f"<#{value}>" for value in conf.get("channels",[])) or "None"
+        center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None"
+        generations=effective_generations(conf.get("generations",[1]),policy.get("allowed_generations",[1]))
+        active=conf.get("active_encounter")
+        if active:next_spawn=f"Blocked by active encounter #{active}"
+        elif remaining:next_spawn=f"Cooldown: {remaining}s remaining"
+        elif activity<target:next_spawn=f"Needs {target-activity} more activity points"
+        else:next_spawn="Ready on the next qualifying message"
+        enabled=conf.get("enabled",False);pace=conf.get("pace","custom");encounter_minutes=int(policy.get("encounter_timeout",900))//60;battle_minutes=int(conf.get("battle_timeout",1800))//60
+        generation_text=", ".join(map(str,generations));rarity=policy.get("rarity_profile","friendly");specials="enabled" if policy.get("allow_special_species") else "event-only"
         await ctx.send(
-            f"Enabled: **{conf['enabled']}**\n"
-            f"Channels: {channels}\n"
-            f"Threshold: {minimum}–{maximum}\n"
-            f"Pace: {conf['pace']}\n"
-            f"Cooldown: {cooldown}s\n"
-            f"Encounter/battle expiry: {policy['encounter_timeout']}s/{conf['battle_timeout']}s\n"
-            f"Generations: {', '.join(map(str,generations))}\n"
-            f"Active: {conf['active_encounter'] or 'None'}\n"
-            f"Catalog species: {len(SPECIES)}"
+            f"**Pokémon server settings**\nEnabled: **{enabled}**\nSpawn channels: {channels}\nPokémon Center: {center}\n"
+            f"Activity: **{activity}/{target}** points (new target range {minimum}–{maximum})\nPace: **{pace}** · Cooldown: **{cooldown}s**\n"
+            f"Next spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** · Battle lifetime: **{battle_minutes}m**\n"
+            f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\n"
+            f"Catalog species: **{len(SPECIES)}**"
         )
     @pokemon_set.command(name="pace")
     async def pace(self,ctx,setting:str):
