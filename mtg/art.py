@@ -195,7 +195,7 @@ def render_battlefield(game, names, paths, background_path):
                     path = None
             if not path:
                 fallback = ImageDraw.Draw(panel)
-                stats=game.current_stats(permanent) if card.creature else None
+                stats=game.current_stats(permanent) if game.is_creature(permanent) else None
                 fallback.multiline_text((7, 28), f"{card.name}\n{stats[0]}/{stats[1]}" if stats else card.name, fill=(240, 235, 218), font=small_font, spacing=4)
             if permanent.tapped:
                 overlay = Image.new("RGBA", panel.size, (45, 18, 18, 115))

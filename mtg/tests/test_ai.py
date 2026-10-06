@@ -481,6 +481,14 @@ class SoloAITests(unittest.TestCase):
         conversion.active_index=0; conversion.phase="precombat_main"; conversion.priority_user=AI; conversion.player(AI).land_played=True
         advance_solo(conversion); self.assertEqual(conversion.stack[-1].uid,glasses)
 
+    def test_ai_animates_jade_statue_once_to_prepare_a_blocker(self):
+        game=solo(); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
+        attacker=self.add(game,HUMAN,"giant"); statue=self.add(game,AI,"lea:253"); self.add(game,AI,"forest"); self.add(game,AI,"forest")
+        game.active_index=0; game.phase="after_attackers"; game.attackers=[attacker.uid]; game.priority_user=AI
+        advance_solo(game); self.assertEqual(game.stack[-1].ability_effect,"animate_self")
+        game.pass_priority(HUMAN); advance_solo(game)
+        self.assertTrue(statue.animated_until_end_combat); self.assertFalse(game.stack)
+
     def test_ai_pays_soul_net_death_trigger_when_mana_is_available(self):
         game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
         self.add(game,AI,"lea:270"); self.add(game,AI,"forest"); victim=self.add(game,HUMAN,"bear")

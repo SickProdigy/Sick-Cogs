@@ -94,6 +94,7 @@ class Card:
     upkeep_untap_cost: str = ""
     draw_tapped_damage: int = 0
     death_life: bool = False
+    animate_combat: bool = False
     type_line: str = ""
     set_code: str = ""
 
@@ -160,6 +161,7 @@ class Card:
         if self.upkeep_untap_cost: abilities.append(f"At your upkeep, you may pay {self.upkeep_untap_cost} to untap this artifact")
         if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
         if self.death_life: abilities.append("Whenever a creature dies, you may pay {1} to gain 1 life")
+        if self.animate_combat: abilities.append("{2}: Becomes a 3/6 Golem artifact creature until end of combat; activate only during combat")
         if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
         if self.land_grave_damage: abilities.append(f"Whenever a land goes from battlefield to graveyard, deals {self.land_grave_damage} damage to its controller")
         if self.upkeep_each_damage: abilities.append(f"At each player's upkeep, deals {self.upkeep_each_damage} damage to that player")
@@ -268,6 +270,7 @@ ALPHA_ARTIFACTS = {
     "lea:266": {"enters_tapped":True, "activation_cost":"{1}", "activation_tap":True, "activation_effect":"destroy_all_nonland", "activation_text":"Destroy all artifacts, creatures, and enchantments"},
     "lea:269": {"produces":("C",), "mana_amount":2},
     "lea:270": {"death_life":True},
+    "lea:253": {"activation_cost":"{2}", "activation_effect":"animate_self", "activation_text":"Becomes a 3/6 Golem artifact creature until end of combat", "animate_combat":True},
 }
 
 ALPHA_MANA_CREATURES = {
@@ -480,6 +483,7 @@ for reference in PLAYABLE_ALPHA:
         upkeep_untap_cost=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_untap_cost",""),
         draw_tapped_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_tapped_damage",0),
         death_life=ALPHA_ARTIFACTS.get(reference.key,{}).get("death_life",False),
+        animate_combat=ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_combat",False),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 

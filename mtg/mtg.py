@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.44.0"
+    __version__="0.45.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -116,13 +116,14 @@ class MTG(commands.Cog):
             p=g.players[user]; field=[]
             for n,x in enumerate(p.battlefield,1):
                 c=g.card(x.uid); state=" ↷" if x.tapped else ""
-                stats=(lambda value:f" {value[0]}/{value[1]}")(g.current_stats(x)) if c.creature else ""
+                stats=(lambda value:f" {value[0]}/{value[1]}")(g.current_stats(x)) if g.is_creature(x) else ""
                 active=sorted(g.current_keywords(x)-set(c.keywords))
                 active_protection=sorted(g.current_protections(x)-set(c.protection_colors))
                 ability_parts=[c.ability_text] if c.ability_text else []
                 if active: ability_parts.append("Active: "+", ".join(word.title() for word in active))
                 if active_protection: ability_parts.append("Active protection: "+"/".join(active_protection))
                 if x.color_override: ability_parts.append("Color: "+{"W":"White","U":"Blue","B":"Black","R":"Red","G":"Green"}[x.color_override])
+                if x.animated_until_end_combat: ability_parts.append("Animated: 3/6 Golem artifact creature until end of combat")
                 granted_regeneration=g.granted_regeneration_cost(x)
                 if granted_regeneration: ability_parts.append(f"Granted: {granted_regeneration}: Regenerate this creature")
                 if x.regeneration_shields: ability_parts.append(f"Regeneration shield ×{x.regeneration_shields}")

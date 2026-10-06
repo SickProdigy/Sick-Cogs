@@ -291,6 +291,14 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.activate_ability(10,1,"20"); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Deals 1 damage to any target",rendered); self.assertIn("Rod of Ruin ability",rendered)
 
+    async def test_public_embed_shows_animated_jade_statue(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:253"
+        statue=permanent_type(uid,"lea:253",sick=False,animated_until_end_combat=True); game.player(10).battlefield=[statue]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Jade Statue 3/6",rendered); self.assertIn("Animated: 3/6 Golem artifact creature",rendered)
+
     async def test_public_embed_shows_static_artifact_rules(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

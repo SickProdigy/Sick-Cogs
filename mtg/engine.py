@@ -25,6 +25,7 @@ class Permanent:
     cant_regenerate: bool = False
     attached_to: Optional[int] = None
     color_override: str = ""
+    animated_until_end_combat: bool = False
 
 @dataclass
 class Player:
@@ -106,6 +107,8 @@ class Game:
         try: return self.players[int(user)]
         except KeyError as e: raise GameError("You are not in this game.") from e
     def card(self,uid): return CARDS[self.cards[uid]]
+    def is_creature(self,permanent): return self.card(permanent.uid).creature or permanent.animated_until_end_combat
+    def has_current_type(self,permanent,card_type): return self.is_creature(permanent) if card_type=="Creature" else self.card(permanent.uid).has_type(card_type)
     def hand(self,user): return [self.card(x) for x in self.player(user).hand]
     def characteristic_stats(self,user,card,entering=False):
         player=self.player(user)
@@ -114,7 +117,7 @@ class Game:
         elif card.characteristic_pt=="plague_rats":
             value=sum(self.card(x.uid).name=="Plague Rats" for p in self.players.values() for x in p.battlefield)+(1 if entering else 0)
         elif card.characteristic_pt=="non_wall_creatures":
-            value=sum(self.card(x.uid).creature and "Wall" not in self.card(x.uid).type_line for x in player.battlefield)+(1 if entering else 0)
+            value=sum(self.is_creature(x) and "Wall" not in self.card(x.uid).type_line for x in player.battlefield)+(1 if entering else 0)
         else:
             return card.power,card.toughness
         return value,value
@@ -146,8 +149,9 @@ class Game:
     @staticmethod
     def _has_subtype(card,subtype):
         return subtype in card.type_line.split(" — ",1)[-1].split()
-    def _aura_type_legal(self,aura_card,target_card):
-        return any(target_card.has_type(kind) for kind in aura_card.aura_target_types) and all(self._has_subtype(target_card,subtype) for subtype in aura_card.aura_target_subtypes)
+    def _aura_type_legal(self,aura_card,target):
+        target_card=self.card(target.uid)
+        return any(self.has_current_type(target,kind) for kind in aura_card.aura_target_types) and all(self._has_subtype(target_card,subtype) for subtype in aura_card.aura_target_subtypes)
     def current_colors(self,permanent):
         return (permanent.color_override,) if permanent.color_override else self.card(permanent.uid).colors
     def spell_colors(self,spell):
@@ -162,7 +166,7 @@ class Game:
     def _protected_from(self,permanent,source_card,source_colors=None):
         return bool(set(source_card.colors if source_colors is None else source_colors) & self.current_protections(permanent))
     def _aura_can_attach(self,aura_card,target,aura=None,colors=None):
-        if not self._aura_type_legal(aura_card,self.card(target.uid)): return False
+        if not self._aura_type_legal(aura_card,target): return False
         excluded=aura.uid if aura is not None and aura_card.protection_self_exception else None
         aura_colors=self.current_colors(aura) if aura is not None else aura_card.colors if colors is None else colors
         return not bool(set(aura_colors) & self.current_protections(target,excluded))
@@ -175,7 +179,7 @@ class Game:
     def current_stats(self,permanent):
         owner=next((p.user_id for p in self.players.values() if permanent in p.battlefield),None)
         if owner is None: raise GameError("Permanent is not on the battlefield.")
-        card=self.card(permanent.uid); power,toughness=self.characteristic_stats(owner,card)
+        card=self.card(permanent.uid); power,toughness=((3,6) if permanent.animated_until_end_combat else self.characteristic_stats(owner,card))
         swamp_bonus=1 if card.conditional_swamp_bonus and any(self.card(x.uid).has_land_type("swamp") for x in self.player(owner).battlefield) else 0
         auras=self.attached_auras(permanent)
         lords=[self.card(source.uid) for source in self.continuous_lords(permanent)]
@@ -184,7 +188,7 @@ class Game:
         return power+swamp_bonus+sum(bonus[0] for bonus in aura_bonuses)+sum(lord.lord_power for lord in lords)+sum(self.card(source.uid).global_power for source in globals_)+permanent.bonus+permanent.power_bonus,toughness+swamp_bonus+sum(bonus[1] for bonus in aura_bonuses)+sum(lord.lord_toughness for lord in lords)+sum(self.card(source.uid).global_toughness for source in globals_)+permanent.bonus+permanent.toughness_bonus
     def global_buff_applies(self,source,source_user,target,target_user):
         effect=self.card(source.uid); target_card=self.card(target.uid)
-        if not target_card.creature or not (effect.global_power or effect.global_toughness): return False
+        if not self.is_creature(target) or not (effect.global_power or effect.global_toughness): return False
         if effect.global_controller_only and source_user!=target_user: return False
         if effect.global_buff_color and effect.global_buff_color not in self.current_colors(target): return False
         if effect.global_requires_untapped and target.tapped: return False
@@ -199,7 +203,7 @@ class Game:
     def can_attack_permanent(self,permanent):
         card=self.card(permanent.uid); keywords=self.current_keywords(permanent)
         defender_override=any(self.card(aura.uid).aura_attack_override for aura in self.attached_auras(permanent))
-        return card.creature and not permanent.tapped and (not permanent.sick or card.haste) and ("defender" not in keywords or defender_override)
+        return self.is_creature(permanent) and not permanent.tapped and (not permanent.sick or card.haste) and ("defender" not in keywords or defender_override)
 
     def _draw(self,p,n=1):
         for _ in range(n):
@@ -250,7 +254,7 @@ class Game:
         self._cleanup()
         limits=[self.card(source.uid).untap_power_limit for player in self.players.values() for source in player.battlefield if self.card(source.uid).untap_power_limit]
         for x in p.battlefield:
-            restricted=self.card(x.uid).creature and any(self.current_stats(x)[0]>=limit for limit in limits)
+            restricted=self.is_creature(x) and any(self.current_stats(x)[0]>=limit for limit in limits)
             if not self.card(x.uid).skip_untap and not restricted: x.tapped=False
             x.sick=False
         self.skip_draw_step=bool(first and self.turn==1)
@@ -340,7 +344,7 @@ class Game:
         for permanent in player.battlefield:
             source=self.card(permanent.uid)
             if permanent.uid in excluded_uids: continue
-            if source.produces and source.mana_amount==1 and not source.mana_activation_cost and not source.sacrifice_for_mana and not permanent.tapped and (not source.creature or not permanent.sick or source.haste):
+            if source.produces and source.mana_amount==1 and not source.mana_activation_cost and not source.sacrifice_for_mana and not permanent.tapped and (not self.is_creature(permanent) or not permanent.sick or source.haste):
                 options=tuple((symbol,self._mana_output(permanent,symbol)) for symbol in source.produces)
                 items.append(("permanent",str(permanent.uid),permanent,options))
 
@@ -399,7 +403,7 @@ class Game:
             if card.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {card.target_color}.")
             return f"S:{spell.uid}"
         if card.activation_effect in ("draw_self","destroy_all_nonland"): return str(user)
-        if card.activation_effect=="untap_self": return f"{user}:{source.uid}"
+        if card.activation_effect in ("untap_self","animate_self"): return f"{user}:{source.uid}"
         if card.activation_attached:
             controller,attached=self.find_permanent(source.attached_to)
             if attached is None or not self._aura_can_attach(card,attached,source): raise GameError(f"{card.name} is not attached to a legal permanent.")
@@ -415,13 +419,13 @@ class Game:
         battlefield=self.player(target_user).battlefield
         if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
         permanent=battlefield[pos-1]; target_card=self.card(permanent.uid)
-        if card.activation_effect=="damage_any" and not target_card.creature: raise GameError("Target permanent is not a creature.")
+        if card.activation_effect=="damage_any" and not self.is_creature(permanent): raise GameError("Target permanent is not a creature.")
         if card.activation_effect=="destroy_black_permanent" and "B" not in self.current_colors(permanent): raise GameError("Target permanent is not black.")
-        if card.activation_effect=="destroy_tapped_creature" and (not target_card.creature or not permanent.tapped): raise GameError("Target must be a tapped creature.")
+        if card.activation_effect=="destroy_tapped_creature" and (not self.is_creature(permanent) or not permanent.tapped): raise GameError("Target must be a tapped creature.")
         if card.activation_effect=="destroy_wall" and "Wall" not in target_card.type_line.split(" — ",1)[-1].split(): raise GameError("Target must be a Wall.")
-        if card.activation_effect=="unblockable" and (not target_card.creature or self.current_stats(permanent)[0]>2): raise GameError("Target must be a creature with power 2 or less.")
+        if card.activation_effect=="unblockable" and (not self.is_creature(permanent) or self.current_stats(permanent)[0]>2): raise GameError("Target must be a creature with power 2 or less.")
         if card.activation_effect=="untap_land" and not target_card.land: raise GameError("Target must be a land.")
-        if card.activation_effect=="tap_permanent" and not any(target_card.has_type(kind) for kind in ("Artifact","Creature","Land")): raise GameError("Target must be an artifact, creature, or land.")
+        if card.activation_effect=="tap_permanent" and not any(self.has_current_type(permanent,kind) for kind in ("Artifact","Creature","Land")): raise GameError("Target must be an artifact, creature, or land.")
         return f"{target_user}:{permanent.uid}"
 
     def can_activate(self,user,position,target=None):
@@ -430,7 +434,8 @@ class Game:
         permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
         activation_cost,activation_effect,activation_tap,_=self._activation_profile(permanent)
         if not (activation_cost or activation_effect): return False
-        if activation_tap and (permanent.tapped or (card.creature and permanent.sick and not card.haste)): return False
+        if card.animate_combat and self.phase not in ("after_attackers","after_blockers","after_first_strike"): return False
+        if activation_tap and (permanent.tapped or (self.is_creature(permanent) and permanent.sick and not card.haste)): return False
         try:
             stable_target=self._target_for_activation(card,user,target,permanent)
             protected=self._stable_target_permanent(stable_target)
@@ -445,8 +450,9 @@ class Game:
         permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
         activation_cost,activation_effect,activation_tap,native=self._activation_profile(permanent)
         if not (activation_cost or activation_effect): raise GameError("That permanent has no supported activated ability.")
+        if card.animate_combat and self.phase not in ("after_attackers","after_blockers","after_first_strike"): raise GameError(f"{card.name} can be activated only during combat.")
         if activation_tap and permanent.tapped: raise GameError(f"{card.name} is already tapped.")
-        if activation_tap and card.creature and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
+        if activation_tap and self.is_creature(permanent) and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
         stable_target=self._target_for_activation(card,user,target,permanent)
         protected=self._stable_target_permanent(stable_target)
         if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate") and self._protected_from(protected,card,self.current_colors(permanent)): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
@@ -475,7 +481,7 @@ class Game:
         permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
         if not card.produces: raise GameError("That permanent has no supported mana ability.")
         if permanent.tapped: raise GameError(f"{card.name} is already tapped.")
-        if card.creature and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
+        if self.is_creature(permanent) and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
         symbol=(color or (card.produces[0] if len(card.produces)==1 else "")).upper()
         if symbol not in card.produces: raise GameError(f"Choose one of: {', '.join(card.produces)}.")
         pending_triggers=[]
@@ -542,7 +548,7 @@ class Game:
         battlefield=self.player(target_user).battlefield
         if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
         permanent=battlefield[pos-1]
-        if not self.card(permanent.uid).creature: raise GameError("Target is not a creature.")
+        if not self.is_creature(permanent): raise GameError("Target is not a creature.")
         return target_user,permanent
 
     def _target_stack(self,target):
@@ -629,7 +635,7 @@ class Game:
             battlefield=self.player(target_user).battlefield
             if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
             permanent=battlefield[pos-1]; target_card=self.card(permanent.uid)
-            if not any(target_card.has_type(kind) for kind in c.target_types): raise GameError("Twiddle must target an artifact, creature, or land.")
+            if not any(self.has_current_type(permanent,kind) for kind in c.target_types): raise GameError("Twiddle must target an artifact, creature, or land.")
             return f"{mode}:{target_user}:{permanent.uid}"
         if c.effect in ("destroy_creature","exile_creature_life"):
             target_user,permanent=self._target_creature(target)
@@ -653,7 +659,7 @@ class Game:
             battlefield=self.player(target_user).battlefield
             if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
             permanent=battlefield[pos-1]; target_card=self.card(permanent.uid)
-            if not any(target_card.has_type(kind) for kind in c.target_types): raise GameError("Target has an unsupported permanent type.")
+            if not any(self.has_current_type(permanent,kind) for kind in c.target_types): raise GameError("Target has an unsupported permanent type.")
             return f"{target_user}:{permanent.uid}"
         if c.effect=="destroy_land":
             if not target or ":" not in target: raise GameError("Target must be USER_ID:POSITION.")
@@ -795,7 +801,7 @@ class Game:
         blocker_perm=next((x for x in defender.battlefield if x.uid==blocker_uid),None)
         if blocker_perm is None: return False,"That blocker is no longer on the battlefield."
         blocker=self.card(blocker_uid)
-        if not blocker.creature or blocker_perm.tapped: return False,"Invalid blocker."
+        if not self.is_creature(blocker_perm) or blocker_perm.tapped: return False,"Invalid blocker."
         attacker_keywords=self.current_keywords(attacker_perm); blocker_keywords=self.current_keywords(blocker_perm)
         if "unblockable" in attacker_keywords: return False,f"{attacker.name} can't be blocked this turn."
         if "fear" in attacker_keywords and not (blocker.has_type("Artifact") or "B" in self.current_colors(blocker_perm)):
@@ -844,6 +850,9 @@ class Game:
 
     def _end_combat(self):
         self.attackers=[]; self.blocks={}; self.blocked_attackers=[]; self.trample_assignments={}
+        for player in self.players.values():
+            for permanent in player.battlefield: permanent.animated_until_end_combat=False
+        self._sba()
 
     def _death_trigger_sources(self):
         return [(controller.user_id,source.uid,self.card(source.uid).key,source.color_override) for controller in self.players.values() for source in controller.battlefield if self.card(source.uid).death_life]
@@ -864,7 +873,7 @@ class Game:
     def _dies(self,controller,permanent,batch_id=None,death_sources=None):
         dies=not permanent.exile_on_death
         (controller.graveyard if dies else controller.exile).append(permanent.uid)
-        if dies and self.card(permanent.uid).creature:
+        if dies and self.is_creature(permanent):
             self._death_triggers(permanent.uid,self.next_uid if batch_id is None else batch_id,death_sources)
 
     def _remove_from_combat(self,uid):
@@ -930,33 +939,36 @@ class Game:
         elif effect=="untap_self":
             if target is None: fizzle("its source was gone"); return
             target.tapped=False
+        elif effect=="animate_self":
+            if target is None: fizzle("its source was gone"); return
+            target.animated_until_end_combat=True
         elif effect=="destroy_all_nonland":
             trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
             for player in self.players.values():
                 for permanent in list(player.battlefield):
-                    if any(self.card(permanent.uid).has_type(kind) for kind in ("Artifact","Creature","Enchantment")):
+                    if any(self.has_current_type(permanent,kind) for kind in ("Artifact","Creature","Enchantment")):
                         self._destroy(player,permanent,trigger_batch=trigger_batch,death_sources=death_sources)
         elif effect=="damage_any":
             if ":" in (s.target or ""):
-                if target_card is None or not target_card.creature: fizzle("its target was gone or illegal"); return
+                if target_card is None or not self.is_creature(target): fizzle("its target was gone or illegal"); return
                 target.damage+=card.activation_amount
             else: self.player(int(s.target)).life-=card.activation_amount
             self.player(s.owner).life-=card.activation_self_damage
         elif effect in ("destroy_black_permanent","destroy_tapped_creature","destroy_wall"):
             legal=target_card is not None
             if effect=="destroy_black_permanent": legal=legal and "B" in self.current_colors(target)
-            elif effect=="destroy_tapped_creature": legal=legal and target_card.creature and target.tapped
+            elif effect=="destroy_tapped_creature": legal=legal and self.is_creature(target) and target.tapped
             else: legal=legal and "Wall" in target_card.type_line.split(" — ",1)[-1].split()
             if not legal: fizzle("its target was gone or illegal"); return
             self._destroy(controller,target)
         elif effect=="unblockable":
-            if target_card is None or not target_card.creature or self.current_stats(target)[0]>2: fizzle("its target was gone or illegal"); return
+            if target_card is None or not self.is_creature(target) or self.current_stats(target)[0]>2: fizzle("its target was gone or illegal"); return
             if "unblockable" not in target.temporary_keywords: target.temporary_keywords.append("unblockable")
         elif effect=="untap_land":
             if target_card is None or not target_card.land: fizzle("its target was gone or illegal"); return
             target.tapped=False
         elif effect=="tap_permanent":
-            if target_card is None or not any(target_card.has_type(kind) for kind in ("Artifact","Creature","Land")): fizzle("its target was gone or illegal"); return
+            if target_card is None or not any(self.has_current_type(target,kind) for kind in ("Artifact","Creature","Land")): fizzle("its target was gone or illegal"); return
             target.tapped=True
         else:
             fizzle("the effect is unsupported"); return
@@ -1020,7 +1032,7 @@ class Game:
         elif c.effect in ("regenerate_target","grant_keyword","destroy_wall"):
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None); target_card=self.card(target.uid) if target is not None else None
-            legal=target_card is not None and target_card.creature and (c.effect!="destroy_wall" or "Wall" in target_card.type_line.split(" — ",1)[-1].split())
+            legal=target_card is not None and self.is_creature(target) and (c.effect!="destroy_wall" or "Wall" in target_card.type_line.split(" — ",1)[-1].split())
             if not legal:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             if c.effect=="regenerate_target": target.regeneration_shields+=1
@@ -1031,7 +1043,7 @@ class Game:
         elif c.effect=="tap_or_untap":
             mode,user_text,uid_text=s.target.split(":"); controller=self.player(int(user_text))
             target=next((x for x in controller.battlefield if x.uid==int(uid_text)),None); target_card=self.card(target.uid) if target is not None else None
-            if target_card is None or not any(target_card.has_type(kind) for kind in c.target_types):
+            if target_card is None or not any(self.has_current_type(target,kind) for kind in c.target_types):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             if mode=="tap": self._tap_permanent(controller.user_id,target)
             else: target.tapped=False
@@ -1053,7 +1065,7 @@ class Game:
         elif c.effect=="return_creature_hand":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
-            if target is None or not self.card(target.uid).creature:
+            if target is None or not self.is_creature(target):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
             controller.battlefield.remove(target); controller.hand.append(target.uid); self._remove_from_combat(target.uid)
             p.graveyard.append(s.uid)
@@ -1069,7 +1081,7 @@ class Game:
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
             target_card=self.card(target.uid) if target is not None else None
-            legal=target_card is not None and target_card.creature and not (c.target_nonartifact and "Artifact" in target_card.type_line) and not (c.target_nonblack and "B" in self.current_colors(target))
+            legal=target_card is not None and self.is_creature(target) and not (c.target_nonartifact and "Artifact" in target_card.type_line) and not (c.target_nonblack and "B" in self.current_colors(target))
             if not legal:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             life_gain=max(0,self.current_stats(target)[0]) if c.effect=="exile_creature_life" else 0
@@ -1083,19 +1095,19 @@ class Game:
                 for permanent in controller.battlefield:
                     card=self.card(permanent.uid)
                     keywords=self.current_keywords(permanent)
-                    affected=card.creature and ((c.effect=="earthquake_x" and "flying" not in keywords) or (c.effect=="hurricane_x" and "flying" in keywords))
+                    affected=self.is_creature(permanent) and ((c.effect=="earthquake_x" and "flying" not in keywords) or (c.effect=="hurricane_x" and "flying" in keywords))
                     if affected and not self._protected_from(permanent,c,self.spell_colors(s)): permanent.damage+=s.x_value
             p.graveyard.append(s.uid)
         elif c.effect=="destroy_all_creatures":
             trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
             for controller in self.players.values():
                 for permanent in list(controller.battlefield):
-                    if self.card(permanent.uid).creature: self._destroy(controller,permanent,allow_regeneration=False,trigger_batch=trigger_batch,death_sources=death_sources)
+                    if self.is_creature(permanent): self._destroy(controller,permanent,allow_regeneration=False,trigger_batch=trigger_batch,death_sources=death_sources)
             p.graveyard.append(s.uid)
         elif c.effect=="destroy_permanent":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
-            if target is None or not any(self.card(target.uid).has_type(kind) for kind in c.target_types):
+            if target is None or not any(self.has_current_type(target,kind) for kind in c.target_types):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
             self._destroy(controller,target); p.graveyard.append(s.uid)
         elif c.effect=="destroy_land":
@@ -1125,7 +1137,7 @@ class Game:
                         if target is None or not self._aura_can_attach(card,target,permanent):
                             controller.battlefield.remove(permanent); controller.graveyard.append(permanent.uid); affected=True
                         continue
-                    if not card.creature: continue
+                    if not self.is_creature(permanent): continue
                     toughness=self.current_stats(permanent)[1]
                     if toughness<=0:
                         self._remove_from_combat(permanent.uid); controller.battlefield.remove(permanent); self._dies(controller,permanent,trigger_batch,death_sources); affected=True

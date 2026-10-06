@@ -18,7 +18,7 @@ def _target(game, user, card):
         choices=[]
         for position,permanent in enumerate(game.player(target_user).battlefield,1):
             target=game.card(permanent.uid)
-            if game._aura_can_attach(card,permanent): choices.append((sum(game.current_stats(permanent)) if target.creature else target.cost,position))
+            if game._aura_can_attach(card,permanent): choices.append((sum(game.current_stats(permanent)) if game.is_creature(permanent) else target.cost,position))
         return f"{target_user}:{max(choices)[1]}" if choices else None
     if card.effect in ("counter_spell","elemental_blast"):
         for position,spell in enumerate(reversed(game.stack),1):
@@ -27,7 +27,7 @@ def _target(game, user, card):
         if card.effect=="elemental_blast":
             targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if card.target_color in game.current_colors(permanent) and _can_target(game,card,permanent)]
             if targets:
-                position,_=max(targets,key=lambda item:(game.card(item[1].uid).cost,sum(game.current_stats(item[1])) if game.card(item[1].uid).creature else 0))
+                position,_=max(targets,key=lambda item:(game.card(item[1].uid).cost,sum(game.current_stats(item[1])) if game.is_creature(item[1]) else 0))
                 return f"{game.opponent(user)}:{position}"
         return None
     if card.effect in ("damage","damage_any","damage_x_exile"):
@@ -35,7 +35,7 @@ def _target(game, user, card):
     if card.effect in ("draw_target","draw_target_x","life_target_x"):
         return str(user)
     if card.effect=="return_creature_hand":
-        creatures=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.card(permanent.uid).creature and _can_target(game,card,permanent)]
+        creatures=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.is_creature(permanent) and _can_target(game,card,permanent)]
         if not creatures: return None
         position,_=max(creatures,key=lambda item:sum(game.current_stats(item[1])))
         return f"{game.opponent(user)}:{position}"
@@ -45,7 +45,7 @@ def _target(game, user, card):
         position,_=max(choices,key=lambda item:(sum(game.projected_stats(user,game.card(item[1]))),game.card(item[1]).cost))
         return f"G:{position}"
     if card.effect=="regenerate_target":
-        choices=[(game.card(permanent.uid).cost,position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.card(permanent.uid).creature and _can_target(game,card,permanent) and not permanent.regeneration_shields and _regeneration_threatened(game,user,permanent)]
+        choices=[(game.card(permanent.uid).cost,position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent) and _can_target(game,card,permanent) and not permanent.regeneration_shields and _regeneration_threatened(game,user,permanent)]
         return f"{user}:{max(choices)[1]}" if choices else None
     if card.effect=="grant_keyword":
         if game.active_user!=user or game.phase!="after_attackers": return None
@@ -53,10 +53,10 @@ def _target(game, user, card):
         return f"{user}:{max(choices)[1]}" if choices else None
     if card.effect=="tap_or_untap":
         if game.phase=="after_attackers" and game.active_user!=user:
-            choices=[(sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.card(permanent.uid).creature and permanent.tapped and _can_target(game,card,permanent)]
+            choices=[(sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent) and permanent.tapped and _can_target(game,card,permanent)]
             return f"untap:{user}:{max(choices)[1]}" if choices else None
         if game.active_user!=user or game.phase not in ("precombat_main","after_attackers"): return None
-        choices=[(sum(game.current_stats(permanent)) if game.card(permanent.uid).creature else game.card(permanent.uid).cost,position) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if not permanent.tapped and any(game.card(permanent.uid).has_type(kind) for kind in card.target_types) and _can_target(game,card,permanent)]
+        choices=[(sum(game.current_stats(permanent)) if game.is_creature(permanent) else game.card(permanent.uid).cost,position) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if not permanent.tapped and any(game.has_current_type(permanent,kind) for kind in card.target_types) and _can_target(game,card,permanent)]
         return f"tap:{game.opponent(user)}:{max(choices)[1]}" if choices else None
     if card.effect=="destroy_wall":
         choices=[(sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if "Wall" in game.card(permanent.uid).type_line.split(" — ",1)[-1].split() and _can_target(game,card,permanent)]
@@ -65,7 +65,7 @@ def _target(game, user, card):
         creatures=[]
         for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1):
             target=game.card(permanent.uid)
-            if not target.creature or not _can_target(game,card,permanent): continue
+            if not game.is_creature(permanent) or not _can_target(game,card,permanent): continue
             if card.target_nonartifact and "Artifact" in target.type_line: continue
             if card.target_nonblack and "B" in game.current_colors(permanent): continue
             creatures.append((position,permanent))
@@ -73,7 +73,7 @@ def _target(game, user, card):
         position,_=max(creatures,key=lambda item:sum(game.current_stats(item[1])))
         return f"{game.opponent(user)}:{position}"
     if card.effect == "destroy_permanent":
-        targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if any(game.card(permanent.uid).has_type(kind) for kind in card.target_types) and _can_target(game,card,permanent)]
+        targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if any(game.has_current_type(permanent,kind) for kind in card.target_types) and _can_target(game,card,permanent)]
         if not targets: return None
         position,_=max(targets,key=lambda item:(bool(game.card(item[1].uid).produces),game.card(item[1].uid).cost))
         return f"{game.opponent(user)}:{position}"
@@ -86,7 +86,7 @@ def _target(game, user, card):
         creatures = [
             (position, permanent)
             for position, permanent in enumerate(game.player(user).battlefield, 1)
-            if game.card(permanent.uid).creature and _can_target(game,card,permanent)
+            if game.is_creature(permanent) and _can_target(game,card,permanent)
         ]
         if card.effect == "pump_blocking":
             blocking=set(game.blocks.values()); creatures=[item for item in creatures if item[1].uid in blocking]
@@ -122,7 +122,7 @@ def _activate_helpful_mana(game, user):
 def _global_enchantment_score(game,user,card):
     value=card.global_power+card.global_toughness
     def eligible(target_user,permanent):
-        if not game.card(permanent.uid).creature: return False
+        if not game.is_creature(permanent): return False
         if card.global_controller_only and target_user!=user: return False
         if card.global_buff_color and card.global_buff_color not in game.current_colors(permanent): return False
         if card.global_requires_untapped and permanent.tapped: return False
@@ -181,8 +181,8 @@ def _play_one(game, user, difficulty):
         elif card.draw_step_extra:
             score=5+card.draw_step_extra
         elif card.untap_power_limit:
-            own=sum(game.card(permanent.uid).creature and game.current_stats(permanent)[0]>=card.untap_power_limit for permanent in player.battlefield)
-            enemy=sum(game.card(permanent.uid).creature and game.current_stats(permanent)[0]>=card.untap_power_limit for permanent in game.player(game.opponent(user)).battlefield)
+            own=sum(game.is_creature(permanent) and game.current_stats(permanent)[0]>=card.untap_power_limit for permanent in player.battlefield)
+            enemy=sum(game.is_creature(permanent) and game.current_stats(permanent)[0]>=card.untap_power_limit for permanent in game.player(game.opponent(user)).battlefield)
             if own>enemy: continue
             score=5+2*(enemy-own)
         elif card.white_as_red:
@@ -241,8 +241,8 @@ def _play_one(game, user, difficulty):
             own=sum(game.card(permanent.uid).has_type("Enchantment") for permanent in player.battlefield)
             score=5+3*enemy-2*own
         elif card.effect == "destroy_all_creatures":
-            enemy=sum(game.card(permanent.uid).creature for permanent in game.player(game.opponent(user)).battlefield)
-            own=sum(game.card(permanent.uid).creature for permanent in player.battlefield)
+            enemy=sum(game.is_creature(permanent) for permanent in game.player(game.opponent(user)).battlefield)
+            own=sum(game.is_creature(permanent) for permanent in player.battlefield)
             score=6+3*enemy-2*own
         elif card.effect in ("earthquake_x","hurricane_x"):
             score=8+(x_value or 0)
@@ -274,7 +274,7 @@ def _blocks(game, user, difficulty):
     blockers = [
         (position, permanent)
         for position, permanent in enumerate(game.player(user).battlefield, 1)
-        if game.card(permanent.uid).creature and not permanent.tapped
+        if game.is_creature(permanent) and not permanent.tapped
     ]
     if difficulty == "easy":
         blockers = blockers[::2]
@@ -303,13 +303,17 @@ def _activation_target(game,user,card,source_uid=None):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
         return None
     if card.activation_effect=="draw_self": return str(user)
+    if card.activation_effect=="animate_self":
+        _,source=game.find_permanent(source_uid)
+        pending=any(item.ability_effect=="animate_self" and item.source_uid==source_uid for item in game.stack)
+        return str(user) if source is not None and not source.animated_until_end_combat and not pending and game.active_user!=user and game.phase=="after_attackers" and game.attackers else None
     if card.activation_effect=="destroy_all_nonland":
         def board_value(player):
             return sum(
-                1+max(target.cost,sum(game.current_stats(permanent)) if target.creature else 0)
+                1+max(target.cost,sum(game.current_stats(permanent)) if game.is_creature(permanent) else 0)
                 for permanent in player.battlefield
                 for target in (game.card(permanent.uid),)
-                if any(target.has_type(kind) for kind in ("Artifact","Creature","Enchantment"))
+                if any(game.has_current_type(permanent,kind) for kind in ("Artifact","Creature","Enchantment"))
             )
         return str(user) if board_value(game.player(opponent))>board_value(game.player(user)) else None
     if card.activation_effect=="damage_any":
@@ -320,7 +324,7 @@ def _activation_target(game,user,card,source_uid=None):
         target=game.card(permanent.uid)
         if not _can_target(game,card,permanent): continue
         if card.activation_effect=="destroy_black_permanent" and "B" in game.current_colors(permanent): candidates.append((target.cost,position))
-        elif card.activation_effect=="destroy_tapped_creature" and target.creature and permanent.tapped: candidates.append((sum(game.current_stats(permanent)),position))
+        elif card.activation_effect=="destroy_tapped_creature" and game.is_creature(permanent) and permanent.tapped: candidates.append((sum(game.current_stats(permanent)),position))
         elif card.activation_effect=="destroy_wall" and "Wall" in target.type_line.split(" — ",1)[-1].split(): candidates.append((sum(game.current_stats(permanent)),position))
     if candidates: return f"{opponent}:{max(candidates)[1]}"
     if card.activation_effect=="unblockable" and game.active_user==user and game.phase in ("precombat_main","after_attackers"):
@@ -329,15 +333,15 @@ def _activation_target(game,user,card,source_uid=None):
         for position,permanent in enumerate(game.player(user).battlefield,1):
             target=game.card(permanent.uid)
             can_attack=not permanent.tapped and (not permanent.sick or target.haste) and "defender" not in game.current_keywords(permanent)
-            if permanent.uid!=source_uid and target.creature and _can_target(game,card,permanent) and can_attack and game.current_stats(permanent)[0]<=2 and "unblockable" not in game.current_keywords(permanent) and (attackers is None or permanent.uid in attackers):
+            if permanent.uid!=source_uid and game.is_creature(permanent) and _can_target(game,card,permanent) and can_attack and game.current_stats(permanent)[0]<=2 and "unblockable" not in game.current_keywords(permanent) and (attackers is None or permanent.uid in attackers):
                 choices.append((game.current_stats(permanent)[0],position))
         if choices: return f"{user}:{max(choices)[1]}"
     if card.activation_effect=="tap_permanent":
         choices=[]
         for position,permanent in enumerate(game.player(opponent).battlefield,1):
             target=game.card(permanent.uid)
-            if not permanent.tapped and any(target.has_type(kind) for kind in ("Artifact","Creature","Land")) and _can_target(game,card,permanent):
-                score=(10+sum(game.current_stats(permanent))) if target.creature else target.cost
+            if not permanent.tapped and any(game.has_current_type(permanent,kind) for kind in ("Artifact","Creature","Land")) and _can_target(game,card,permanent):
+                score=(10+sum(game.current_stats(permanent))) if game.is_creature(permanent) else target.cost
                 choices.append((score,position))
         if choices: return f"{opponent}:{max(choices)[1]}"
     if card.activation_effect=="untap_land":

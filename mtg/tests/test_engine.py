@@ -1908,6 +1908,53 @@ class AlphaSoulNetTests(unittest.TestCase):
         self.assertIn(whelp.uid,game.player(20).graveyard); self.assertEqual(game.stack[-1].ability_effect,"death_life")
 
 
+class AlphaJadeStatueTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_activation_is_combat_only_pays_two_and_persists(self):
+        game=ready(); statue=self.add(game,20,"lea:253"); lands=[self.add(game,20,"forest") for _ in range(2)]
+        game.priority_user=20
+        with self.assertRaisesRegex(GameError,"only during combat"): game.activate_ability(20,1)
+        self.assertTrue(all(not x.tapped for x in lands))
+        game.phase="after_attackers"; game.activate_ability(20,1)
+        self.assertFalse(game.is_creature(statue)); self.assertTrue(all(x.tapped for x in lands))
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored)
+        restored_statue=next(x for x in restored.player(20).battlefield if x.uid==statue.uid)
+        self.assertTrue(restored.is_creature(restored_statue)); self.assertEqual(restored.current_stats(restored_statue),(3,6))
+
+    def test_animated_statue_can_block_then_reverts_at_end_of_combat(self):
+        game=ready(); attacker=self.add(game,10,"giant"); statue=self.add(game,20,"lea:253"); game.player(20).mana_pool={"C":2}
+        game.phase="after_attackers"; game.attackers=[attacker.uid]; game.priority_user=20
+        game.activate_ability(20,1); self.resolve_top(game)
+        game.phase="blockers"; game.priority_user=None; game.declare_blockers(20,{1:1})
+        self.assertEqual(game.blocks,{attacker.uid:statue.uid})
+        game.pass_priority(10); game.pass_priority(20)
+        self.assertFalse(game.is_creature(statue)); self.assertIn(statue,game.player(20).battlefield)
+
+    def test_creature_aura_falls_off_when_animation_ends(self):
+        game=ready(); statue=self.add(game,10,"lea:253"); game.player(10).mana_pool={"C":2}
+        game.phase="after_attackers"; game.priority_user=10; game.activate_ability(10,1); self.resolve_top(game)
+        aura=self.add(game,10,"lea:24"); aura.attached_to=statue.uid
+        self.assertEqual(game.current_stats(statue),(4,8)); game._end_combat()
+        self.assertFalse(game.is_creature(statue)); self.assertIn(aura.uid,game.player(10).graveyard)
+
+    def test_animated_statue_is_a_creature_for_damage_removal_and_soul_net(self):
+        game=ready(); self.add(game,10,"lea:270"); statue=self.add(game,20,"lea:253"); statue.animated_until_end_combat=True
+        statue.damage=6; game._sba()
+        self.assertIn(statue.uid,game.player(20).graveyard); self.assertEqual(game.stack[-1].ability_effect,"death_life")
+
+    def test_animation_fizzles_after_source_removal(self):
+        game=ready(); statue=self.add(game,10,"lea:253"); game.player(10).mana_pool={"C":2}; game.phase="after_attackers"
+        game.activate_ability(10,1); game.player(10).battlefield.remove(statue); game.player(10).graveyard.append(statue.uid)
+        self.resolve_top(game); self.assertIn("fizzled",game.log[-1])
+
+
 class AlphaStaticArtifactTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
