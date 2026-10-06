@@ -840,5 +840,15 @@ class RagingRiverRenderingTests(unittest.TestCase):
         blocker=Permanent(99,"bear",owner=20,sick=False); flyer=Permanent(100,"lea:46",owner=20,sick=False); game.cards.update({99:"bear",100:"lea:46",101:"lea:168"}); game.player(20).battlefield=[blocker,flyer]; game.stack=[spell_type(10,101,"lea:168",ability_effect="raging_river_split",decision_pending=True,choice_owner=20)]; game.priority_user=20; cog.games={1:game}
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("divide nonflying defenders left/right",rendered); view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":raging_river")); self.assertEqual({option.value for option in select.options},{"none","1"}); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pay")).disabled)
 
+class CommandLayoutTests(unittest.TestCase):
+    def test_player_help_keeps_advanced_fallbacks_nested_and_concise(self):
+        public={"challenge","solo","status","card","catalog","graveyard","mana","action","play","attack","block","pass","concede"}
+        fallback={"vault","sanctuary","channel","angel","incarnation","hydra","hydraorder","mask","maskpick","activate","forktarget","bodyguard","trample","attackdamage","blockdamage","untap","trigger","wording","orders","kudzu","balance","leak","selection","copy","doppelganger"}
+        self.assertEqual(set(MTG.mtg.all_commands),public)
+        self.assertEqual(set(MTG.action.all_commands),fallback)
+        self.assertFalse(fallback & set(MTG.mtg.all_commands))
+        self.assertTrue(all(command.qualified_name.startswith("mtg action ") for command in MTG.action.commands))
+        self.assertTrue(all(len(command.short_doc)<=58 for command in MTG.action.commands))
+
 if __name__ == "__main__":
     unittest.main()

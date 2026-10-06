@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.120.0"
+    __version__="0.120.1"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -611,174 +611,178 @@ class MTG(commands.Cog):
         for page in pages: await ctx.send(page,allowed_mentions=discord.AllowedMentions.none())
     @mtg.command(name="mana")
     async def mana(self,ctx,position:int,color:str=None):
-        """Tap a supported mana permanent. Multi-color sources require W/U/B/R/G; sick creatures cannot tap."""
+        """Add mana from a battlefield permanent."""
         await self.mutate_ctx(ctx,lambda g:g.activate_mana(ctx.author.id,position,color),"mana")
-    @mtg.command(name="vault")
+    @mtg.group(name="action",invoke_without_command=True)
+    async def action(self,ctx):
+        """Fallbacks for choices normally shown as buttons or menus."""
+        if ctx.invoked_subcommand is None: await ctx.send(f"Use `{ctx.clean_prefix}help mtg action` to list advanced text fallbacks.")
+    @action.command(name="vault")
     async def vault(self,ctx,choice:str,position:int=None):
-        """Choose `take` or `skip POSITION` when a tapped Time Vault would let you skip a turn."""
+        """Resolve a Time Vault turn choice."""
         normalized=choice.casefold()
         if normalized not in ("take","skip") or (normalized=="skip" and position is None): await ctx.send("Choose `take` or `skip POSITION`."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_time_vault_turn(ctx.author.id,normalized=="skip",position),f"vault_{normalized}")
-    @mtg.command(name="sanctuary")
+    @action.command(name="sanctuary")
     async def sanctuary(self,ctx,choice:str):
-        """Choose `draw` or `skip` for Island Sanctuary during your draw step."""
+        """Resolve an Island Sanctuary draw choice."""
         normalized=choice.casefold()
         if normalized not in ("draw","skip"): await ctx.send("Choose `draw` or `skip`."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_sanctuary_draw(ctx.author.id,normalized=="skip"),f"sanctuary_{normalized}")
-    @mtg.command(name="channel")
+    @action.command(name="channel")
     async def channel(self,ctx,amount:int=1):
-        """While Channel is active, pay life to add that much colorless mana."""
+        """Pay life for Channel mana."""
         await self.mutate_ctx(ctx,lambda g:g.activate_channel(ctx.author.id,amount),"channel")
-    @mtg.command(name="angel")
+    @action.command(name="angel")
     async def angel(self,ctx,target:str):
-        """While Guardian Angel is active, pay {1} to prevent the next 1 damage to PLAYER_ID or USER_ID:POSITION."""
+        """Buy Guardian Angel prevention."""
         await self.mutate_ctx(ctx,lambda g:g.activate_guardian_angel(ctx.author.id,target),"guardian_angel")
-    @mtg.command(name="incarnation")
+    @action.command(name="incarnation")
     async def incarnation(self,ctx,controller_id:int,position:int):
-        """Activate a Personal Incarnation you own while another player controls it."""
+        """Use an owned Personal Incarnation."""
         await self.mutate_ctx(ctx,lambda g:g.activate_personal_incarnation(ctx.author.id,controller_id,position),"activate_owned_incarnation")
-    @mtg.command(name="hydra")
+    @action.command(name="hydra")
     async def hydra(self,ctx,position:int,mode:str):
-        """Use Rock Hydra `prevent` or upkeep-only `counter`."""
+        """Use a Rock Hydra ability."""
         await self.mutate_ctx(ctx,lambda g:g.activate_hydra(ctx.author.id,position,mode),f"hydra_{mode.casefold()}")
-    @mtg.command(name="hydraorder")
+    @action.command(name="hydraorder")
     async def hydraorder(self,ctx,position:int,order:str):
-        """Choose Rock Hydra replacement priority: `counters` or `shields`."""
+        """Set Rock Hydra damage ordering."""
         await self.mutate_ctx(ctx,lambda g:g.choose_hydra_order(ctx.author.id,position,order),"hydra_order")
-    @mtg.command(name="mask")
+    @action.command(name="mask")
     async def mask(self,ctx,position:int,x_value:int):
-        """Activate Illusionary Mask at a battlefield position and pay X."""
+        """Activate Illusionary Mask."""
         await self.mutate_ctx(ctx,lambda g:g.activate_illusionary_mask(ctx.author.id,position,x_value),"illusionary_mask")
-    @mtg.command(name="maskpick")
+    @action.command(name="maskpick")
     async def maskpick(self,ctx,choice:str):
-        """Choose an eligible hand position for Illusionary Mask, or `decline`."""
+        """Choose Mask’s creature or decline."""
         position=None
         if choice.casefold()!="decline":
             try: position=int(choice)
             except ValueError:
                 await ctx.send("Choose an eligible hand position or `decline`."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_illusionary_mask(ctx.author.id,position),"illusionary_mask_choice")
-    @mtg.command(name="activate")
+    @action.command(name="activate")
     async def activate(self,ctx,position:int,target:str=None,x_value:int=None,choice_value:int=None):
-        """Activate an ability. Supply a target when needed; Clockwork Beast uses `- X COUNTERS`; Jade Monolith uses `SOURCE>TARGET`."""
+        """Activate a supported card ability."""
         normalized=None if target and target.casefold() in {"-","none"} else target
         await self.mutate_ctx(ctx,lambda g:g.activate_ability(ctx.author.id,position,normalized,x_value,choice_value),"activate")
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None,x_value:int=None):
-        """Play/cast a hand position with optional target and X; comma-separated multi-target choices support Fireball and Volcanic Eruption; modal choices include tap:/untap: for Twiddle, life:/prevent: for Healing Salve, a source as S:POSITION or USER_ID:POSITION for Reverse Damage, TYPE:USER_ID:POSITION for Phantasmal Terrain, and sacrifice:FIELD_POSITION for Sacrifice."""
+        """Play a land or cast a card from your hand."""
         normalized=None if target and target.casefold() in {"-","none"} else target
         await self.mutate_ctx(ctx,lambda g:g.play(ctx.author.id,position,normalized,x_value),"play")
-    @mtg.command(name="forktarget")
+    @action.command(name="forktarget")
     async def forktarget(self,ctx,target:str="keep"):
-        """Keep Fork copy targets or provide the copied spell's normal target syntax."""
+        """Choose targets for a Fork copy."""
         await self.mutate_ctx(ctx,lambda g:g.choose_fork_target(ctx.author.id,target),"fork_target_choice")
     @mtg.command(name="attack")
     async def attack(self,ctx,*groups:str):
-        """Declare attackers; join positions with `+` to form a band, such as `1 2+3`."""
+        """Declare attackers by battlefield position."""
         try:
             parsed=[[int(position) for position in group.split("+")] for group in groups]
         except ValueError:
             await ctx.send("Use battlefield positions, joining band members with `+`, such as `1 2+3`."); return
         positions=[position for group in parsed for position in group]; bands=[group for group in parsed if len(group)>1]
         await self.mutate_ctx(ctx,lambda g:g.declare_attackers(ctx.author.id,positions,bands),"attack")
-    @mtg.command(name="bodyguard")
+    @action.command(name="bodyguard")
     async def bodyguard(self,ctx,position:int):
-        """Choose which untapped Veteran Bodyguard receives unblocked-creature combat damage."""
+        """Choose a Veteran Bodyguard."""
         await self.mutate_ctx(ctx,lambda g:g.choose_bodyguard(ctx.author.id,position),"choose_bodyguard")
-    @mtg.command(name="trample")
+    @action.command(name="trample")
     async def trample(self,ctx,position:int,damage_to_blocker:int):
-        """Choose how much trample damage an attacker assigns to its blocker; defaults to lethal."""
+        """Set trample damage assignment."""
         await self.mutate_ctx(ctx,lambda g:g.assign_trample(ctx.author.id,position,damage_to_blocker),"trample")
     @mtg.command(name="block")
     async def block(self,ctx,*assignments:str):
-        """Block as ATTACKER_POSITION:BLOCKER_POSITION; no values means no blocks."""
+        """Declare blockers by battlefield position."""
         def run(g):
             pairs=[]
             for item in assignments:
                 a,b=item.split(":",1); pairs.append((int(a),int(b)))
             g.declare_blockers(ctx.author.id,pairs)
         await self.mutate_ctx(ctx,run,"block")
-    @mtg.command(name="attackdamage")
+    @action.command(name="attackdamage")
     async def attackdamage(self,ctx,attacker_position:int,*assignments:str):
-        """Divide an attacker’s damage in order as BLOCKER_POSITION:DAMAGE."""
+        """Divide damage among blockers."""
         def run(g):
             parsed=[]
             for item in assignments:
                 blocker,damage=item.split(":",1); parsed.append((int(blocker),int(damage)))
             g.assign_attacker_damage(ctx.author.id,attacker_position,parsed)
         await self.mutate_ctx(ctx,run,"attacker_damage")
-    @mtg.command(name="blockdamage")
+    @action.command(name="blockdamage")
     async def blockdamage(self,ctx,blocker_position:int,*assignments:str):
-        """Divide a multi-blocker's damage in order as ATTACKER_POSITION:DAMAGE."""
+        """Divide damage among attackers."""
         def run(g):
             parsed=[]
             for item in assignments:
                 attacker,damage=item.split(":",1); parsed.append((int(attacker),int(damage)))
             g.assign_blocker_damage(ctx.author.id,blocker_position,parsed)
         await self.mutate_ctx(ctx,run,"blocker_damage")
-    @mtg.command(name="untap")
+    @action.command(name="untap")
     async def untap(self,ctx,*positions:int):
-        """Choose the battlefield positions to untap when Smoke or Winter Orb restricts the untap step."""
+        """Resolve a restricted untap."""
         await self.mutate_ctx(ctx,lambda g:g.choose_untap(ctx.author.id,positions),"untap")
     @mtg.command(name="pass")
     async def pass_(self,ctx): await self.mutate_ctx(ctx,lambda g:g.pass_priority(ctx.author.id),"pass")
-    @mtg.command(name="trigger")
+    @action.command(name="trigger")
     async def trigger(self,ctx,choice:str,position:int=None):
-        """Resolve a trigger with `pay`, `draw`, `decline`, or `sacrifice POSITION`."""
+        """Resolve a pending trigger."""
         normalized=choice.casefold()
         if normalized not in ("pay","draw","decline","sacrifice"): await ctx.send("Choose `pay`, `draw`, `decline`, or `sacrifice POSITION`."); return
         if normalized=="sacrifice" and position is None: await ctx.send("Provide the battlefield position to sacrifice."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_trigger(ctx.author.id,normalized!="decline",position if normalized=="sacrifice" else None),f"trigger_{normalized}")
-    @mtg.command(name="wording")
+    @action.command(name="wording")
     async def wording(self,ctx,source:str,target:str):
-        """Resolve Magical Hack or Sleight of Mind with FROM TO."""
+        """Choose a replacement word."""
         await self.mutate_ctx(ctx,lambda g:g.choose_word_change(ctx.author.id,source,target),"word_change_choice")
 
-    @mtg.command(name="orders")
+    @action.command(name="orders")
     async def orders(self,ctx,choice:str):
-        """Resolve False Orders with an attacker position or `decline`."""
+        """Resolve False Orders."""
         if choice.casefold()=="decline": position=None
         else:
             try: position=int(choice)
-            except ValueError: await ctx.send("Use `mtg orders ATTACKER_POSITION` or `mtg orders decline`."); return
+            except ValueError: await ctx.send("Use `mtg action orders ATTACKER_POSITION` or `mtg action orders decline`."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_false_orders(ctx.author.id,position),"false_orders_choice")
-    @mtg.command(name="kudzu")
+    @action.command(name="kudzu")
     async def kudzu(self,ctx,choice:str,position:int=None):
-        """Reattach Kudzu with USER_ID POSITION, or `decline`."""
+        """Choose Kudzu’s new land."""
         if choice.casefold()=="decline": controller=None
         else:
             try: controller=int(choice)
-            except ValueError: await ctx.send("Use `mtg kudzu USER_ID POSITION` or `mtg kudzu decline`."); return
+            except ValueError: await ctx.send("Use `mtg action kudzu USER_ID POSITION` or `mtg action kudzu decline`."); return
             if position is None: await ctx.send("Provide the target land battlefield position."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_kudzu(ctx.author.id,controller,position),"kudzu_choice")
 
-    @mtg.command(name="balance")
+    @action.command(name="balance")
     async def balance(self,ctx,*positions:int):
-        """Complete the pending Balance choice with exact battlefield or private-hand positions."""
+        """Resolve a Balance choice."""
         await self.mutate_ctx(ctx,lambda g:g.choose_balance(ctx.author.id,positions),"balance_choice")
 
-    @mtg.command(name="leak")
+    @action.command(name="leak")
     async def leak(self,ctx,amount:int):
-        """Choose how much mana to pay for a resolving Power Leak trigger."""
+        """Choose a Power Leak payment."""
         await self.mutate_ctx(ctx,lambda g:g.choose_power_leak(ctx.author.id,amount),"power_leak")
-    @mtg.command(name="selection")
+    @action.command(name="selection")
     async def selection(self,ctx,*choices:str):
-        """Resolve Natural Selection with `shuffle` or a top-to-bottom position order."""
+        """Resolve Natural Selection."""
         if len(choices)==1 and choices[0].casefold()=="shuffle": await self.mutate_ctx(ctx,lambda g:g.choose_natural_selection(ctx.author.id,shuffle=True),"natural_selection_shuffle"); return
         try: order=tuple(int(value) for value in choices)
-        except ValueError: await ctx.send("Use `mtg selection shuffle` or `mtg selection 2 1 3`."); return
+        except ValueError: await ctx.send("Use `mtg action selection shuffle` or `mtg action selection 2 1 3`."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_natural_selection(ctx.author.id,order),"natural_selection_order")
-    @mtg.command(name="copy")
+    @action.command(name="copy")
     async def copy(self,ctx,controller_id:str="none",position:int=None):
-        """Choose a permanent for Clone or Copy Artifact, or use `none`."""
+        """Choose a copyable permanent."""
         if controller_id.casefold()=="none": await self.mutate_ctx(ctx,lambda g:g.choose_copy(ctx.author.id),"copy_none"); return
         try: owner=int(controller_id)
-        except ValueError: await ctx.send("Use `mtg copy USER_ID POSITION` or `mtg copy none`."); return
+        except ValueError: await ctx.send("Use `mtg action copy USER_ID POSITION` or `mtg action copy none`."); return
         if position is None: await ctx.send("Provide the battlefield position to copy."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_copy(ctx.author.id,owner,position),"copy_choice")
-    @mtg.command(name="doppelganger")
+    @action.command(name="doppelganger")
     async def doppelganger(self,ctx,choice:str,position:int=None):
-        """Choose `USER_ID POSITION` as the upkeep target, then `copy` or `keep` after responses."""
+        """Resolve Vesuvan Doppelganger."""
         normalized=choice.casefold()
         if normalized in ("copy","keep"):
             await self.mutate_ctx(ctx,lambda g:g.choose_vesuvan_copy(ctx.author.id,accept=normalized=="copy"),f"vesuvan_{normalized}"); return
