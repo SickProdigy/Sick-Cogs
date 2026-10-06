@@ -4265,6 +4265,32 @@ class LibraryOfLengTests(unittest.TestCase):
         game.choose_cleanup_discard(10,[1]); self.assertEqual(game.phase,"cleanup_discard"); game.choose_cleanup_discard(10,[1]); self.assertNotEqual(game.phase,"cleanup_discard"); self.assertTrue(set(cards[:2])<=set(game.player(10).graveyard))
         exempt=ready(); exempt.player(10).hand=[]; exempt.player(10).battlefield=[]; [self.add(exempt,10,"bear","hand") for _ in range(9)]; self.leng(exempt,10); exempt.phase="ending"; exempt._advance(); self.assertNotEqual(exempt.phase,"cleanup_discard"); self.assertEqual(len(exempt.player(10).hand),9)
 
+class AlphaCamouflageTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="battlefield": game.player(user).battlefield.append(Permanent(uid,key,owner=user,sick=False))
+        else: getattr(game.player(user),zone).append(uid)
+        return uid
+
+    def test_resolved_spell_replaces_blocking_with_persisted_random_piles(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; first=self.add(game,10,"bear"); second=self.add(game,10,"giant"); bear=self.add(game,20,"bear"); giant=self.add(game,20,"lea:179"); spell=self.add(game,10,"lea:187","graveyard"); game.active_index=0; game.attackers=[first,second]; game.phase="after_attackers"; game.priority_user=10
+        game._resolve(Spell(10,spell,"lea:187")); self.assertTrue(game.camouflage_pending); game._advance(); self.assertEqual((game.phase,game.priority_user),("camouflage",20))
+        restored=Game.from_raw(game.to_raw()); self.assertTrue(restored.camouflage_pending)
+        with patch("mtg.engine.random.SystemRandom.shuffle",side_effect=lambda values:values.reverse()): restored.choose_camouflage(20,[[1,2],[2]])
+        self.assertEqual(restored.phase,"after_blockers"); self.assertEqual(set(restored.blockers_for(second)),{bear,giant}); self.assertEqual(restored.blockers_for(first),[giant]); self.assertFalse(restored.camouflage_pending)
+
+    def test_piles_validate_count_creatures_and_extra_block_capacity(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; self.add(game,10,"bear"); self.add(game,10,"giant"); self.add(game,20,"bear"); self.add(game,20,"forest"); game.active_index=0; game.attackers=[game.player(10).battlefield[0].uid,game.player(10).battlefield[1].uid]; game.phase="camouflage"; game.camouflage_pending=True; game.priority_user=20
+        with self.assertRaisesRegex(GameError,"exactly 2 piles"): game.choose_camouflage(20,[[1]])
+        with self.assertRaisesRegex(GameError,"valid creature"): game.choose_camouflage(20,[[2],[]])
+        with self.assertRaisesRegex(GameError,"cannot be placed"): game.choose_camouflage(20,[[1],[1]])
+        game.choose_camouflage(20); self.assertEqual(game.blocks,{})
+
+    def test_cast_window_is_attacking_player_after_attackers(self):
+        game=ready(); game.player(10).hand=[]; game.player(10).mana_pool={"G":1}; self.add(game,10,"lea:187","hand"); game.active_index=0; game.phase="precombat_main"; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"after attackers"): game.play(10,1)
+        game.phase="after_attackers"; game.play(10,1); self.assertEqual(game.stack[-1].key,"lea:187")
+
 class AlphaRagingRiverTests(unittest.TestCase):
     def add(self,game,user,key):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; permanent=Permanent(uid,key,owner=user,sick=False); game.player(user).battlefield.append(permanent); return permanent

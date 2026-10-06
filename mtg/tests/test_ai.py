@@ -1031,6 +1031,10 @@ class SoloAITests(unittest.TestCase):
         game.pass_priority(HUMAN); advance_solo(game); game.pass_priority(HUMAN); advance_solo(game)
         self.assertTrue(any(event["action"]=="ai_fork_keep_targets" for event in game.history))
 
+    def test_ai_completes_camouflage_piles(self):
+        game=solo(order=(HUMAN,AI)); first=self.add(game,HUMAN,"bear"); second=self.add(game,HUMAN,"giant"); blocker=self.add(game,AI,"bear"); game.active_index=0; game.attackers=[first.uid,second.uid]; game.phase="camouflage"; game.camouflage_pending=True; game.priority_user=AI
+        advance_solo(game); self.assertEqual(game.phase,"after_blockers"); self.assertFalse(game.camouflage_pending); self.assertIn(blocker.uid,game.all_blocker_uids()); self.assertTrue(any(event["action"]=="ai_camouflage_piles" for event in game.history))
+
     def test_ai_completes_both_raging_river_divisions(self):
         spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
         defending=solo(order=(HUMAN,AI)); attacker=self.add(defending,HUMAN,"bear"); blocker=self.add(defending,AI,"bear"); uid=defending.next_uid; defending.next_uid+=1; defending.cards[uid]="lea:168"; defending.active_index=0; defending.attackers=[attacker.uid]; defending.phase="after_attackers"; defending.stack=[spell_type(HUMAN,uid,"lea:168",ability_effect="raging_river_split",decision_pending=True,choice_owner=AI)]; defending.priority_user=AI

@@ -800,6 +800,11 @@ class ForkRenderingTests(unittest.TestCase):
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Lightning Bolt copy",rendered); self.assertIn("must choose new targets or keep",rendered); self.assertIn("[R]",rendered)
         view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":fork_target")); self.assertEqual([option.value for option in select.options],["keep"]); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled)
 
+class CamouflageRenderingTests(unittest.TestCase):
+    def test_pending_piles_have_public_prompt_no_blocks_control_and_disabled_pass(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id))); game=Game(1,[10,20],1); game.phase="camouflage"; game.camouflage_pending=True; game.active_index=0; game.priority_user=20; game.attackers=[99,100]; game.cards.update({99:"bear",100:"giant"}); cog.games={1:game}
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("divide chosen creatures into 2 Camouflage piles",rendered); view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":camouflage")); self.assertEqual([option.value for option in select.options],["none"]); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled)
+
 class RagingRiverRenderingTests(unittest.TestCase):
     def test_pending_division_is_public_and_has_bounded_control(self):
         spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id))); game=Game(1,[10,20],1); game.player(20).battlefield=[]

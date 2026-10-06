@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.116.0"
+    __version__="0.117.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -109,7 +109,8 @@ class MTG(commands.Cog):
             e.description=f"Opening hands - **{names[g.active_user]}** will play first."
         else:
             e.description=f"Turn **{g.turn}** - **{g.phase.replace('_',' ').title()}**\nActive: **{names[g.active_user]}**"
-            if g.priority_user: e.description+=f"\nPriority: **{names[g.priority_user]}**"
+            if g.phase=="camouflage": e.description+=f"\n**{names[g.opponent(g.active_user)]}** must divide chosen creatures into {len(g.attackers)} Camouflage piles; use battlefield positions with `camouflage`."
+            elif g.priority_user: e.description+=f"\nPriority: **{names[g.priority_user]}**"
             elif g.phase=="attackers": e.description+=f"\nWaiting for **{names[g.active_user]}** to declare attackers."
             elif g.phase=="blockers": e.description+=f"\nWaiting for **{names[g.opponent(g.active_user)]}** to declare blockers."
         for user in g.order:

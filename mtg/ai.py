@@ -846,6 +846,14 @@ def advance_solo(game: Game):
             choices=game.private_hand_decision(user)[1]; required=len(choices)-7
             positions=[position for position,_ in sorted(choices,key=lambda item:(item[1].cost+item[1].power+item[1].toughness,item[0]))[:required]]
             game.choose_cleanup_discard(user,positions); game.record(user,"ai_cleanup_discard"); changed=True; continue
+        if game.phase == "camouflage":
+            if game.opponent(game.active_user)!=user: return changed
+            piles=[[] for _ in game.attackers]; defender=game.player(user)
+            for position,permanent in enumerate(defender.battlefield,1):
+                if not game.is_creature(permanent) or permanent.tapped: continue
+                capacity=permanent.temporary_max_blocks or game.card(permanent.uid).max_blocks
+                for offset in range(min(capacity,len(piles))): piles[(position-1+offset)%len(piles)].append(position)
+            game.choose_camouflage(user,piles); game.record(user,"ai_camouflage_piles"); changed=True; continue
         if game.phase == "blockers":
             if game.opponent(game.active_user) != user:
                 return changed
