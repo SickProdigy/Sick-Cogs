@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"sacrifice_mana","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"sacrifice_mana","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
@@ -27,7 +27,7 @@ def _target(game, user, card):
         if not choices: return None
         stable=f"{target_user}:{max(choices)[1]}"
         return f"island:{stable}" if card.aura_choose_land_type else stable
-    if card.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
+    if card.effect in ("counter_spell","counter_mana_value_x","power_sink","elemental_blast"):
         for position,spell in enumerate(reversed(game.stack),1):
             target=game.card(spell.uid)
             if not spell.ability_effect and spell.owner!=user and (not card.target_color or card.target_color in game.spell_colors(spell)) and (card.effect!="counter_mana_value_x" or game.can_pay(user,card,game.spell_mana_value(spell))): return f"S:{position}"
@@ -46,7 +46,7 @@ def _target(game, user, card):
     if card.effect=="sacrifice_mana":
         choices=[(game.card(permanent.uid).cost+sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent)]
         return f"sacrifice:{min(choices)[1]}" if choices else None
-    if card.effect=="mana_short":
+    if card.effect in ("mana_short","drain_power"):
         opponent=game.player(game.opponent(user))
         return str(opponent.user_id) if opponent.mana_pool or any(game.card(permanent.uid).land and not permanent.tapped for permanent in opponent.battlefield) else None
     if card.effect=="return_creature_hand":
@@ -329,7 +329,7 @@ def _play_one(game, user, difficulty):
             score=4+(x_value or 0)
         elif card.effect=="extra_turn":
             score=24
-        elif card.effect=="mana_short":
+        elif card.effect in ("mana_short","drain_power"):
             opponent=game.player(game.opponent(user)); score=8+sum(opponent.mana_pool.values())+sum(game.card(permanent.uid).land and not permanent.tapped for permanent in opponent.battlefield)
         elif card.effect == "destroy_land":
             score = 11
@@ -343,7 +343,7 @@ def _play_one(game, user, difficulty):
             score=8
         elif card.effect=="reanimate_creature":
             score=13
-        elif card.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
+        elif card.effect in ("counter_spell","counter_mana_value_x","power_sink","elemental_blast"):
             score=15 if target and target.startswith("S:") else 11
         elif card.effect in ("regenerate_target","grant_keyword","tap_or_untap"):
             score=10
@@ -682,6 +682,12 @@ def advance_solo(game: Game):
             return changed
         if game.stack and game.stack[-1].decision_pending:
             trigger=game.stack[-1]
+            if not trigger.ability_effect and game.card(trigger.uid).effect=="drain_power":
+                position,permanent,mana=game.drain_power_choice(user)
+                game.choose_drain_power(user,position,mana[0]); game.record(user,"ai_drain_power_choice"); changed=True; continue
+            if not trigger.ability_effect and game.card(trigger.uid).effect=="power_sink":
+                cost=f"{{{trigger.x_value}}}"; pay=game._mana_payment(game.player(user),game.card(trigger.uid),mana_cost=cost) is not None
+                game.choose_power_sink(user,pay); game.record(user,"ai_power_sink_pay" if pay else "ai_power_sink_decline"); changed=True; continue
             if not trigger.ability_effect and game.card(trigger.uid).effect=="search_library":
                 choices=game.library_search(user)
                 position,_=max(choices,key=lambda item:(item[1].cost+item[1].power+item[1].toughness+2*len(item[1].keywords),-item[0]))

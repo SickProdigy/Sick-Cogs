@@ -3575,4 +3575,64 @@ class CombatTests(unittest.TestCase):
         with self.assertRaises(GameError): g.concede(20)
         self.assertEqual(g.winner,20)
 
+
+class AlphaManaControlSpellTests(unittest.TestCase):
+    def add(self,game,user,key,tapped=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,sick=False,tapped=tapped); game.player(user).battlefield.append(permanent); return permanent
+
+    def spell(self,game,owner,key,target=None,x=0,choice_owner=None):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        return Spell(owner,uid,key,target,x_value=x,choice_owner=choice_owner)
+
+    def test_casting_stores_the_actual_resolution_chooser(self):
+        drain_game=ready(); drain_game.player(10).hand=[]; drain=self.spell(drain_game,10,"lea:56"); drain_game.player(10).hand=[drain.uid]; drain_game.player(10).mana_pool={"U":2}; drain_game.phase="precombat_main"; drain_game.priority_user=10
+        drain_game.play(10,1,"20"); self.assertEqual(drain_game.stack[-1].choice_owner,20)
+
+        sink_game=ready(); sink_game.player(10).hand=[]; target=self.spell(sink_game,20,"giant"); sink=self.spell(sink_game,10,"lea:72"); sink_game.player(10).hand=[sink.uid]; sink_game.player(10).mana_pool={"U":1}; sink_game.stack=[target]; sink_game.phase="precombat_main"; sink_game.priority_user=10
+        sink_game.play(10,1,"S:1",0); self.assertEqual(sink_game.stack[-1].choice_owner,20); self.assertEqual(sink_game.stack[-1].target,f"S:{target.uid}")
+
+    def test_drain_power_persists_each_dual_land_choice_and_transfers_the_whole_pool(self):
+        game=ready(); target=game.player(20); target.battlefield=[]; target.mana_pool={"C":1}
+        tundra=self.add(game,20,"lea:284"); forest=self.add(game,20,"forest"); self.add(game,20,"mountain",tapped=True)
+        drain=self.spell(game,10,"lea:56","20",choice_owner=20); drain.decision_pending=True; game.stack=[drain]; game.priority_user=20
+        position,permanent,mana=game.drain_power_choice(20); self.assertEqual((position,permanent.uid,set(mana)),(1,tundra.uid,{"W","U"}))
+        game.choose_drain_power(20,position,"U"); restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.stack[-1].mana_choices,{str(tundra.uid):"U"})
+        position,permanent,mana=restored.drain_power_choice(20); self.assertEqual((position,permanent.uid,mana),(2,forest.uid,("G",)))
+        restored.choose_drain_power(20,position,"G")
+        self.assertFalse(restored.stack); self.assertEqual(restored.player(10).mana_pool,{"C":1,"U":1,"G":1}); self.assertEqual(restored.player(20).mana_pool,{})
+        self.assertTrue(restored.find_permanent(tundra.uid)[1].tapped); self.assertTrue(restored.player(20).battlefield[2].tapped)
+        self.assertIn(drain.uid,restored.player(10).graveyard)
+
+    def test_drain_power_rejects_foreign_and_out_of_order_choices_and_handles_no_usable_lands(self):
+        game=ready(); game.player(20).battlefield=[]; land=self.add(game,20,"lea:284")
+        drain=self.spell(game,10,"lea:56","20",choice_owner=20); drain.decision_pending=True; game.stack=[drain]; game.priority_user=20
+        with self.assertRaises(GameError): game.choose_drain_power(10,1,"U")
+        with self.assertRaises(GameError): game.choose_drain_power(20,2,"U")
+        with self.assertRaises(GameError): game.choose_drain_power(20,1,"B")
+        self.assertFalse(land.tapped); self.assertEqual(drain.mana_choices,{})
+        empty=ready(); empty.player(20).battlefield=[]; empty.player(20).mana_pool={"R":2}; spell=self.spell(empty,10,"lea:56","20",choice_owner=20)
+        empty._resolve(spell); self.assertEqual(empty.player(10).mana_pool,{"R":2}); self.assertEqual(empty.player(20).mana_pool,{})
+
+    def test_power_sink_waits_for_target_controller_and_payment_preserves_the_spell(self):
+        game=ready(); game.player(20).battlefield=[]; self.add(game,20,"forest"); target=self.spell(game,20,"giant"); sink=self.spell(game,10,"lea:72",f"S:{target.uid}",1,20)
+        game.stack=[target,sink]; game.priority_user=10; game.pass_priority(10); game.pass_priority(20)
+        self.assertTrue(sink.decision_pending); self.assertEqual(game.priority_user,20)
+        restored=Game.from_raw(game.to_raw()); restored.choose_trigger(20,True)
+        self.assertEqual([item.uid for item in restored.stack],[target.uid]); self.assertTrue(restored.player(20).battlefield[0].tapped); self.assertIn(sink.uid,restored.player(10).graveyard)
+
+    def test_power_sink_decline_counters_empties_mana_and_taps_only_mana_lands(self):
+        game=ready(); game.player(20).battlefield=[]; forest=self.add(game,20,"forest"); ring=self.add(game,20,"lea:269"); bear=self.add(game,20,"bear"); game.player(20).mana_pool={"R":2}
+        target=self.spell(game,20,"giant"); sink=self.spell(game,10,"lea:72",f"S:{target.uid}",3,20); sink.decision_pending=True; game.stack=[target,sink]; game.priority_user=20
+        game.choose_trigger(20,False)
+        self.assertFalse(game.stack); self.assertIn(target.uid,game.player(20).graveyard); self.assertIn(sink.uid,game.player(10).graveyard); self.assertEqual(game.player(20).mana_pool,{})
+        self.assertTrue(forest.tapped); self.assertFalse(ring.tapped); self.assertFalse(bear.tapped)
+
+    def test_power_sink_rejects_foreign_or_unpayable_choice_without_mutation(self):
+        game=ready(); game.player(20).battlefield=[]; target=self.spell(game,20,"giant"); sink=self.spell(game,10,"lea:72",f"S:{target.uid}",2,20); sink.decision_pending=True; game.stack=[target,sink]; game.priority_user=20
+        with self.assertRaises(GameError): game.choose_power_sink(10,False)
+        with self.assertRaises(GameError): game.choose_power_sink(20,True)
+        self.assertEqual([item.uid for item in game.stack],[target.uid,sink.uid]); self.assertNotIn(sink.uid,game.player(10).graveyard)
+
 if __name__=="__main__": unittest.main()

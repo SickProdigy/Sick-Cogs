@@ -76,6 +76,7 @@ class Spell:
     source_power: int = 0
     choice_value: int = 0
     choice_owner: Optional[int] = None
+    mana_choices: Dict[str, str] = field(default_factory=dict)
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -822,7 +823,12 @@ class Game:
         p.hand.pop(index-1); self.phase_passes=0
         for spell in self.stack: spell.passes=0
         sacrifice_value=self.card(sacrificed.uid).cost if sacrificed is not None else 0
-        spell=Spell(user,uid,c.key,target,x_value=x_value,choice_value=sacrifice_value)
+        choice_owner=None
+        if c.effect=="drain_power": choice_owner=int(target)
+        elif c.effect=="power_sink":
+            target_uid=int(target.split(":",1)[1]); target_spell=next(item for item in self.stack if item.uid==target_uid)
+            choice_owner=target_spell.owner
+        spell=Spell(user,uid,c.key,target,x_value=x_value,choice_value=sacrifice_value,choice_owner=choice_owner)
         self.stack.append(spell)
         if sacrificed is not None:
             sacrificed_name=self.card(sacrificed.uid).name; was_land=self.card(sacrificed.uid).land; death_sources=self._death_trigger_sources(); batch=self.next_uid
@@ -900,12 +906,12 @@ class Game:
                 if not self.is_creature(permanent): raise GameError("Healing Salve prevention target is not a creature.")
                 return f"prevent:{target_user}:{permanent.uid}"
             raise GameError("Healing Salve target must be life:PLAYER_ID, prevent:PLAYER_ID, or prevent:USER_ID:POSITION.")
-        if c.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
+        if c.effect in ("counter_spell","counter_mana_value_x","power_sink","elemental_blast"):
             if target and target.upper().startswith("S:"):
                 spell=self._target_stack(target); target_card=self.card(spell.uid)
                 if c.target_color and c.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {c.target_color}.")
                 return f"S:{spell.uid}"
-            if c.effect in ("counter_spell","counter_mana_value_x"): raise GameError(f"{c.name} requires an S:POSITION stack target.")
+            if c.effect in ("counter_spell","counter_mana_value_x","power_sink"): raise GameError(f"{c.name} requires an S:POSITION stack target.")
             if not target or ":" not in target: raise GameError("Elemental Blast target must be S:POSITION or USER_ID:POSITION.")
             try: target_user,pos=(int(x) for x in target.split(":"))
             except (TypeError,ValueError) as e: raise GameError("Elemental Blast target must be S:POSITION or USER_ID:POSITION.") from e
@@ -967,7 +973,7 @@ class Game:
             if c.effect=="pump_blocking" and permanent.uid not in self.blocks.values():
                 raise GameError(f"{c.name} must target a blocking creature.")
             return f"{target_user}:{permanent.uid}"
-        if c.effect in ("draw_target","draw_target_x","life_target_x","discard_random_x","mana_short"):
+        if c.effect in ("draw_target","draw_target_x","life_target_x","discard_random_x","mana_short","drain_power"):
             try: target_user=int(target)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
             self.player(target_user); return str(target_user)
@@ -1010,6 +1016,10 @@ class Game:
                     s.decision_pending=True; self.priority_user=s.choice_owner if s.choice_owner is not None else s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="search_library" and self.player(s.owner).library:
                     s.decision_pending=True; self.priority_user=s.owner; return
+                if not s.ability_effect and self.card(s.uid).effect=="drain_power" and self._drain_power_lands(s):
+                    s.decision_pending=True; self.priority_user=s.choice_owner; return
+                if not s.ability_effect and self.card(s.uid).effect=="power_sink" and self._power_sink_target(s) is not None:
+                    s.decision_pending=True; self.priority_user=s.choice_owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
                 if not self.finished: self.priority_user=self.active_user
@@ -1036,6 +1046,64 @@ class Game:
         self.phase_passes=0; self.priority_user=self.active_user
         self.log.append(f"{user} searched their library with {self.card(spell.uid).name}, put a card into their hand, then shuffled.")
 
+    def _power_sink_target(self,spell):
+        if not spell.target or not spell.target.startswith("S:"): return None
+        target_uid=int(spell.target.split(":",1)[1])
+        return next((item for item in self.stack if item.uid==target_uid and not item.ability_effect),None)
+
+    def _drain_power_lands(self,spell):
+        if spell.choice_owner is None: return []
+        player=self.player(spell.choice_owner); choices=[]
+        for position,permanent in enumerate(player.battlefield,1):
+            mana=self.current_mana_choices(permanent)
+            if self.card(permanent.uid).land and not permanent.tapped and mana:
+                choices.append((position,permanent,tuple(mana)))
+        return choices
+
+    def drain_power_choice(self,user):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect or self.card(self.stack[-1].uid).effect!="drain_power":
+            raise GameError("You do not have a Drain Power choice to make.")
+        spell=self.stack[-1]
+        for position,permanent,mana in self._drain_power_lands(spell):
+            if str(permanent.uid) not in spell.mana_choices: return position,permanent,mana
+        return None
+
+    def choose_drain_power(self,user,position,symbol):
+        choice=self.drain_power_choice(user)
+        if choice is None: raise GameError("Drain Power has no remaining land choice.")
+        expected_position,permanent,mana=choice
+        if position!=expected_position or symbol not in mana: raise GameError("Choose a listed mana ability for the next land.")
+        spell=self.stack[-1]; spell.mana_choices[str(permanent.uid)]=symbol
+        if self.drain_power_choice(user) is not None: return
+        self.stack.pop(); self._resolve(spell)
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0
+        if not self.finished: self.priority_user=self.active_user
+
+    def choose_power_sink(self,user,pay):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect or self.card(self.stack[-1].uid).effect!="power_sink":
+            raise GameError("You do not have a Power Sink choice to make.")
+        spell=self.stack[-1]; target=self._power_sink_target(spell); player=self.player(user); pending=[]
+        if target is None:
+            self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append("Power Sink fizzled because its target was gone.")
+        elif pay:
+            cost=f"{{{spell.x_value}}}"; payment=self._mana_payment(player,self.card(spell.uid),mana_cost=cost)
+            if payment is None: raise GameError(f"You cannot pay {cost} for Power Sink.")
+            sources,remaining,choices=payment
+            for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending)
+            player.mana_pool=remaining; self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append(f"{user} paid {cost} for Power Sink; the targeted spell was not countered.")
+        else:
+            self.stack.pop(); self.stack.remove(target); self.player(target.owner).graveyard.append(target.uid)
+            for permanent in player.battlefield:
+                if self.card(permanent.uid).land and self.current_mana_choices(permanent): self._tap_permanent(user,permanent,pending_triggers=pending)
+            player.mana_pool.clear(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append(f"{user} declined Power Sink; {self.card(target.uid).name} was countered and their mana was emptied.")
+        self.stack.extend(pending)
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0
+        if not self.finished: self.priority_user=self.active_user
+
     def trigger_sacrifice_choices(self,trigger):
         if trigger.ability_effect=="upkeep_sacrifice":
             return [(position,permanent) for position,permanent in enumerate(self.player(trigger.owner).battlefield,1) if permanent.uid!=trigger.source_uid and self.is_creature(permanent)]
@@ -1045,6 +1113,7 @@ class Game:
 
     def trigger_cost(self,trigger):
         card=self.card(trigger.uid)
+        if not trigger.ability_effect and card.effect=="power_sink": return f"{{{trigger.x_value}}}"
         if trigger.ability_effect in ("cast_draw","graveyard_return"): return ""
         if trigger.ability_effect=="upkeep_untap": return card.upkeep_untap_cost
         if trigger.ability_effect=="aura_upkeep_untap": return card.aura_upkeep_untap_cost
@@ -1053,6 +1122,7 @@ class Game:
         return "{1}"
 
     def trigger_accept_label(self,trigger):
+        if not trigger.ability_effect and self.card(trigger.uid).effect=="power_sink": return f"Pay {{{trigger.x_value}}}"
         if trigger.ability_effect=="cast_draw": return "Draw a card"
         if trigger.ability_effect=="graveyard_return": return "Return to battlefield"
         if trigger.ability_effect=="upkeep_sacrifice": return "Choose a creature"
@@ -1064,6 +1134,8 @@ class Game:
         if not self.stack or not self.stack[-1].decision_pending or (self.stack[-1].choice_owner if self.stack[-1].choice_owner is not None else self.stack[-1].owner)!=user:
             raise GameError("You do not have a trigger choice to make.")
         trigger=self.stack[-1]; card=self.card(trigger.uid)
+        if not trigger.ability_effect and card.effect=="power_sink":
+            self.choose_power_sink(user,pay); return
         if trigger.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"):
             required="another creature" if trigger.ability_effect=="upkeep_sacrifice" else "a land"
             if not pay: raise GameError(f"{card.name} requires you to sacrifice {required} if able.")
@@ -1583,6 +1655,8 @@ class Game:
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=c.key
                 self.stack.append(Spell(s.owner,uid,c.key,f"{user}:{target.uid}",ability_effect="earthbind_enter",source_uid=aura.uid,color_override=aura.color_override))
         elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(self._make_permanent(s.uid,c.key,owner=s.owner,tapped=c.enters_tapped,color_override=s.color_override))
+        elif c.effect=="power_sink":
+            p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone.")
         elif c.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
             if s.target.startswith("S:"):
                 target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid),None)
@@ -1638,6 +1712,16 @@ class Game:
         elif c.effect=="prevent_combat_damage": self.prevent_combat_damage=True; p.graveyard.append(s.uid)
         elif c.effect=="extra_turn": self.extra_turns.insert(0,s.owner); p.graveyard.append(s.uid)
         elif c.effect=="channel": p.channel_active=True; p.graveyard.append(s.uid)
+        elif c.effect=="drain_power":
+            target_player=self.player(int(s.target)); pending=[]
+            for _,permanent,mana in self._drain_power_lands(s):
+                symbol=s.mana_choices.get(str(permanent.uid))
+                if symbol not in mana:
+                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because a mana choice was incomplete."); return
+                self._tap_permanent(target_player.user_id,permanent,symbol,add_mana=True,pending_triggers=pending)
+            transferred=dict(target_player.mana_pool); target_player.mana_pool.clear()
+            for symbol,count in transferred.items(): p.mana_pool[symbol]=p.mana_pool.get(symbol,0)+count
+            p.graveyard.append(s.uid); self.stack.extend(pending); self.log.append(f"{s.owner} received {sum(transferred.values())} mana from {target_player.user_id} with {c.name}.")
         elif c.effect=="mana_short":
             target_player=self.player(int(s.target)); pending=[]
             for permanent in target_player.battlefield:

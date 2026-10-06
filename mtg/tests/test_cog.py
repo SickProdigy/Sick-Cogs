@@ -678,5 +678,19 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         cog.refresh_message.assert_awaited_once_with(expired)
 
 
+
+    async def test_mana_control_decisions_render_and_expose_only_the_correct_controls(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); game.player(20).battlefield=[]; land=game.next_uid; game.next_uid+=1; game.cards[land]="lea:284"; game.player(20).battlefield=[permanent_type(land,"lea:284",owner=20,sick=False)]
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:56"; game.stack=[spell_type(10,uid,"lea:56","20",decision_pending=True,choice_owner=20)]; game.priority_user=20; cog.games={1:game}
+        view=GameView(cog,1); select=next(item for item in view.children if item.custom_id.endswith(":drain_power")); passing=next(item for item in view.children if item.custom_id.endswith(":pass"))
+        self.assertEqual({option.value for option in select.options},{"1:W","1:U"}); self.assertTrue(passing.disabled); self.assertIn("target player is choosing land mana",str(cog.game_embed(game).to_dict()))
+
+        target_uid=game.next_uid; game.next_uid+=1; game.cards[target_uid]="giant"; sink_uid=game.next_uid; game.next_uid+=1; game.cards[sink_uid]="lea:72"
+        target=spell_type(20,target_uid,"giant"); pending=spell_type(10,sink_uid,"lea:72",f"S:{target_uid}",x_value=2,decision_pending=True,choice_owner=20); game.stack=[target,pending]
+        view=GameView(cog,1); pay=next(item for item in view.children if item.custom_id.endswith(":pay")); decline=next(item for item in view.children if item.custom_id.endswith(":decline_trigger"))
+        self.assertEqual(pay.label,"Pay {2}"); self.assertFalse(pay.disabled); self.assertEqual(decline.label,"Don't pay"); self.assertIn("targeted spell's controller may Pay {2}",str(cog.game_embed(game).to_dict()))
+
 if __name__ == "__main__":
     unittest.main()

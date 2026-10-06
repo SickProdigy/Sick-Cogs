@@ -8,7 +8,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 67 creatures playable through 0.84.0; 10 remain |
-| Instants and sorceries | 70 | 53 spells playable through 0.87.0; 17 remain |
+| Instants and sorceries | 70 | 55 spells playable through 0.88.0; 15 remain |
 | Enchantments | 68 | 59 enchantments playable through 0.86.0; 9 remain |
 | Artifacts | 42 | Thirty-three artifacts playable through 0.83.0; 9 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -196,3 +196,5 @@ The 0.85.0 additional-cost promotion adds Sacrifice. Casting requires an explici
 The 0.86.0 control-change promotion adds Control Magic and Steal Artifact. Permanents now persist their owner separately from their current controller. Control Auras move their attached permanent under the newest applicable Aura controller, apply summoning sickness on every control change, revert through older effects or to the owner when an Aura leaves, and remove a changing permanent from combat. Bounce, destruction, exile, sacrifice, and state actions send stolen cards to their owner while controller-based rewards and triggers still use the controller at the event. Public state labels stolen ownership, legacy saves infer owners safely, and solo AI targets useful opposing creatures or artifacts.
 
 The 0.87.0 hidden-library promotion adds Demonic Tutor. The spell does not choose early while opponents can still respond; after it reaches resolution, it persists a private choice state and exposes a requester-bound paginated Discord browser capped at 25 options per page. The selected stable library position moves to hand, the remaining library is securely shuffled, public state reveals neither library contents nor the chosen card, and stale or foreign interactions are rejected. Empty libraries resolve safely, reloads preserve the pending search, and solo AI completes the same decision flow.
+
+The 0.88.0 mana-control promotion adds Drain Power and Power Sink. Both wait until resolution before exposing persisted choices, after opponents have had the normal response window. Drain Power asks the targeted player to choose the mana ability of each usable land in stable battlefield order, carries those choices across reloads, runs the shared land-tap trigger path, and transfers both newly produced and already floating mana by its actual symbols. Power Sink asks the targeted spell’s controller to pay the chosen X or decline; payment is atomic through the shared mana solver, while declining counters the stable target, taps only that player’s lands with mana abilities, and empties their pool. Public Discord controls disclose no private zones, reject stale or foreign input, and solo AI completes both decision flows.

@@ -870,5 +870,19 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game)
         self.assertNotIn(giant,game.player(AI).library); self.assertTrue(any(event["action"]=="ai_search_library" for event in game.history))
 
+
+    def test_ai_completes_mana_control_resolution_choices(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        drain=solo(order=(AI,HUMAN)); drain.player(AI).kept=drain.player(HUMAN).kept=True; drain.player(AI).battlefield=[]
+        land=self.add(drain,AI,"lea:284"); uid=drain.next_uid; drain.next_uid+=1; drain.cards[uid]="lea:56"
+        drain.stack=[spell_type(HUMAN,uid,"lea:56",str(AI),decision_pending=True,choice_owner=AI)]; drain.priority_user=AI; drain.phase="precombat_main"
+        advance_solo(drain); self.assertTrue(land.tapped); self.assertEqual(drain.player(HUMAN).mana_pool.get("W"),1); self.assertTrue(any(event["action"]=="ai_drain_power_choice" for event in drain.history))
+
+        sink=solo(order=(AI,HUMAN)); sink.player(AI).kept=sink.player(HUMAN).kept=True; sink.player(AI).battlefield=[]; self.add(sink,AI,"forest")
+        target_uid=sink.next_uid; sink.next_uid+=1; sink.cards[target_uid]="giant"; sink_uid=sink.next_uid; sink.next_uid+=1; sink.cards[sink_uid]="lea:72"
+        target=spell_type(AI,target_uid,"giant"); pending=spell_type(HUMAN,sink_uid,"lea:72",f"S:{target_uid}",x_value=1,decision_pending=True,choice_owner=AI)
+        sink.stack=[target,pending]; sink.priority_user=AI; sink.phase="precombat_main"; advance_solo(sink)
+        self.assertEqual([item.uid for item in sink.stack],[target_uid]); self.assertTrue(any(event["action"]=="ai_power_sink_pay" for event in sink.history))
+
 if __name__ == "__main__":
     unittest.main()

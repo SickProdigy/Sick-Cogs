@@ -39,6 +39,18 @@ class UntapSelect(discord.ui.Select):
     async def callback(self,i):
         await self.cog.act(i,self.game_id,lambda g:g.choose_untap(i.user.id,[int(value) for value in self.values]),"untap")
 
+class DrainPowerSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id
+        choice=game.drain_power_choice(game.stack[-1].choice_owner)
+        position,permanent,mana=choice
+        name=game.card(permanent.uid).name
+        options=[discord.SelectOption(label=f"{name}: add {{{symbol}}}"[:100],value=f"{position}:{symbol}") for symbol in mana]
+        super().__init__(placeholder=f"Choose {name}'s mana ability",min_values=1,max_values=1,options=options,custom_id=f"mtg:{game_id}:drain_power")
+    async def callback(self,i):
+        position,symbol=self.values[0].split(":",1)
+        await self.cog.act(i,self.game_id,lambda g:g.choose_drain_power(i.user.id,int(position),symbol),"drain_power_choice")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -49,15 +61,18 @@ class GameView(discord.ui.View):
             if game and action in ("keep","mulligan"): item.disabled=game.phase!="opening"
             if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
-                pending=bool(game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect)
+                pending=bool(game.stack and game.stack[-1].decision_pending and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
                 mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"))
                 item.disabled=not pending or mandatory
                 if pending and action=="pay": item.label=game.trigger_accept_label(game.stack[-1])
+                if pending and action=="decline_trigger" and not game.stack[-1].ability_effect: item.label="Don't pay"
             if game and action=="search":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
             if game and action=="concede": item.disabled=game.finished
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") and game.trigger_sacrifice_choices(game.stack[-1]):
             self.add_item(SacrificeSelect(self.cog,self.game_id,game,game.stack[-1]))
+        if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="drain_power":
+            self.add_item(DrainPowerSelect(self.cog,self.game_id,game))
         if game and game.phase=="untap" and game.untap_choices(): self.add_item(UntapSelect(self.cog,self.game_id,game))
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)

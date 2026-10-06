@@ -492,6 +492,8 @@ ALPHA_SPELLS = {
     "lea:115": {"effect":"discard_random_x"},
     "lea:105": {"effect":"drain_life_x", "x_mana_color":"B"},
     "lea:104": {"effect":"search_library"},
+    "lea:56": {"effect":"drain_power"},
+    "lea:72": {"effect":"power_sink"},
     "lea:84": {"effect":"timetwister"},
     "lea:183": {"effect":"wheel_seven"},
     "lea:101": {"effect":"set_color", "color_change":"B"},
