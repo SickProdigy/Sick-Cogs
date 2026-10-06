@@ -63,14 +63,14 @@ class RetroStyle(PokedexStyle):
     def list_embed(self,session):
         values=session.entries()[session.page*PAGE_SIZE:(session.page+1)*PAGE_SIZE];rows=[]
         for item in values:
-            state=self.status(session,item.id);mark={"caught":"O","seen":"o","unseen":"-"}[state]
-            name=item.name.upper() if state!="unseen" else "???";rows.append(f"{mark} #{item.id:03d}  {name[:15]}")
+            state=self.status(session,item.id)
+            name=item.name.upper() if state!="unseen" else "???";rows.append(f"#{item.id:03d}  {name[:15]}")
         rows=rows or ["No matching entries."]
         box=["+----------------------+",*[f"| {row:<20} |" for row in rows],"+----------------------+"]
         embed=discord.Embed(title=f"POKEDEX | GENERATION {session.generation}",description="\n".join([FENCE,*box,FENCE]),color=discord.Color.red())
         embed.set_footer(text=self.footer(session));return embed
     def detail_embed(self,session,item):
-        state=self.status(session,item.id);name=item.name.upper() if state!="unseen" else "???";mark={"caught":"O CAUGHT","seen":"o SEEN","unseen":"- UNKNOWN"}[state]
+        state=self.status(session,item.id);name=item.name.upper() if state!="unseen" else "???";mark={"caught":"CAUGHT","seen":"SEEN","unseen":"UNKNOWN"}[state]
         box=["+----------------------+",f"| #{item.id:03d} {name[:14]:<14} |",f"| {mark:<20} |","+----------------------+"]
         embed=discord.Embed(title="POKEDEX DATA",description="\n".join([FENCE,*box,FENCE,*self.details(session,item)]),color=discord.Color.red())
         if state!="unseen":embed.set_thumbnail(url=sprite(item.id))
