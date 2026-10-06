@@ -12,7 +12,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, pace_for_settings, scaled_wild_level
+from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, FightView, PartyView, StarterView
@@ -81,11 +81,25 @@ class CogPolicyTests(unittest.TestCase):
         self.assertEqual(scaled_wild_level(50,2),52)
         self.assertEqual(scaled_wild_level(100,2),100)
 
-    def test_spawn_pool_excludes_starters_and_filters_generation(self):
+    def test_spawn_pool_excludes_starters_specials_and_filters_generation(self):
         pool = available_species([1])
         self.assertTrue(pool)
-        self.assertFalse({1, 4, 7} & {item.id for item in pool})
+        self.assertFalse({1,4,7,144,145,146,150,151} & {item.id for item in pool})
+        self.assertTrue({144,145,146,150,151} <= {item.id for item in available_species([1],True)})
         self.assertEqual(available_species([]), [])
+
+    def test_friendly_rarity_is_noticeable_without_being_extreme(self):
+        common=SPECIES[19];rare=SPECIES[147];very_rare=SPECIES[113]
+        self.assertEqual((rarity_tier(common),rarity_tier(rare),rarity_tier(very_rare)),("common","rare","very_rare"))
+        self.assertEqual((spawn_weight(common),spawn_weight(rare),spawn_weight(very_rare)),(100,35,15))
+        self.assertGreater(spawn_weight(very_rare),spawn_weight(very_rare,"challenging"))
+
+    def test_global_policy_clamps_server_pace_and_generations(self):
+        policy={"minimum_threshold":12,"minimum_cooldown":240}
+        self.assertEqual(bounded_pace(5,9,60,policy),(12,12,240))
+        self.assertEqual(bounded_pace(18,30,300,policy),(18,30,300))
+        self.assertEqual(effective_generations([1,2],[1]),[1])
+        self.assertEqual(effective_generations([2],[1]),[1])
 
     def test_expiry_requires_active_state_and_valid_deadline(self):
         now = datetime.now(timezone.utc)
@@ -128,6 +142,10 @@ class CogPolicyTests(unittest.TestCase):
         self.assertNotIn("pokemon heal", names)
         self.assertIn("pokemon center", names)
         self.assertIn("pokemon use potion", names)
+        self.assertNotIn("pokemon set expiry",names)
+        self.assertIn("pokemon set battleexpiry",names)
+        self.assertIn("pokemon set encountertime",names)
+        self.assertIn("pokemon set rarity",names)
         self.assertIn("pokemon use revive", names)
         self.assertIn("pokemon pokedex", names)
         self.assertIn("pokemon gym challenge", names)
