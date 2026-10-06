@@ -143,9 +143,9 @@ class BattleRenderer:
         try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total,trainer_name)
         except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
 
-    async def pokedex_registration(self,pokemon):
+    async def pokedex_registration(self,pokemon,trainer_name):
         data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
-        try:return await self._render(self._pokedex_registration_sync,pokemon,data)
+        try:return await self._render(self._pokedex_registration_sync,pokemon,data,trainer_name)
         except (OSError,ValueError) as exc:raise RenderError("Pokédex registration rendering failed.") from exc
 
     async def trainer_card(self,user_name,conf,style="retro"):
@@ -423,8 +423,8 @@ class BattleRenderer:
         draw.ellipse((275,280,612,341),fill=(183,205,112),outline=RETRO[1],width=2)
         for x in range(280,615,28):draw.line((x,289,x+7,275),fill=RETRO[0],width=3)
 
-    def _pokedex_registration_sync(self,pokemon,data):
-        species=SPECIES[pokemon.species_id];canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
+    def _pokedex_registration_sync(self,pokemon,data,trainer_name):
+        species=SPECIES[pokemon.species_id];trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer";canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
         draw.rectangle((28,25,772,340),fill=RETRO[7],outline=RETRO[0],width=6)
         draw.rectangle((48,48,330,315),fill=RETRO[4],outline=RETRO[1],width=4)
         image=self._retro(self._open(data,(245,225),trim=True,upscale=True));canvas.paste(image,(189-image.width//2,285-image.height),image)
@@ -432,7 +432,7 @@ class BattleRenderer:
         draw.text((370,120),f"No. {species.id:03d}  {species.name}",fill=RETRO[1],font=ImageFont.load_default(size=25))
         draw.text((370,175),"New Pokemon data",fill=RETRO[0],font=ImageFont.load_default(size=22))
         draw.text((370,205),"was added to the Pokedex!",fill=RETRO[0],font=ImageFont.load_default(size=22))
-        draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,f"{species.name} was registered in your Pokedex.",(25,382),width=84,size=19)
+        draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,f"{species.name} was registered in {trainer}'s Pokedex.",(25,382),width=84,size=19)
         return self._save(canvas)
 
     def _trainer_card_sync(self,user_name,conf,pokemon,data,style):

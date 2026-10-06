@@ -114,7 +114,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.34.1";__author__="SickProdigy"
+    __version__="0.34.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -375,11 +375,11 @@ class Pokemon(commands.Cog):
         except RenderError:
             log.exception("Progression rendering failed");return embed,[]
 
-    async def rendered_pokedex_registration(self,pokemon):
-        species=SPECIES[pokemon.species_id]
-        embed=discord.Embed(title=f"{species.name} was registered!",description="New Pokémon data was added to your Pokédex.",color=discord.Color.red())
+    async def rendered_pokedex_registration(self,pokemon,trainer_name):
+        species=SPECIES[pokemon.species_id];trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer"
+        embed=discord.Embed(title=f"{species.name} was registered!",description=f"New Pokémon data was added to {trainer}'s Pokédex.",color=discord.Color.red())
         try:
-            image=await self.renderer.pokedex_registration(pokemon);embed.set_image(url="attachment://pokedex-registration.png")
+            image=await self.renderer.pokedex_registration(pokemon,trainer);embed.set_image(url="attachment://pokedex-registration.png")
             return embed,[discord.File(image,filename="pokedex-registration.png")]
         except RenderError:
             log.exception("Pokédex registration rendering failed");return embed,[]
@@ -652,7 +652,7 @@ class Pokemon(commands.Cog):
             embed,files=await self.rendered_battle(battle)
             await i.response.edit_message(embed=embed,attachments=files,view=None if battle.state!="active" else BattleView(self,eid))
             if first_registration:
-                registration,registration_files=await self.rendered_pokedex_registration(pokemon)
+                registration,registration_files=await self.rendered_pokedex_registration(pokemon,battle.trainer_name)
                 await i.followup.send(embed=registration,files=registration_files)
             if battle.state!="active":await self.send_progression(i,battle)
     async def save_battle(self,b):
