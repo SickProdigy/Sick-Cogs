@@ -85,7 +85,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.19.5";__author__="SickProdigy"
+    __version__="0.19.6";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -716,7 +716,7 @@ class Pokemon(commands.Cog):
         """View your trainer profile and Kanto badge case."""
         conf=await self.config.user(ctx.author).all()
         await ctx.send(embed=trainer_profile_embed(ctx.author,conf,MAX_COLLECTION))
-    @commands.group(name="pokemonset",aliases=["pkmnset"],invoke_without_command=True)
+    @commands.group(name="pokemonset",aliases=["pokeset","pkmnset"],invoke_without_command=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def pokemon_set(self,ctx):

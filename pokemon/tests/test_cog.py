@@ -146,6 +146,7 @@ class CogPolicyTests(unittest.TestCase):
         player_names={command.qualified_name for command in Pokemon.pokemon.walk_commands()}
         self.assertEqual(set(Pokemon.pokemon.aliases),{"pkmn","poke"})
         admin_names={command.qualified_name for command in Pokemon.pokemon_set.walk_commands()}
+        self.assertEqual(set(Pokemon.pokemon_set.aliases),{"pokeset","pkmnset"})
         self.assertNotIn("pokemon heal",player_names)
         self.assertFalse(any(name.startswith("pokemon set") for name in player_names))
         self.assertIn("pokemon center",player_names)
