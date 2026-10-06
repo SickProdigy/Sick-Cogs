@@ -157,6 +157,7 @@ class Card:
     discard_to_library: bool = False
     combat_destroy_nonwall: bool = False
     raging_river: bool = False
+    lich: bool = False
     enchantment_cast_draw: bool = False
     dealt_damage_plus_counter: bool = False
     damaged_creature_death_counter: bool = False
@@ -358,6 +359,7 @@ ALPHA_TAP_ENCHANTMENTS = {
 }
 
 ALPHA_ENCHANTMENTS = {
+    "lea:113": {"lich":True},
     "lea:168": {"raging_river":True},
     "lea:25": {"draw_step_sanctuary":True},
     "lea:100": {"activation_cost":"{B}{B}", "activation_effect":"counter_color", "target_color":"G", "activation_text":"Counter target green spell"},
@@ -829,6 +831,7 @@ for reference in PLAYABLE_ALPHA:
         discard_to_library=ALPHA_ARTIFACTS.get(reference.key,{}).get("discard_to_library",False),
         combat_destroy_nonwall=ALPHA_COMBAT_TRIGGERS.get(reference.key,{}).get("combat_destroy_nonwall",False),
         raging_river=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("raging_river",False),
+        lich=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("lich",False),
         enchantment_cast_draw=ALPHA_OPTIONAL_TRIGGERS.get(reference.key,{}).get("enchantment_cast_draw",False),
         dealt_damage_plus_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("dealt_damage_plus_counter",False),
         damaged_creature_death_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("damaged_creature_death_counter",False),

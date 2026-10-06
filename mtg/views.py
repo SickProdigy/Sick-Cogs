@@ -139,6 +139,14 @@ class WordChangeSelect(discord.ui.Select):
         source,target=self.values[0].split(":",1)
         await self.cog.act(i,self.game_id,lambda g:g.choose_word_change(i.user.id,source,target),"word_change_choice")
 
+class LichSacrificeSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id; trigger=game.stack[-1]; choices=game.lich_sacrifice_choices(trigger); required=trigger.choice_value
+        options=[discord.SelectOption(label=f"{position}. {game.card(permanent.uid).name}"[:100],description="Sacrifice this nontoken permanent",value=str(position)) for position,permanent in choices]
+        super().__init__(placeholder=f"Choose exactly {required} permanents for Lich",min_values=required,max_values=required,options=options,custom_id=f"mtg:{game_id}:lich_sacrifice")
+    async def callback(self,i):
+        await self.cog.act(i,self.game_id,lambda g:g.choose_lich_sacrifices(i.user.id,[int(value) for value in self.values]),"lich_sacrifice")
+
 class CamouflageSelect(discord.ui.Select):
     def __init__(self,cog,game_id):
         self.cog,self.game_id=cog,game_id
@@ -175,7 +183,7 @@ class GameView(discord.ui.View):
             if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase in ("untap","cleanup_discard","camouflage") or game.turn_start_pending_user is not None or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].fork_retarget and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
-                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak","vesuvan_copy","kudzu_move","balance_lands","balance_hand","balance_creatures","raging_river_split","raging_river_attackers"))
+                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak","vesuvan_copy","kudzu_move","balance_lands","balance_hand","balance_creatures","lich_damage","raging_river_split","raging_river_attackers"))
                 item.disabled=not pending or mandatory
                 if pending and action=="pay": item.label=game.trigger_accept_label(game.stack[-1])
                 if pending and action=="decline_trigger" and not game.stack[-1].ability_effect: item.label="Don't pay"
@@ -188,6 +196,9 @@ class GameView(discord.ui.View):
             if game and action=="vault_take": item.disabled=game.turn_start_pending_user is None
             if game and action in ("sanctuary_draw","sanctuary_skip"): item.disabled=not game.sanctuary_draw_pending or game.active_user is None
             if game and action=="concede": item.disabled=game.finished
+        if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="lich_damage":
+            choices=game.lich_sacrifice_choices(game.stack[-1]); required=game.stack[-1].choice_value
+            if choices and len(choices)<=25 and 1<=required<=25: self.add_item(LichSacrificeSelect(self.cog,self.game_id,game))
         if game and game.phase=="camouflage": self.add_item(CamouflageSelect(self.cog,self.game_id))
         if game and game.turn_start_pending_user is not None and game.time_vault_choices(game.turn_start_pending_user): self.add_item(TimeVaultSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") and game.trigger_sacrifice_choices(game.stack[-1]):

@@ -1368,6 +1368,14 @@ class Game:
         if self.stack:
             s=self.stack[-1]; s.passes+=1
             if s.passes==2:
+                if s.ability_effect=="lich_damage":
+                    available=[permanent for permanent in self.player(s.owner).battlefield if not self.is_token(permanent.uid)]
+                    if len(available)>=s.choice_value:
+                        s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
+                    self.stack.pop(); self._resolve(s)
+                    if self.stack: self.stack[-1].passes=0
+                    if not self.finished: self.priority_user=self.active_user
+                    return
                 if s.ability_effect=="graveyard_return" and not self._graveyard_upkeep_return_eligible(s.owner,s.source_uid):
                     self.stack.pop(); self.cards.pop(s.uid,None); self.log.append(f"{self.card(s.source_uid).name} did not return because its graveyard condition was no longer true.")
                     if self.stack: self.stack[-1].passes=0
@@ -1944,13 +1952,13 @@ class Game:
                     self.stack.append(trigger); raise GameError(f"{card.name} no longer has three creature cards above it.")
                 player.graveyard.remove(trigger.source_uid); player.battlefield.append(self._make_permanent(trigger.source_uid,card.key,owner=player.user_id)); result=" and returned it to the battlefield"
             elif trigger.ability_effect in ("cast_life","death_life"):
-                player.life+=1; result=" and gained 1 life"
+                self._gain_life(user,1); result=" and gained 1 life or used Lich's replacement"
             elif trigger.ability_effect=="aura_upkeep_life":
-                player.life+=card.aura_controller_upkeep_life; result=f" and gained {card.aura_controller_upkeep_life} life"
+                self._gain_life(user,card.aura_controller_upkeep_life); result=f" and gained {card.aura_controller_upkeep_life} life"
             elif trigger.ability_effect=="upkeep_vitality":
                 _,source=self.find_permanent(trigger.source_uid)
                 if source is not None and source.vitality_counters:
-                    source.vitality_counters-=1; player.life+=1; result=" and removed a vitality counter to gain 1 life"
+                    source.vitality_counters-=1; self._gain_life(user,1); result=" and removed a vitality counter to gain 1 life"
                 else: result=" but no vitality counter remained"
             elif trigger.ability_effect=="upkeep_untap":
                 _,source=self.find_permanent(trigger.source_uid)
@@ -2065,6 +2073,30 @@ class Game:
             return [(battlefield.index(permanent)+1,permanent) for permanent in battlefield if permanent.uid in self.attackers]
         defender=self.player(self.opponent(self.active_user))
         return [(position,permanent) for position,permanent in enumerate(defender.battlefield,1) if self.is_creature(permanent) and "flying" not in self.current_keywords(permanent)]
+
+    def lich_sacrifice_choices(self,trigger=None):
+        trigger=trigger or (self.stack[-1] if self.stack else None)
+        if trigger is None or trigger.ability_effect!="lich_damage": return []
+        player=self.player(trigger.owner)
+        return [(position,permanent) for position,permanent in enumerate(player.battlefield,1) if not self.is_token(permanent.uid)]
+
+    def choose_lich_sacrifices(self,user,positions):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].ability_effect!="lich_damage" or self.stack[-1].choice_owner!=user: raise GameError("No Lich sacrifice choice is waiting for you.")
+        trigger=self.stack[-1]; choices={position:permanent for position,permanent in self.lich_sacrifice_choices(trigger)}
+        try: selected=[int(position) for position in positions]
+        except (TypeError,ValueError) as error: raise GameError("Choose valid nontoken permanent positions for Lich.") from error
+        if len(selected)!=trigger.choice_value or len(set(selected))!=len(selected) or not set(selected)<=set(choices): raise GameError(f"Choose exactly {trigger.choice_value} distinct nontoken permanents for Lich.")
+        sacrificed=[choices[position] for position in selected]; controller=self.player(user); death_sources=self._death_trigger_sources(); batch=self.next_uid
+        for permanent in sacrificed:
+            self._remember_source_power(permanent); self._remove_from_combat(permanent.uid); controller.battlefield.remove(permanent)
+        self.stack.pop(); self.cards.pop(trigger.uid,None)
+        for permanent in sacrificed: self._dies(controller,permanent,batch,death_sources)
+        if self.stack: self.stack[-1].passes=0
+        trigger.decision_pending=False; self.phase_passes=0
+        if not self.finished:
+            self.priority_user=self.active_user; self._sba(); self._life()
+        self.log.append(f"{user} sacrificed {len(sacrificed)} nontoken permanent(s) to Lich.")
 
     def choose_raging_river(self,user,left_positions=()):
         if self.finished: raise GameError("Game is over.")
@@ -2364,6 +2396,16 @@ class Game:
         graveyard=self.player(spell.owner).graveyard
         if spell.uid not in graveyard: graveyard.append(spell.uid)
 
+    def _has_lich(self,user):
+        return any(self.card(permanent.uid).lich for permanent in self.player(user).battlefield)
+
+    def _gain_life(self,user,amount):
+        amount=max(0,int(amount)); player=self.player(user)
+        if not amount: return 0
+        if self._has_lich(user):
+            self._draw(player,amount); self.log.append(f"{user} drew {amount} card(s) instead of gaining life because of Lich."); return 0
+        player.life+=amount; return amount
+
     def _has_library_of_leng(self,user):
         return any(self.card(permanent.uid).discard_to_library for permanent in self.player(user).battlefield)
 
@@ -2417,7 +2459,7 @@ class Game:
     def _damage_player(self,user,amount,source=None,source_controller=None,source_uid=None,combat=False):
         player=self.player(user); amount=max(0,int(amount)); identity=source_uid if source_uid is not None else getattr(source,"uid",None)
         if amount and identity in player.source_damage_lifegain:
-            player.source_damage_lifegain.remove(identity); player.life+=amount; return 0
+            player.source_damage_lifegain.remove(identity); self._gain_life(user,amount); return 0
         if combat and amount and identity in player.source_damage_caps:
             cap=player.source_damage_caps.pop(identity); amount=min(amount,cap)
         if amount and identity in player.source_damage_prevention:
@@ -2438,7 +2480,10 @@ class Game:
                 if not aura_card.aura_damage_vitality: continue
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=aura_card.key
                 self.stack.append(Spell(user,uid,aura_card.key,f"{user}:{aura.uid}",ability_effect="vitality_counter",source_uid=aura.uid,color_override=aura.color_override,choice_value=dealt,batch_id=trigger_batch))
-            effects={"opponent_damage_discard_random","vitality_counter"}; start=len(self.stack)
+            for lich in [permanent for permanent in player.battlefield if self.card(permanent.uid).lich]:
+                uid=self.next_uid; self.next_uid+=1; self.cards[uid]=self.card(lich.uid).key
+                self.stack.append(Spell(user,uid,self.card(lich.uid).key,str(user),ability_effect="lich_damage",source_uid=lich.uid,color_override=lich.color_override,choice_value=dealt,batch_id=trigger_batch))
+            effects={"opponent_damage_discard_random","vitality_counter","lich_damage"}; start=len(self.stack)
             while start and self.stack[start-1].ability_effect in effects and self.stack[start-1].batch_id==trigger_batch: start-=1
             self.stack[start:]=sorted(self.stack[start:],key=lambda trigger:trigger.owner!=self.active_user)
         return dealt
@@ -2525,6 +2570,8 @@ class Game:
         dies=not permanent.exile_on_death
         token=self.is_token(permanent.uid); owner=self.permanent_owner(permanent,controller)
         if not token: (owner.graveyard if dies else owner.exile).append(permanent.uid)
+        if dies and self.card(permanent.uid).lich:
+            self._finish(self.opponent(controller.user_id),"Lich left the battlefield for the graveyard")
         if dies and self.card(permanent.uid).key=="lea:240":
             marker={"owner":controller.user_id,"source_uid":permanent.uid,"source_timestamp":permanent.layer_timestamp}
             if marker not in self.tomb_cleanup_sources: self.tomb_cleanup_sources.append(marker)
@@ -2596,6 +2643,9 @@ class Game:
         controller,target=target_permanent()
         target_card=self.card(target.uid) if target is not None else None
         if target is not None and effect not in ("self","regenerate","corpse_regenerate","end_step_corpse_counters","empty_battlefield_sacrifice","earthbind_enter","end_step_sacrifice","end_step_destroy","forced_end_step_destroy","berserk_end_step_destroy","end_combat_destroy","end_combat_remove_power_counter","no_land_sacrifice","dealt_damage_counter","damaged_creature_death_counter","add_power_counters","redirect_one_to_owner","cap_unblocked_damage","hydra_prevent","hydra_counter") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
+        if effect=="lich_damage":
+            if len(self.lich_sacrifice_choices(s))<s.choice_value: self._finish(self.opponent(s.owner),"could not sacrifice enough permanents to Lich")
+            self.cards.pop(s.uid,None); self.log.append("Lich damage trigger resolved."); return
         if effect=="raging_river":
             s.ability_effect="raging_river_split"; s.decision_pending=True; s.choice_owner=self.opponent(self.active_user); s.passes=0; self.stack.append(s); self.priority_user=s.choice_owner; self.log.append(f"{s.choice_owner} must divide their nonflying creatures for Raging River."); return
         if effect=="vesuvan_copy":
@@ -2680,7 +2730,7 @@ class Game:
         elif effect=="tap_damage":
             self._damage_player(int(s.target),card.land_tap_damage or card.aura_tap_damage,source_uid=s.source_uid)
         elif effect=="tap_life":
-            self.player(int(s.target)).life+=card.opponent_forest_tap_life
+            self._gain_life(int(s.target),card.opponent_forest_tap_life)
         elif effect=="land_event_damage":
             self._damage_player(int(s.target),card.land_enter_damage or card.land_grave_damage or card.extra_land_damage,source_uid=s.source_uid)
         elif effect=="creature_bond_damage":
@@ -2842,6 +2892,8 @@ class Game:
             if c.aura_enter_flying_damage and "flying" in self.current_keywords(target):
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=c.key
                 self.stack.append(Spell(s.owner,uid,c.key,f"{user}:{target.uid}",ability_effect="earthbind_enter",source_uid=aura.uid,color_override=aura.color_override))
+        elif c.lich:
+            permanent=self._make_permanent(s.uid,c.key,owner=s.owner,color_override=s.color_override); p.battlefield.append(permanent); p.life-=max(0,p.life)
         elif c.enters_copy_types:
             target=self._stable_target_permanent(s.target); copy_key=""; added_types=[]; copy_colors=[]; copy_upkeep=False
             if target is not None and any(self.has_current_type(target,kind) for kind in c.enters_copy_types):
@@ -2850,6 +2902,7 @@ class Game:
             permanent=self._make_permanent(s.uid,c.key,owner=s.owner,copy_key=copy_key,copy_added_types=added_types,copy_colors=copy_colors,copy_upkeep_creature=copy_upkeep,color_override=s.color_override)
             effective=(CARDS.get(copy_key) or TOKENS.get(copy_key)) if copy_key else c; permanent.tapped=effective.enters_tapped
             p.battlefield.append(permanent)
+            if effective.lich: p.life-=max(0,p.life)
         elif c.kind in ("Creature","Artifact","Enchantment"):
             counters=s.x_value if c.enters_x_plus_counters else 0
             p.battlefield.append(self._make_permanent(s.uid,c.key,owner=s.owner,tapped=c.enters_tapped,color_override=s.color_override,plus_one_counters=counters))
@@ -2891,7 +2944,7 @@ class Game:
             self._finish_spell(s)
         elif c.effect=="draw": self._draw(p,c.amount); self._finish_spell(s)
         elif c.effect in ("draw_target","draw_target_x"): self._draw(self.player(int(s.target)),s.x_value if c.effect=="draw_target_x" else c.amount); self._finish_spell(s)
-        elif c.effect=="life_target_x": self.player(int(s.target)).life+=s.x_value; self._finish_spell(s)
+        elif c.effect=="life_target_x": self._gain_life(int(s.target),s.x_value); self._finish_spell(s)
         elif c.effect=="discard_random_x":
             target_player=self.player(int(s.target)); self._begin_effect_discard(s,[(target_player.user_id,self._random_discard_uids(target_player,s.x_value))],"discard_random_spell")
         elif c.effect=="wheel_seven":
@@ -2902,10 +2955,10 @@ class Game:
                 player.library.extend(player.hand); player.library.extend(player.graveyard); player.hand=[]; player.graveyard=[]
                 random.SystemRandom().shuffle(player.library)
             self._draw_each(7); self._finish_spell(s)
-        elif c.effect=="life": p.life+=c.amount; self._finish_spell(s)
+        elif c.effect=="life": self._gain_life(s.owner,c.amount); self._finish_spell(s)
         elif c.effect=="healing_salve":
             parts=s.target.split(":"); target_player=self.player(int(parts[1]))
-            if parts[0]=="life": target_player.life+=c.amount
+            if parts[0]=="life": self._gain_life(target_player.user_id,c.amount)
             elif len(parts)==2: target_player.damage_prevention+=c.amount
             else:
                 target=next((permanent for permanent in target_player.battlefield if permanent.uid==int(parts[2])),None)
@@ -2917,7 +2970,7 @@ class Game:
             user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
             if target is None or user!=s.owner or not self.is_creature(target):
                 self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
-            amount=p.damage_taken_this_turn; p.life+=amount; self._damage_permanent(target,amount,c,self.spell_colors(s),source_uid=s.uid); self._finish_spell(s)
+            amount=p.damage_taken_this_turn; self._gain_life(s.owner,amount); self._damage_permanent(target,amount,c,self.spell_colors(s),source_uid=s.uid); self._finish_spell(s)
         elif c.effect=="guardian_angel":
             target=self._stable_target_permanent(s.target)
             if ":" in s.target and (target is None or not self.is_creature(target)):
@@ -2989,7 +3042,7 @@ class Game:
                 if c.effect=="damage_x_exile": target.exile_on_death=True; target.cant_regenerate=True
             else:
                 target_player=self.player(int(s.target or self.opponent(s.owner))); life_cap=max(0,target_player.life); dealt=self._damage_player(target_player.user_id,amount,source_uid=s.uid)
-            if c.effect=="drain_life_x": p.life+=min(dealt,life_cap)
+            if c.effect=="drain_life_x": self._gain_life(s.owner,min(dealt,life_cap))
             self._damage_player(s.owner,c.self_damage,source_uid=s.uid); self._finish_spell(s)
         elif c.effect in ("regenerate_target","grant_keyword","destroy_wall"):
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
@@ -3075,7 +3128,7 @@ class Game:
                 self._remember_source_power(target); self._remove_from_combat(target.uid); owner=self.permanent_owner(target,controller); controller.battlefield.remove(target)
                 if self.is_token(target.uid): self.cards.pop(target.uid,None)
                 else: owner.exile.append(target.uid)
-                controller.life+=life_gain
+                self._gain_life(controller.user_id,life_gain)
             else: self._destroy(controller,target,allow_regeneration=False)
             self._finish_spell(s)
         elif c.effect in ("earthquake_x","hurricane_x"):
@@ -3180,7 +3233,7 @@ class Game:
                 self._dies(p,permanent,trigger_batch,death_sources)
                 self.log.append(f"{self.card(permanent.uid).name} was sacrificed by its end-step trigger.")
     def _life(self):
-        losers=[p.user_id for p in self.players.values() if p.life<=0]
+        losers=[p.user_id for p in self.players.values() if p.life<=0 and not self._has_lich(p.user_id)]
         if len(losers)==2: self._finish(None,"both players reached zero life")
         elif losers: self._finish(self.opponent(losers[0]),"zero life")
     def concede(self,user):
@@ -3199,7 +3252,8 @@ class Game:
         if self.sanctuary_draw_pending:
             raise GameError("The active player must choose whether to skip their draw for Island Sanctuary first.")
         if self.stack and self.stack[-1].decision_pending:
-            if self.stack[-1].ability_effect.startswith("raging_river_"): message="The pending Raging River division must be completed first."
+            if self.stack[-1].ability_effect=="lich_damage": message="The damaged player must choose Lich sacrifices first."
+            elif self.stack[-1].ability_effect.startswith("raging_river_"): message="The pending Raging River division must be completed first."
             elif self.stack[-1].is_copy and self.stack[-1].fork_retarget: message="The Fork controller must choose targets for the copied spell first."
             elif self.stack[-1].ability_effect.startswith("balance_"): message="The pending Balance choice must be completed first."
             elif self.stack[-1].ability_effect=="vesuvan_copy": message="The pending Vesuvan target must be chosen first." if self.stack[-1].choice_value==0 else "The pending Vesuvan copy decision must be completed first."

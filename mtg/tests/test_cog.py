@@ -800,6 +800,15 @@ class ForkRenderingTests(unittest.TestCase):
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Lightning Bolt copy",rendered); self.assertIn("must choose new targets or keep",rendered); self.assertIn("[R]",rendered)
         view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":fork_target")); self.assertEqual([option.value for option in select.options],["keep"]); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled)
 
+class LichRenderingTests(unittest.TestCase):
+    def test_pending_sacrifices_have_exact_select_and_disable_other_actions(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id))); game=Game(1,[10,20],1); game.player(10).battlefield=[]
+        for key in ("lea:113","forest","mountain"):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(10).battlefield.append(Permanent(uid,key,owner=10,sick=False))
+        trigger=game.next_uid; game.next_uid+=1; game.cards[trigger]="lea:113"; game.stack=[spell_type(10,trigger,"lea:113",ability_effect="lich_damage",choice_value=2,choice_owner=10,decision_pending=True)]; game.priority_user=10; cog.games={1:game}
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("must sacrifice 2 nontoken permanents",rendered)
+        view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":lich_sacrifice")); self.assertEqual((select.min_values,select.max_values),(2,2)); self.assertEqual(len(select.options),3); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pay")).disabled)
+
 class CamouflageRenderingTests(unittest.TestCase):
     def test_pending_piles_have_public_prompt_no_blocks_control_and_disabled_pass(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id))); game=Game(1,[10,20],1); game.phase="camouflage"; game.camouflage_pending=True; game.active_index=0; game.priority_user=20; game.attackers=[99,100]; game.cards.update({99:"bear",100:"giant"}); cog.games={1:game}

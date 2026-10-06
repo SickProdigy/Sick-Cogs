@@ -4265,6 +4265,33 @@ class LibraryOfLengTests(unittest.TestCase):
         game.choose_cleanup_discard(10,[1]); self.assertEqual(game.phase,"cleanup_discard"); game.choose_cleanup_discard(10,[1]); self.assertNotEqual(game.phase,"cleanup_discard"); self.assertTrue(set(cards[:2])<=set(game.player(10).graveyard))
         exempt=ready(); exempt.player(10).hand=[]; exempt.player(10).battlefield=[]; [self.add(exempt,10,"bear","hand") for _ in range(9)]; self.leng(exempt,10); exempt.phase="ending"; exempt._advance(); self.assertNotEqual(exempt.phase,"cleanup_discard"); self.assertEqual(len(exempt.player(10).hand),9)
 
+class AlphaLichTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="battlefield": game.player(user).battlefield.append(Permanent(uid,key,owner=user,sick=False))
+        else: getattr(game.player(user),zone).append(uid)
+        return uid
+
+    def test_entry_zero_life_and_life_gain_becomes_draw(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(10).hand=[]; game.player(10).library=[]; lich=self.add(game,10,"lea:113","graveyard"); drawn=[self.add(game,10,key,"library") for key in ("bear","giant")]
+        game.player(10).graveyard.remove(lich); game.player(10).life=13; game._resolve(Spell(10,lich,"lea:113"))
+        self.assertEqual(game.player(10).life,0); self.assertFalse(game.finished); self.assertTrue(game._has_lich(10))
+        restored=Game.from_raw(game.to_raw()); restored._gain_life(10,2)
+        self.assertEqual(restored.player(10).life,0); self.assertEqual(set(restored.player(10).hand),set(drawn)); self.assertFalse(restored.finished)
+
+    def test_damage_requires_exact_nontoken_sacrifices_and_persists(self):
+        game=ready(); game.player(10).battlefield=[]; lich=self.add(game,10,"lea:113"); first=self.add(game,10,"forest"); second=self.add(game,10,"mountain"); token=self.add(game,10,"token:wasp")
+        game.player(10).life=0; game._damage_player(10,2,source_uid=999); self.assertEqual(game.player(10).life,-2); game.pass_priority(10); game.pass_priority(20)
+        restored=Game.from_raw(game.to_raw()); self.assertTrue(restored.stack[-1].decision_pending); self.assertEqual(restored.stack[-1].choice_value,2); self.assertNotIn(token,[permanent.uid for _,permanent in restored.lich_sacrifice_choices()])
+        with self.assertRaisesRegex(GameError,"exactly 2"): restored.choose_lich_sacrifices(10,[2])
+        restored.choose_lich_sacrifices(10,[2,3]); self.assertFalse(restored.finished); self.assertTrue(restored._has_lich(10)); self.assertTrue({first,second}<=set(restored.player(10).graveyard))
+
+    def test_insufficient_permanents_or_losing_lich_ends_game(self):
+        short=ready(); short.player(10).battlefield=[]; self.add(short,10,"lea:113"); short.player(10).life=0; short._damage_player(10,2); short.pass_priority(10); short.pass_priority(20)
+        self.assertTrue(short.finished); self.assertEqual(short.winner,20); self.assertIn("could not sacrifice",short.finished_reason)
+        sacrifice=ready(); sacrifice.player(10).battlefield=[]; self.add(sacrifice,10,"lea:113"); self.add(sacrifice,10,"forest"); sacrifice.player(10).life=0; sacrifice._damage_player(10,1); sacrifice.pass_priority(10); sacrifice.pass_priority(20); sacrifice.choose_lich_sacrifices(10,[1])
+        self.assertTrue(sacrifice.finished); self.assertEqual(sacrifice.winner,20); self.assertIn("graveyard",sacrifice.finished_reason)
+
 class AlphaCamouflageTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

@@ -825,6 +825,12 @@ class SoloAITests(unittest.TestCase):
         advance_solo(tome); self.assertTrue(source.tapped); self.assertEqual(tome.stack[-1].ability_effect,"draw_self")
         tome.pass_priority(HUMAN); advance_solo(tome); self.assertEqual(len(tome.player(AI).hand),before+1)
 
+    def test_ai_completes_lich_sacrifice_with_low_value_nonlich_permanents(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.phase="precombat_main"; game.player(AI).battlefield=[]; lich=self.add(game,AI,"lea:113"); forest=self.add(game,AI,"forest"); giant=self.add(game,AI,"giant")
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:113"; game.stack=[spell_type(AI,uid,"lea:113",ability_effect="lich_damage",choice_value=1,choice_owner=AI,decision_pending=True)]; game.priority_user=AI
+        advance_solo(game); self.assertIn(forest.uid,game.player(AI).graveyard); self.assertIn(lich,game.player(AI).battlefield); self.assertIn(giant,game.player(AI).battlefield); self.assertTrue(any(event["action"]=="ai_lich_sacrifice" for event in game.history))
+
     def test_ai_targets_berserk_only_at_its_own_attacker_before_damage(self):
         game=solo(order=(AI,HUMAN)); attacker=self.add(game,AI,"giant"); self.add(game,AI,"bear"); game.active_index=0; game.attackers=[attacker.uid]; game.phase="after_blockers"; game.priority_user=AI
         self.assertEqual(_target(game,AI,CARDS["lea:185"]),f"{AI}:1")

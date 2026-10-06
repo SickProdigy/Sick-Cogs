@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.117.0"
+    __version__="0.118.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -246,7 +246,8 @@ class MTG(commands.Cog):
                 if item.ability_effect=="prevent_source_damage" and item.target:
                     source_uid=int(item.target.split(":")[1]); label+=f" (source: {g.card(source_uid).name if source_uid in g.cards else source_uid})"
                 if item.decision_pending:
-                    if item.ability_effect=="raging_river_split": label+=f" ({item.choice_owner} must divide nonflying defenders left/right)"
+                    if item.ability_effect=="lich_damage": label+=f" ({item.choice_owner} must sacrifice {item.choice_value} nontoken permanents)"
+                    elif item.ability_effect=="raging_river_split": label+=f" ({item.choice_owner} must divide nonflying defenders left/right)"
                     elif item.ability_effect=="raging_river_attackers": label+=f" ({item.choice_owner} must divide attackers left/right)"
                     elif item.is_copy and item.fork_retarget: label+=f" ({item.choice_owner} must choose new targets or keep the originals)"
                     elif not item.ability_effect and g.card(item.uid).effect=="search_library": label+=" (controller is searching their library)"
