@@ -291,6 +291,16 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.activate_ability(10,1,"20"); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Deals 1 damage to any target",rendered); self.assertIn("Rod of Ruin ability",rendered)
 
+    async def test_public_embed_shows_disk_and_pending_mass_destruction(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        disk=game.next_uid; game.next_uid+=1; game.cards[disk]="lea:266"
+        land=game.next_uid; game.next_uid+=1; game.cards[land]="plains"
+        game.player(10).battlefield=[permanent_type(disk,"lea:266",sick=False),permanent_type(land,"plains",sick=False)]
+        game.phase="precombat_main"; game.priority_user=10; game.activate_ability(10,1)
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Enters tapped",rendered); self.assertIn("Destroy all artifacts, creatures, and enchantments",rendered); self.assertIn("Nevinyrral's Disk ability",rendered)
+
     async def test_public_embed_labels_activated_abilities_on_stack(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

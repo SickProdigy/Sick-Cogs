@@ -31,6 +31,7 @@ class Card:
     mana_activation_cost: str = ""
     sacrifice_for_mana: bool = False
     skip_untap: bool = False
+    enters_tapped: bool = False
     target_nonartifact: bool = False
     target_nonblack: bool = False
     target_color: str = ""
@@ -102,6 +103,7 @@ class Card:
     @property
     def ability_text(self):
         abilities=[self.keyword_text] if self.keyword_text else []
+        if self.enters_tapped: abilities.append("Enters tapped")
         if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
         if self.activation_cost or self.activation_effect:
             effects=[]
@@ -232,6 +234,7 @@ ALPHA_ARTIFACTS = {
     "lea:263": {"produces":("W",)},
     "lea:264": {"produces":("R",)},
     "lea:265": {"produces":("U",)},
+    "lea:266": {"enters_tapped":True, "activation_cost":"{1}", "activation_tap":True, "activation_effect":"destroy_all_nonland", "activation_text":"Destroy all artifacts, creatures, and enchantments"},
     "lea:269": {"produces":("C",), "mana_amount":2},
 }
 
@@ -415,6 +418,7 @@ for reference in PLAYABLE_ALPHA:
         activation_text=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_text",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_text",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_text",""))),
         activation_amount=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_amount",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_amount",0)),
         activation_self_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_self_damage",0),
+        enters_tapped=ALPHA_ARTIFACTS.get(reference.key,{}).get("enters_tapped",False),
         conditional_swamp_bonus=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("conditional_swamp_bonus",False),
         lord_subtype=ALPHA_LORDS.get(reference.key,{}).get("lord_subtype",""),
         lord_power=ALPHA_LORDS.get(reference.key,{}).get("lord_power",0),

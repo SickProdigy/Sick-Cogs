@@ -349,7 +349,7 @@ class Game:
             spell=self._target_stack(target)
             if card.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {card.target_color}.")
             return f"S:{spell.uid}"
-        if card.activation_effect=="draw_self": return str(user)
+        if card.activation_effect in ("draw_self","destroy_all_nonland"): return str(user)
         if card.activation_effect=="untap_self": return f"{user}:{source.uid}"
         if card.activation_attached:
             controller,attached=self.find_permanent(source.attached_to)
@@ -821,6 +821,11 @@ class Game:
         elif effect=="untap_self":
             if target is None: fizzle("its source was gone"); return
             target.tapped=False
+        elif effect=="destroy_all_nonland":
+            for player in self.players.values():
+                for permanent in list(player.battlefield):
+                    if any(self.card(permanent.uid).has_type(kind) for kind in ("Artifact","Creature","Enchantment")):
+                        self._destroy(player,permanent)
         elif effect=="damage_any":
             if ":" in (s.target or ""):
                 if target_card is None or not target_card.creature: fizzle("its target was gone or illegal"); return
@@ -859,7 +864,7 @@ class Game:
             if target is None or not self._aura_can_attach(c,target,colors=self.spell_colors(s)):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             p.battlefield.append(Permanent(s.uid,c.key,sick=False,attached_to=target.uid,color_override=s.color_override))
-        elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key,color_override=s.color_override))
+        elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key,tapped=c.enters_tapped,color_override=s.color_override))
         elif c.effect in ("counter_spell","elemental_blast"):
             if s.target.startswith("S:"):
                 target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid),None)

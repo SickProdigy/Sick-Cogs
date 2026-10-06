@@ -483,6 +483,9 @@ class SoloAITests(unittest.TestCase):
         icy=solo(); self.add(icy,HUMAN,"forest"); self.add(icy,HUMAN,"giant")
         self.assertEqual(_activation_target(icy,AI,cards["lea:248"]),f"{HUMAN}:2")
         rod=solo(); self.assertEqual(_activation_target(rod,AI,cards["lea:268"]),str(HUMAN))
+        disk=solo(); source=self.add(disk,AI,"lea:266"); self.add(disk,HUMAN,"giant")
+        self.assertEqual(_activation_target(disk,AI,cards["lea:266"],source.uid),str(AI))
+        self.add(disk,AI,"giant"); self.assertIsNone(_activation_target(disk,AI,cards["lea:266"],source.uid))
 
         tome=solo(order=(AI,HUMAN)); tome.player(HUMAN).kept=True; tome.player(AI).kept=True; tome.player(AI).hand=[]
         source=self.add(tome,AI,"lea:254"); [self.add(tome,AI,"forest") for _ in range(4)]

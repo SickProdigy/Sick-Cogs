@@ -287,6 +287,15 @@ def _activation_target(game,user,card,source_uid=None):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
         return None
     if card.activation_effect=="draw_self": return str(user)
+    if card.activation_effect=="destroy_all_nonland":
+        def board_value(player):
+            return sum(
+                1+max(target.cost,sum(game.current_stats(permanent)) if target.creature else 0)
+                for permanent in player.battlefield
+                for target in (game.card(permanent.uid),)
+                if any(target.has_type(kind) for kind in ("Artifact","Creature","Enchantment"))
+            )
+        return str(user) if board_value(game.player(opponent))>board_value(game.player(user)) else None
     if card.activation_effect=="damage_any":
         if card.activation_self_damage and game.player(user).life<=card.activation_self_damage: return None
         return str(opponent)

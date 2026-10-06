@@ -1817,6 +1817,31 @@ class AlphaReusableArtifactTests(unittest.TestCase):
         empty.activate_ability(10,1); self.resolve_top(empty); self.assertTrue(empty.finished); self.assertEqual(empty.winner,20)
 
 
+    def test_nevinyrrals_disk_enters_tapped_after_casting(self):
+        game=ready(); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:266"; game.player(10).hand.insert(0,uid)
+        [self.add(game,10,"plains") for _ in range(4)]
+        game.play(10,1); self.resolve_top(game)
+        disk=next(permanent for permanent in game.player(10).battlefield if permanent.uid==uid)
+        position=game.player(10).battlefield.index(disk)+1
+        self.assertTrue(disk.tapped); self.assertFalse(game.can_activate(10,position))
+
+    def test_nevinyrrals_disk_destroys_nonlands_allows_regeneration_and_persists(self):
+        game=ready(); disk=self.add(game,10,"lea:266"); land=self.add(game,10,"plains"); survivor=self.add(game,10,"bear"); survivor.regeneration_shields=1
+        enemy_creature=self.add(game,20,"giant"); enemy_artifact=self.add(game,20,"lea:261"); enemy_enchantment=self.add(game,20,"lea:93"); enemy_land=self.add(game,20,"forest")
+        game.activate_ability(10,1); self.assertTrue(disk.tapped); self.assertTrue(land.tapped); self.assertEqual(game.stack[-1].ability_effect,"destroy_all_nonland")
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.to_raw(),game.to_raw()); self.resolve_top(restored)
+        owner=restored.player(10); opponent=restored.player(20)
+        self.assertEqual([restored.card(x.uid).key for x in owner.battlefield],["plains","bear"])
+        saved=owner.battlefield[1]; self.assertTrue(saved.tapped); self.assertEqual(saved.regeneration_shields,0)
+        self.assertEqual([restored.card(x.uid).key for x in opponent.battlefield],["forest"])
+        self.assertTrue({enemy_creature.uid,enemy_artifact.uid,enemy_enchantment.uid}<=set(opponent.graveyard)); self.assertIn(disk.uid,owner.graveyard); self.assertIn(enemy_land.uid,[x.uid for x in opponent.battlefield])
+
+    def test_nevinyrrals_disk_ability_survives_source_removal(self):
+        game=ready(); disk=self.add(game,10,"lea:266"); self.add(game,10,"plains"); victim=self.add(game,20,"bear")
+        game.activate_ability(10,1); game.player(10).battlefield.remove(disk); game.player(10).graveyard.append(disk.uid)
+        self.resolve_top(game); self.assertIn(victim.uid,game.player(20).graveyard)
+
+
 class CombatTests(unittest.TestCase):
     def test_unblocked_damage_and_lethal_creatures(self):
         g=ready(); a=g.players[10]; d=g.players[20]
