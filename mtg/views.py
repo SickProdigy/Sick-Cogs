@@ -68,6 +68,8 @@ class GameView(discord.ui.View):
                 if pending and action=="decline_trigger" and not game.stack[-1].ability_effect: item.label="Don't pay"
             if game and action=="search":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
+            if game and action=="private_hand":
+                item.disabled=not bool(game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand"))
             if game and action=="concede": item.disabled=game.finished
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") and game.trigger_sacrifice_choices(game.stack[-1]):
             self.add_item(SacrificeSelect(self.cog,self.game_id,game,game.stack[-1]))
@@ -88,6 +90,10 @@ class GameView(discord.ui.View):
     async def search(self,i,b):
         await i.response.defer(ephemeral=True,thinking=True)
         await self.cog.send_library_search(i,self.game_id,0,editing=False)
+    @discord.ui.button(label="Private hand choice",style=discord.ButtonStyle.secondary,custom_id="private_hand")
+    async def private_hand(self,i,b):
+        await i.response.defer(ephemeral=True,thinking=True)
+        await self.cog.send_private_hand_decision(i,self.game_id,0,editing=False)
     @discord.ui.button(label="Keep hand",style=discord.ButtonStyle.success,custom_id="keep")
     async def keep(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,True),"keep")
     @discord.ui.button(label="Mulligan",style=discord.ButtonStyle.secondary,custom_id="mulligan")
@@ -143,6 +149,35 @@ class LibrarySearchView(discord.ui.View):
     @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=1)
     async def next(self,interaction,button):
         await interaction.response.defer(); await self.cog.send_library_search(interaction,self.game_id,self.page+1,editing=True)
+
+class PrivateHandSelect(discord.ui.Select):
+    def __init__(self,browser,entries):
+        self.browser=browser; start=browser.page*browser.page_size
+        visible=entries[start:start+browser.page_size]
+        options=[discord.SelectOption(label=f"{position}. {card.name}"[:100],description=f"{card.kind} - {card.mana_cost or 'no mana cost'}"[:100],value=str(position)) for position,card in visible]
+        super().__init__(placeholder="Choose a card to discard",min_values=1,max_values=1,options=options,row=0)
+    async def callback(self,interaction):
+        await self.browser.cog.complete_private_hand_interaction(interaction,self.browser.game_id,int(self.values[0]))
+
+class PrivateHandDecisionView(discord.ui.View):
+    page_size=25
+    def __init__(self,cog,game_id,user_id,page,pages,effect,entries):
+        super().__init__(timeout=300); self.cog,self.game_id,self.user_id,self.page,self.pages,self.effect=cog,game_id,user_id,page,pages,effect
+        if effect=="discard_choice": self.add_item(PrivateHandSelect(self,entries))
+        self.previous.disabled=page<=0; self.next.disabled=page>=pages-1
+        self.done.disabled=effect!="look_hand"
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id: return True
+        await interaction.response.send_message("This private hand decision belongs to another player.",ephemeral=True); return False
+    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary,row=1)
+    async def previous(self,interaction,button):
+        await interaction.response.defer(); await self.cog.send_private_hand_decision(interaction,self.game_id,self.page-1,editing=True)
+    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=1)
+    async def next(self,interaction,button):
+        await interaction.response.defer(); await self.cog.send_private_hand_decision(interaction,self.game_id,self.page+1,editing=True)
+    @discord.ui.button(label="Done viewing",style=discord.ButtonStyle.success,row=1)
+    async def done(self,interaction,button):
+        await self.cog.complete_private_hand_interaction(interaction,self.game_id,None)
 
 class CatalogSelect(discord.ui.Select):
     def __init__(self, browser):

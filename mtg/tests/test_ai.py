@@ -884,5 +884,18 @@ class SoloAITests(unittest.TestCase):
         sink.stack=[target,pending]; sink.priority_user=AI; sink.phase="precombat_main"; advance_solo(sink)
         self.assertEqual([item.uid for item in sink.stack],[target_uid]); self.assertTrue(any(event["action"]=="ai_power_sink_pay" for event in sink.history))
 
+
+    def test_ai_targets_and_completes_private_hand_artifacts(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        target_game=solo(); target_game.player(HUMAN).hand=[]; self.add(target_game,HUMAN,"giant","hand")
+        self.assertEqual(_activation_target(target_game,AI,CARDS["lea:242"]),str(HUMAN)); self.assertEqual(_activation_target(target_game,AI,CARDS["lea:245"]),str(HUMAN))
+
+        discard=solo(order=(AI,HUMAN)); discard.player(AI).kept=discard.player(HUMAN).kept=True; discard.player(AI).hand=[]; cheap=self.add(discard,AI,"bear","hand"); costly=self.add(discard,AI,"giant","hand")
+        uid=discard.next_uid; discard.next_uid+=1; discard.cards[uid]="lea:242"; discard.stack=[spell_type(HUMAN,uid,"lea:242",str(AI),ability_effect="discard_choice",decision_pending=True,choice_owner=AI)]; discard.priority_user=AI; discard.phase="precombat_main"
+        advance_solo(discard); self.assertIn(cheap,discard.player(AI).graveyard); self.assertIn(costly,discard.player(AI).hand); self.assertTrue(any(event["action"]=="ai_private_discard" for event in discard.history))
+
+        look=solo(order=(AI,HUMAN)); look.player(AI).kept=look.player(HUMAN).kept=True; uid=look.next_uid; look.next_uid+=1; look.cards[uid]="lea:245"; look.stack=[spell_type(AI,uid,"lea:245",str(HUMAN),ability_effect="look_hand",decision_pending=True,choice_owner=AI)]; look.priority_user=AI; look.phase="precombat_main"
+        before=list(look.player(HUMAN).hand); advance_solo(look); self.assertEqual(look.player(HUMAN).hand,before); self.assertTrue(any(event["action"]=="ai_private_hand_view" for event in look.history))
+
 if __name__ == "__main__":
     unittest.main()

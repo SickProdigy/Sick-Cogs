@@ -642,6 +642,10 @@ class Game:
             if card.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {card.target_color}.")
             return f"S:{spell.uid}"
         if card.activation_effect in ("draw_self","destroy_all_nonland","create_token","prevent_player_damage","damage_all"): return str(user)
+        if card.activation_effect in ("discard_choice","look_hand"):
+            try: target_user=int(target)
+            except (TypeError,ValueError) as error: raise GameError("Target must be a player ID.") from error
+            self.player(target_user); return str(target_user)
         if card.activation_effect in ("untap_self","animate_self","add_power_counters"): return f"{user}:{source.uid}"
         if card.activation_attached:
             controller,attached=self.find_permanent(source.attached_to)
@@ -725,7 +729,8 @@ class Game:
             permanent.sacrifice_at_end_step=True
         ability_uid=self.next_uid; self.next_uid+=1; self.cards[ability_uid]=card.key
         stored_choice=permanent.layer_timestamp if activation_effect=="set_land_forest" else choice_value
-        self.stack.append(Spell(user,ability_uid,card.key,stable_target,x_value=x_value,ability_effect=activation_effect or "self",source_uid=permanent.uid,color_override=permanent.color_override,source_power=self.current_stats(permanent)[0],choice_value=stored_choice)); self.stack.extend(pending_triggers)
+        choice_owner=int(stable_target) if activation_effect=="discard_choice" else (user if activation_effect=="look_hand" else None)
+        self.stack.append(Spell(user,ability_uid,card.key,stable_target,x_value=x_value,ability_effect=activation_effect or "self",source_uid=permanent.uid,color_override=permanent.color_override,source_power=self.current_stats(permanent)[0],choice_value=stored_choice,choice_owner=choice_owner)); self.stack.extend(pending_triggers)
         self._sba(); self._life()
         self.phase_passes=0
         for item in self.stack[:-1]: item.passes=0
@@ -1012,6 +1017,8 @@ class Game:
                     if self.stack: self.stack[-1].passes=0
                     if not self.finished: self.priority_user=self.active_user
                     return
+                if s.ability_effect in ("discard_choice","look_hand") and (s.ability_effect=="look_hand" or self.player(int(s.target)).hand):
+                    s.decision_pending=True; self.priority_user=s.choice_owner; return
                 if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","aura_upkeep_untap","aura_upkeep_life","upkeep_cost","graveyard_return","upkeep_sacrifice"):
                     s.decision_pending=True; self.priority_user=s.choice_owner if s.choice_owner is not None else s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="search_library" and self.player(s.owner).library:
@@ -1045,6 +1052,30 @@ class Game:
         if self.stack: self.stack[-1].passes=0
         self.phase_passes=0; self.priority_user=self.active_user
         self.log.append(f"{user} searched their library with {self.card(spell.uid).name}, put a card into their hand, then shuffled.")
+
+    def private_hand_decision(self,user):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect not in ("discard_choice","look_hand"):
+            raise GameError("You do not have a private hand decision to complete.")
+        item=self.stack[-1]; target=self.player(int(item.target))
+        return item,[(position,self.card(uid)) for position,uid in enumerate(target.hand,1)]
+
+    def choose_private_hand(self,user,position=None):
+        item,choices=self.private_hand_decision(user); card=self.card(item.uid)
+        if item.ability_effect=="discard_choice":
+            try: position=int(position)
+            except (TypeError,ValueError) as error: raise GameError("Choose a valid private hand position.") from error
+            if not 1<=position<=len(choices): raise GameError("Choose a valid private hand position.")
+            target=self.player(int(item.target)); chosen=target.hand.pop(position-1); target.graveyard.append(chosen)
+            result=f"{target.user_id} discarded {self.card(chosen).name} for {card.name}."
+        else:
+            if position is not None: raise GameError("Glasses of Urza only needs confirmation after viewing the hand.")
+            result=f"{user} looked at {self.player(int(item.target)).user_id}'s hand with {card.name}."
+        self.stack.pop(); self.cards.pop(item.uid,None)
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0
+        if not self.finished: self.priority_user=self.active_user
+        self.log.append(result); self._sba(); self._life()
 
     def _power_sink_target(self,spell):
         if not spell.target or not spell.target.startswith("S:"): return None
@@ -1564,6 +1595,8 @@ class Game:
             self._discard_random(self.player(int(s.target)),1)
         elif effect=="draw_self":
             self._draw(self.player(s.owner),1)
+        elif effect in ("discard_choice","look_hand"):
+            pass
         elif effect=="untap_self":
             if target is None: fizzle("its source was gone"); return
             target.tapped=False

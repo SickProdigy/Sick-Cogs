@@ -3635,4 +3635,50 @@ class AlphaManaControlSpellTests(unittest.TestCase):
         with self.assertRaises(GameError): game.choose_power_sink(20,True)
         self.assertEqual([item.uid for item in game.stack],[target.uid,sink.uid]); self.assertNotIn(sink.uid,game.player(10).graveyard)
 
+
+class AlphaPrivateHandArtifactTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.append(uid); return uid
+        permanent=Permanent(uid,key,owner=user,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_to_decision(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_scepter_uses_response_window_persists_private_choice_and_discards_publicly(self):
+        game=ready(); game.player(20).hand=[]; bear=self.add(game,20,"bear","hand"); giant=self.add(game,20,"giant","hand")
+        source=self.add(game,10,"lea:242"); game.player(10).mana_pool={"C":3}; game.phase="precombat_main"; game.priority_user=10
+        game.activate_ability(10,game.player(10).battlefield.index(source)+1,"20"); ability=game.stack[-1]
+        self.assertEqual((ability.choice_owner,ability.target,ability.ability_effect),(20,"20","discard_choice")); self.assertTrue(source.tapped); self.assertFalse(ability.decision_pending)
+        self.resolve_to_decision(game); self.assertTrue(ability.decision_pending); self.assertEqual(game.priority_user,20)
+        restored=Game.from_raw(game.to_raw()); item,choices=restored.private_hand_decision(20); self.assertEqual([card.key for _,card in choices],["bear","giant"])
+        restored.choose_private_hand(20,2); self.assertIn(giant,restored.player(20).graveyard); self.assertEqual(restored.player(20).hand,[bear]); self.assertNotIn(ability.uid,restored.cards); self.assertFalse(restored.stack)
+
+    def test_scepter_is_controller_turn_only_source_independent_and_empty_hand_safe(self):
+        wrong=ready(); wrong.active_index=1; source=self.add(wrong,10,"lea:242"); wrong.player(10).mana_pool={"C":3}; wrong.priority_user=10
+        with self.assertRaisesRegex(GameError,"only during your turn"): wrong.activate_ability(10,wrong.player(10).battlefield.index(source)+1,"20")
+
+        game=ready(); game.player(20).hand=[]; chosen=self.add(game,20,"bear","hand"); source=self.add(game,10,"lea:242"); game.player(10).mana_pool={"C":3}; game.phase="precombat_main"; game.priority_user=10
+        game.activate_ability(10,game.player(10).battlefield.index(source)+1,"20"); game.player(10).battlefield.remove(source); self.resolve_to_decision(game); game.choose_private_hand(20,1); self.assertIn(chosen,game.player(20).graveyard)
+
+        empty=ready(); empty.player(20).hand=[]; uid=empty.next_uid; empty.next_uid+=1; empty.cards[uid]="lea:242"; empty.stack=[Spell(10,uid,"lea:242","20",ability_effect="discard_choice",choice_owner=20)]; empty.priority_user=10
+        self.resolve_to_decision(empty); self.assertFalse(empty.stack); self.assertNotIn(uid,empty.cards)
+
+    def test_glasses_reveals_only_to_controller_without_mutating_target_hand(self):
+        game=ready(); game.player(20).hand=[]; bear=self.add(game,20,"bear","hand"); giant=self.add(game,20,"giant","hand"); source=self.add(game,10,"lea:245"); game.phase="precombat_main"; game.priority_user=10
+        game.activate_ability(10,game.player(10).battlefield.index(source)+1,"20"); ability=game.stack[-1]; self.resolve_to_decision(game)
+        self.assertEqual((ability.choice_owner,game.priority_user),(10,10)); before=list(game.player(20).hand); restored=Game.from_raw(game.to_raw()); _,choices=restored.private_hand_decision(10)
+        self.assertEqual([card.key for _,card in choices],["bear","giant"])
+        with self.assertRaises(GameError): restored.private_hand_decision(20)
+        restored.choose_private_hand(10); self.assertEqual(restored.player(20).hand,before); self.assertFalse(restored.stack); self.assertFalse(any("Bear" in line or "Giant" in line for line in restored.log))
+
+    def test_private_hand_decisions_reject_foreign_invalid_and_stale_input_atomically(self):
+        game=ready(); game.player(20).hand=[]; card=self.add(game,20,"bear","hand"); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:242"; game.stack=[Spell(10,uid,"lea:242","20",ability_effect="discard_choice",decision_pending=True,choice_owner=20)]; game.priority_user=20
+        for user,position in ((10,1),(20,0),(20,2)):
+            with self.subTest(user=user,position=position):
+                with self.assertRaises(GameError): game.choose_private_hand(user,position)
+                self.assertEqual(game.player(20).hand,[card]); self.assertEqual(len(game.stack),1)
+        game.choose_private_hand(20,1)
+        with self.assertRaises(GameError): game.choose_private_hand(20,1)
+
 if __name__=="__main__": unittest.main()

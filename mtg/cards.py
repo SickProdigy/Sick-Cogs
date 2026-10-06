@@ -405,6 +405,8 @@ ALPHA_ARTIFACTS = {
     "lea:256": {"animate_land_type":"swamp", "animate_land_color":"B"},
     "lea:272": {"activation_cost":"{5}", "activation_tap":True, "activation_effect":"create_token", "activation_text":"Create a 1/1 colorless Insect artifact creature token with flying named Wasp", "creates_token":"token:wasp"},
     "lea:237": {"activation_cost":"{3}", "activation_tap":True, "activation_effect":"prevent_player_damage", "activation_amount":2, "activation_text":"Prevent the next 2 damage that would be dealt to you this turn"},
+    "lea:242": {"activation_cost":"{3}", "activation_tap":True, "activation_effect":"discard_choice", "activation_text":"Target player discards a card", "activation_controller_turn_only":True},
+    "lea:245": {"activation_tap":True, "activation_effect":"look_hand", "activation_text":"Look at target player’s hand"},
 }
 
 ALPHA_MANA_CREATURES = {
@@ -667,7 +669,7 @@ for reference in PLAYABLE_ALPHA:
         enters_power_counters=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("enters_power_counters",0),
         end_combat_remove_power_counter=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("end_combat_remove_power_counter",False),
         activation_upkeep_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_upkeep_only",False),
-        activation_controller_turn_only=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_controller_turn_only",False),
+        activation_controller_turn_only=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_controller_turn_only",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_controller_turn_only",False)),
         activation_once_per_turn=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_once_per_turn",False),
         activation_x_choice=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_x_choice",False),
         prevent_source_color=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("prevent_source_color",""),

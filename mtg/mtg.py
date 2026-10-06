@@ -12,7 +12,7 @@ from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_battlefield,
 from .cards import BASE_CARDS, CARDS
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
 from .engine import Game, GameError
-from .views import CatalogDetailView, CatalogView, ChallengeView, GameView, HandPaginationView, LibrarySearchView
+from .views import CatalogDetailView, CatalogView, ChallengeView, GameView, HandPaginationView, LibrarySearchView, PrivateHandDecisionView
 
 log=logging.getLogger("red.sick-cogs.MTG")
 CONFIG_IDENTIFIER=813604927115
@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.88.0"
+    __version__="0.89.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -184,6 +184,8 @@ class MTG(commands.Cog):
                     if not item.ability_effect and g.card(item.uid).effect=="search_library": label+=" (controller is searching their library)"
                     elif not item.ability_effect and g.card(item.uid).effect=="drain_power": label+=" (target player is choosing land mana)"
                     elif not item.ability_effect and g.card(item.uid).effect=="power_sink": label+=f" (targeted spell's controller may {g.trigger_accept_label(item)} or decline)"
+                    elif item.ability_effect=="discard_choice": label+=" (target player is choosing a card privately)"
+                    elif item.ability_effect=="look_hand": label+=" (controller is viewing the targeted hand privately)"
                     else: label+=(f" (chooser must {g.trigger_accept_label(item)})" if item.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") else f" (controller may {g.trigger_accept_label(item)} or Decline)")
                 stack_lines.append(f"S:{position}. {label}")
             e.add_field(name="Stack · spells targetable with S:POSITION",value="\n".join(stack_lines),inline=False)
@@ -268,6 +270,33 @@ class MTG(commands.Cog):
         view=LibrarySearchView(self,game_id,user,page,pages,game)
         if editing: await interaction.edit_original_response(content=text,view=view)
         else: await interaction.followup.send(text,view=view,ephemeral=True)
+    async def send_private_hand_decision(self,interaction,game_id,page,editing=False):
+        game=self.games.get(game_id); user=interaction.user.id
+        try: item,entries=game.private_hand_decision(user) if game else (_ for _ in ()).throw(GameError("This private hand decision is unavailable."))
+        except GameError:
+            content="This private hand decision is unavailable."
+            if editing: await interaction.edit_original_response(content=content,view=None)
+            else: await interaction.followup.send(content,ephemeral=True)
+            return
+        pages=max(1,math.ceil(len(entries)/PrivateHandDecisionView.page_size)); page=max(0,min(page,pages-1)); start=page*PrivateHandDecisionView.page_size
+        visible=entries[start:start+PrivateHandDecisionView.page_size]; name=game.card(item.uid).name
+        heading=f"{name} - choose one card to discard" if item.ability_effect=="discard_choice" else f"{name} - targeted hand"
+        text=heading+"\n"+("\n".join(f"**{position}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for position,card in visible) or "The targeted hand is empty.")
+        view=PrivateHandDecisionView(self,game_id,user,page,pages,item.ability_effect,entries)
+        if editing: await interaction.edit_original_response(content=text,view=view)
+        else: await interaction.followup.send(text,view=view,ephemeral=True)
+    async def complete_private_hand_interaction(self,interaction,game_id,position):
+        game=self.games.get(game_id)
+        if not game:
+            await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
+        async with self.lock(game.game_id):
+            try:
+                effect=game.stack[-1].ability_effect; game.choose_private_hand(interaction.user.id,position); game.record(interaction.user.id,"private_discard" if effect=="discard_choice" else "private_hand_view"); advance_solo(game); await self.save(game)
+            except (GameError,IndexError,ValueError) as error:
+                await interaction.response.send_message(str(error),ephemeral=True); return
+        message="Card discarded." if position is not None else "Hand view completed."
+        await interaction.response.edit_message(content=message,view=None); await self.refresh_message(game)
+
     async def choose_library_interaction(self,interaction,game_id,position):
         game=self.games.get(game_id)
         if not game:

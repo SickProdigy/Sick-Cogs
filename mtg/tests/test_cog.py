@@ -692,5 +692,24 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         view=GameView(cog,1); pay=next(item for item in view.children if item.custom_id.endswith(":pay")); decline=next(item for item in view.children if item.custom_id.endswith(":decline_trigger"))
         self.assertEqual(pay.label,"Pay {2}"); self.assertFalse(pay.disabled); self.assertEqual(decline.label,"Don't pay"); self.assertIn("targeted spell's controller may Pay {2}",str(cog.game_embed(game).to_dict()))
 
+
+    async def test_private_hand_artifact_controls_are_ephemeral_requester_bound_and_paginated(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); game.player(20).hand=[]
+        for key in ("bear","giant")+("bear",)*24:
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(20).hand.append(uid)
+        ability=game.next_uid; game.next_uid+=1; game.cards[ability]="lea:242"; game.stack=[spell_type(10,ability,"lea:242","20",ability_effect="discard_choice",decision_pending=True,choice_owner=20)]; game.priority_user=20; cog.games={1:game}
+        view=GameView(cog,1); private=next(item for item in view.children if item.custom_id.endswith(":private_hand")); passing=next(item for item in view.children if item.custom_id.endswith(":pass")); self.assertFalse(private.disabled); self.assertTrue(passing.disabled)
+        interaction=SimpleNamespace(user=SimpleNamespace(id=20),followup=SimpleNamespace(send=AsyncMock()))
+        await cog.send_private_hand_decision(interaction,1,0); kwargs=interaction.followup.send.await_args.kwargs; self.assertTrue(kwargs["ephemeral"]); self.assertIn("Bear Cub",interaction.followup.send.await_args.args[0]); browser=kwargs["view"]
+        select=next(item for item in browser.children if hasattr(item,"options")); self.assertEqual(len(select.options),25); self.assertEqual(browser.pages,2); self.assertFalse(browser.next.disabled)
+        response=SimpleNamespace(send_message=AsyncMock()); allowed=await browser.interaction_check(SimpleNamespace(user=SimpleNamespace(id=10),response=response)); self.assertFalse(allowed); response.send_message.assert_awaited_once()
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("target player is choosing a card privately",rendered); self.assertNotIn("Bear Cub",rendered); self.assertNotIn("Hill Giant",rendered)
+
+        game.stack[-1]=spell_type(10,ability,"lea:245","20",ability_effect="look_hand",decision_pending=True,choice_owner=10); game.cards[ability]="lea:245"; game.priority_user=10
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock())); await cog.send_private_hand_decision(interaction,1,0); look=interaction.followup.send.await_args.kwargs["view"]
+        self.assertFalse(next(item for item in look.children if getattr(item,"label",None)=="Done viewing").disabled); self.assertFalse(any(hasattr(item,"options") for item in look.children)); self.assertIn("controller is viewing the targeted hand privately",str(cog.game_embed(game).to_dict()))
+
 if __name__ == "__main__":
     unittest.main()

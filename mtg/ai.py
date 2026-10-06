@@ -479,6 +479,8 @@ def _activation_target(game,user,card,source_uid=None):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
         return None
     if card.activation_effect in ("draw_self","create_token"): return str(user)
+    if card.activation_effect in ("discard_choice","look_hand"):
+        return str(opponent) if game.player(opponent).hand else None
     if card.activation_effect=="damage_all":
         if game.player(user).life<=card.activation_amount: return None
         own=sum(game.is_creature(x) and game.current_stats(x)[1]-x.damage<=card.activation_amount for x in game.player(user).battlefield)
@@ -682,6 +684,11 @@ def advance_solo(game: Game):
             return changed
         if game.stack and game.stack[-1].decision_pending:
             trigger=game.stack[-1]
+            if trigger.ability_effect in ("discard_choice","look_hand"):
+                if trigger.ability_effect=="discard_choice":
+                    _,choices=game.private_hand_decision(user); position,_=min(choices,key=lambda item:(item[1].cost+item[1].power+item[1].toughness,item[0]))
+                else: position=None
+                game.choose_private_hand(user,position); game.record(user,"ai_private_discard" if position is not None else "ai_private_hand_view"); changed=True; continue
             if not trigger.ability_effect and game.card(trigger.uid).effect=="drain_power":
                 position,permanent,mana=game.drain_power_choice(user)
                 game.choose_drain_power(user,position,mana[0]); game.record(user,"ai_drain_power_choice"); changed=True; continue
