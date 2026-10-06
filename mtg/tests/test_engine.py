@@ -48,7 +48,7 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("trample_assignments")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("attacked_this_turn"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("lands_played_this_turn")
             for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
@@ -3318,6 +3318,42 @@ class AlphaClockworkBeastTests(unittest.TestCase):
         self.assertEqual((saved.power_counters,restored.current_stats(saved)),(5,(5,4)))
         saved.tapped=False; restored.phase="precombat_main"; restored.priority_user=10
         with self.assertRaisesRegex(GameError,"only during your upkeep"): restored.activate_ability(10,1,x_value=1,choice_value=1)
+
+
+class AlphaBerserkTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_berserk_doubles_live_power_grants_trample_and_destroys_only_an_attacker(self):
+        game=ready(); attacker=self.add(game,10,"bear"); attacker.power_bonus=1; spell=self.add(game,10,"lea:185","hand"); self.add(game,10,"forest")
+        game.phase="precombat_main"; game.priority_user=10; game.play(10,1,"10:1"); self.resolve_top(game)
+        self.assertEqual(game.current_stats(attacker),(6,2)); self.assertIn("trample",game.current_keywords(attacker)); self.assertEqual(game.end_step_destroys[-1].ability_effect,"berserk_end_step_destroy")
+        game.phase="attackers"; game.priority_user=None; game.declare_attackers(10,[1]); restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.attacked_this_turn,[attacker.uid])
+        restored._begin_end_step(); self.resolve_top(restored); self.assertIn(attacker.uid,restored.player(10).graveyard)
+
+        stayed=ready(); creature=self.add(stayed,10,"bear"); uid=stayed.next_uid; stayed.next_uid+=1; stayed.cards[uid]="lea:185"
+        stayed._resolve(Spell(10,uid,"lea:185",f"10:{creature.uid}")); stayed._begin_end_step(); self.resolve_top(stayed)
+        self.assertIsNotNone(stayed.find_permanent(creature.uid)[1])
+
+    def test_berserk_timing_regeneration_and_zone_change_identity(self):
+        late=ready(); creature=self.add(late,10,"bear"); self.add(late,10,"lea:185","hand"); self.add(late,10,"forest"); late.phase="postcombat_main"; late.priority_user=10
+        with self.assertRaisesRegex(GameError,"before the combat damage step"): late.play(10,1,"10:1")
+
+        illegal=ready(); target=self.add(illegal,10,"forest"); living=self.add(illegal,10,"lea:209"); uid=illegal.next_uid; illegal.next_uid+=1; illegal.cards[uid]="lea:185"; pending=Spell(10,uid,"lea:185",f"10:{target.uid}"); illegal._destroy(illegal.player(10),living,allow_regeneration=False); illegal._resolve(pending)
+        self.assertEqual(target.power_bonus,0); self.assertIn(uid,illegal.player(10).graveyard); self.assertFalse(illegal.end_step_destroys)
+
+        game=ready(); creature=self.add(game,10,"bear"); creature.regeneration_shields=1; uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:185"; game.attacked_this_turn=[creature.uid]
+        game._resolve(Spell(10,uid,"lea:185",f"10:{creature.uid}")); game._begin_end_step(); self.resolve_top(game)
+        self.assertIsNotNone(game.find_permanent(creature.uid)[1]); self.assertTrue(creature.tapped); self.assertEqual(creature.regeneration_shields,0)
+
+        changed=ready(); original=self.add(changed,10,"bear"); uid=changed.next_uid; changed.next_uid+=1; changed.cards[uid]="lea:185"; changed.attacked_this_turn=[original.uid]
+        changed._resolve(Spell(10,uid,"lea:185",f"10:{original.uid}")); trigger=changed.end_step_destroys.pop(); changed.player(10).battlefield.remove(original); replacement=Permanent(original.uid,"bear",sick=False,layer_timestamp=original.layer_timestamp+1); changed.player(10).battlefield.append(replacement); changed._resolve_ability(trigger)
+        self.assertIsNotNone(changed.find_permanent(original.uid)[1])
 
 
 class CombatTests(unittest.TestCase):

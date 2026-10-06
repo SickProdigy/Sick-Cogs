@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"healing_salve","mana_short","set_color","pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
@@ -94,7 +94,7 @@ def _target(game, user, card):
         if not lands: return None
         position,_=max(lands,key=lambda item:len(game.current_mana_choices(item[1])))
         return f"{game.opponent(user)}:{position}"
-    if card.effect in ("pump","pump_blocking","pump_power_x"):
+    if card.effect in ("pump","pump_blocking","pump_power_x","berserk"):
         creatures = [
             (position, permanent)
             for position, permanent in enumerate(game.player(user).battlefield, 1)
@@ -102,6 +102,9 @@ def _target(game, user, card):
         ]
         if card.effect == "pump_blocking":
             blocking=set(game.blocks.values()); creatures=[item for item in creatures if item[1].uid in blocking]
+        elif card.effect=="berserk":
+            if game.active_user!=user or game.phase not in ("after_attackers","after_blockers","after_first_strike"): return None
+            creatures=[item for item in creatures if item[1].uid in game.attackers and not any(spell.key==card.key and spell.target==f"{user}:{item[1].uid}" for spell in game.stack)]
         if not creatures: return None
         position, _ = max(creatures, key=lambda item: game.current_stats(item[1])[0])
         return f"{user}:{position}"
@@ -296,6 +299,8 @@ def _play_one(game, user, difficulty):
             score = 7 + card.amount
         elif card.effect=="pump_power_x":
             score=7+(x_value or 0)
+        elif card.effect=="berserk":
+            score=12
         elif card.effect == "life":
             score = 4 + card.amount
         elif card.effect=="healing_salve":

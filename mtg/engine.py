@@ -91,6 +91,7 @@ class Game:
         self.stack, self.attackers, self.blocks = [], [], {}
         self.blocked_attackers=[]
         self.combat_participants=[]
+        self.attacked_this_turn=[]
         self.trample_assignments={}
         self.end_step_sacrifices=[]
         self.end_step_destroys=[]
@@ -746,6 +747,8 @@ class Game:
             self.stack.extend(self._land_event_triggers(user,"enter",played_extra))
             self.log.append(f"{user} played {c.name}."); return
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
+        if c.effect=="berserk" and self.phase not in ("upkeep","draw","precombat_main","after_attackers","after_blockers","after_first_strike"):
+            raise GameError("Berserk can be cast only before the combat damage step.")
         target=self._target_for_cast(c,user,target)
         if c.effect=="counter_mana_value_x":
             target_uid=int(target.split(":",1)[1]); target_spell=next((item for item in self.stack if item.uid==target_uid and not item.ability_effect),None)
@@ -893,7 +896,7 @@ class Game:
             if c.target_nonartifact and "Artifact" in target_card.type_line: raise GameError("Target must be a nonartifact creature.")
             if c.target_nonblack and "B" in self.current_colors(permanent): raise GameError("Target must be a nonblack creature.")
             return f"{target_user}:{permanent.uid}"
-        if c.effect in ("pump","pump_blocking","pump_power_x"):
+        if c.effect in ("pump","pump_blocking","pump_power_x","berserk"):
             target_user,permanent=self._target_creature(target)
             if c.effect=="pump_blocking" and permanent.uid not in self.blocks.values():
                 raise GameError(f"{c.name} must target a blocking creature.")
@@ -1087,7 +1090,7 @@ class Game:
             chosen.append(x.uid)
         required=[x for x in p.battlefield if self.card(x.uid).attacks_each_combat and self.can_attack_permanent(x) and x.uid not in chosen]
         if required: raise GameError(", ".join(self.card(x.uid).name for x in required)+" must attack this combat if able.")
-        self.attackers=chosen; self.blocks={}; self.blocked_attackers=[]; self.combat_participants=list(chosen); self.trample_assignments={}; self.phase_passes=0
+        self.attackers=chosen; self.attacked_this_turn.extend(uid for uid in chosen if uid not in self.attacked_this_turn); self.blocks={}; self.blocked_attackers=[]; self.combat_participants=list(chosen); self.trample_assignments={}; self.phase_passes=0
         for x in list(p.battlefield):
             if x.uid in chosen and "vigilance" not in self.current_keywords(x): x.tapped=True
         self._sba(); self._life()
@@ -1326,7 +1329,7 @@ class Game:
             self.cards.pop(s.uid,None); self.log.append(f"{card.name} ability fizzled because {reason}.")
         controller,target=target_permanent()
         target_card=self.card(target.uid) if target is not None else None
-        if target is not None and effect not in ("self","regenerate","corpse_regenerate","end_step_corpse_counters","empty_battlefield_sacrifice","earthbind_enter","end_step_sacrifice","end_step_destroy","end_combat_destroy","end_combat_remove_power_counter","no_land_sacrifice","dealt_damage_counter","damaged_creature_death_counter","add_power_counters") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
+        if target is not None and effect not in ("self","regenerate","corpse_regenerate","end_step_corpse_counters","empty_battlefield_sacrifice","earthbind_enter","end_step_sacrifice","end_step_destroy","berserk_end_step_destroy","end_combat_destroy","end_combat_remove_power_counter","no_land_sacrifice","dealt_damage_counter","damaged_creature_death_counter","add_power_counters") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
         if effect=="prevent_source_damage":
             try: _,source_uid,_=s.target.split(":")
             except (AttributeError,ValueError): fizzle("its chosen source was invalid"); return
@@ -1352,6 +1355,10 @@ class Game:
             self._remember_source_power(target); self._remove_from_combat(target.uid); controller.battlefield.remove(target); self._dies(controller,target,trigger_batch,death_sources)
         elif effect=="end_step_destroy":
             if target is None: fizzle("its delayed target was gone"); return
+            self._destroy(controller,target)
+        elif effect=="berserk_end_step_destroy":
+            if target is None or target.layer_timestamp!=s.choice_value: fizzle("its delayed target was gone"); return
+            if target.uid not in self.attacked_this_turn: fizzle("its target had not attacked this turn"); return
             self._destroy(controller,target)
         elif effect=="end_combat_destroy":
             if target is None: fizzle("its combatant was gone"); return
@@ -1589,11 +1596,16 @@ class Game:
                 for permanent in list(controller.battlefield):
                     if self.card(permanent.uid).has_type("Enchantment"): self._destroy(controller,permanent)
             p.graveyard.append(s.uid)
-        elif c.effect in ("pump","pump_blocking","pump_power_x"):
+        elif c.effect in ("pump","pump_blocking","pump_power_x","berserk"):
             user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
-            if target is None:
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
+            if target is None or (c.effect=="berserk" and not self.is_creature(target)):
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             if c.effect=="pump_power_x": target.power_bonus+=s.x_value
+            elif c.effect=="berserk":
+                target.power_bonus+=self.current_stats(target)[0]
+                if "trample" not in target.temporary_keywords: target.temporary_keywords.append("trample")
+                trigger_uid=self.next_uid; self.next_uid+=1; self.cards[trigger_uid]=c.key
+                self.end_step_destroys.append(Spell(s.owner,trigger_uid,c.key,f"{user}:{target.uid}",ability_effect="berserk_end_step_destroy",source_uid=s.uid,color_override=s.color_override,choice_value=target.layer_timestamp))
             else: target.bonus+=c.amount
             p.graveyard.append(s.uid)
         elif c.effect=="return_creature_hand":
@@ -1687,7 +1699,7 @@ class Game:
             if not affected:
                 self._queue_state_triggers(); return
     def _cleanup(self):
-        self.prevent_combat_damage=False; self.creatures_died_this_turn=0
+        self.prevent_combat_damage=False; self.creatures_died_this_turn=0; self.attacked_this_turn=[]
         for p in self.players.values():
             p.damage_prevention=0; p.source_damage_prevention=[]
             for x in p.battlefield:
@@ -1745,12 +1757,12 @@ class Game:
         if user!=self.active_user or self.priority_user!=user: raise GameError("It is not your action window.")
 
     def to_raw(self):
-        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"next_layer_timestamp":self.next_layer_timestamp,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"end_step_destroys":[asdict(x) for x in self.end_step_destroys],"end_combat_destroys":[asdict(x) for x in self.end_combat_destroys],"extra_turns":self.extra_turns,"untap_pending":self.untap_pending,"skip_draw_step":self.skip_draw_step,"prevent_combat_damage":self.prevent_combat_damage,"creatures_died_this_turn":self.creatures_died_this_turn,"attackers":self.attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"combat_participants":self.combat_participants,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
+        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"next_layer_timestamp":self.next_layer_timestamp,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"end_step_destroys":[asdict(x) for x in self.end_step_destroys],"end_combat_destroys":[asdict(x) for x in self.end_combat_destroys],"extra_turns":self.extra_turns,"untap_pending":self.untap_pending,"skip_draw_step":self.skip_draw_step,"prevent_combat_damage":self.prevent_combat_damage,"creatures_died_this_turn":self.creatures_died_this_turn,"attackers":self.attackers,"attacked_this_turn":self.attacked_this_turn,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"combat_participants":self.combat_participants,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
     @classmethod
     def from_raw(cls,r):
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
             d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("turn_start_untapped_lands",0); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0)})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
-        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
+        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

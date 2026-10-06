@@ -809,6 +809,11 @@ class SoloAITests(unittest.TestCase):
         advance_solo(tome); self.assertTrue(source.tapped); self.assertEqual(tome.stack[-1].ability_effect,"draw_self")
         tome.pass_priority(HUMAN); advance_solo(tome); self.assertEqual(len(tome.player(AI).hand),before+1)
 
+    def test_ai_targets_berserk_only_at_its_own_attacker_before_damage(self):
+        game=solo(order=(AI,HUMAN)); attacker=self.add(game,AI,"giant"); self.add(game,AI,"bear"); game.active_index=0; game.attackers=[attacker.uid]; game.phase="after_blockers"; game.priority_user=AI
+        self.assertEqual(_target(game,AI,CARDS["lea:185"]),f"{AI}:1")
+        game.phase="postcombat_main"; self.assertIsNone(_target(game,AI,CARDS["lea:185"]))
+
     def test_ai_uses_stone_giant_on_an_eligible_attacker(self):
         cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
         game=solo(order=(AI,HUMAN)); source=self.add(game,AI,"lea:176"); bear=self.add(game,AI,"bear"); self.add(game,HUMAN,"giant")

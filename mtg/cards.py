@@ -495,6 +495,7 @@ ALPHA_SPELLS = {
     "lea:193": {"effect":"prevent_combat_damage"},
     "lea:50": {"effect":"draw_target_x"},
     "lea:111": {"effect":"pump_power_x"},
+    "lea:185": {"effect":"berserk"},
     "lea:140": {"effect":"damage_x_exile"},
     "lea:146": {"effect":"earthquake_x"},
     "lea:200": {"effect":"hurricane_x"},
