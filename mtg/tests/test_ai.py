@@ -433,6 +433,22 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
         game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(game.current_stats(bear),(3,2))
 
+    def test_ai_chooses_healing_salve_prevention_or_life_mode(self):
+        threatened=solo(order=(HUMAN,AI)); threatened.player(HUMAN).kept=True; threatened.player(AI).kept=True; threatened.player(AI).hand=[]
+        giant=self.add(threatened,AI,"giant"); salve=self.add(threatened,AI,"lea:22","hand"); self.add(threatened,AI,"plains")
+        bolt=self.add(threatened,HUMAN,"lea:161","hand"); self.add(threatened,HUMAN,"mountain")
+        threatened.active_index=0; threatened.phase="precombat_main"; threatened.priority_user=HUMAN; threatened.player(HUMAN).land_played=True; threatened.player(AI).land_played=True
+        threatened.play(HUMAN,1,f"{AI}:1"); advance_solo(threatened)
+        self.assertEqual(threatened.stack[-1].uid,salve); self.assertEqual(threatened.stack[-1].target,f"prevent:{AI}:{giant.uid}")
+        threatened.pass_priority(HUMAN); advance_solo(threatened); self.assertEqual(giant.damage_prevention,3)
+        threatened.pass_priority(HUMAN); advance_solo(threatened); self.assertEqual(giant.damage,0); self.assertIn(bolt,threatened.player(HUMAN).graveyard)
+
+        healing=solo(order=(AI,HUMAN)); healing.player(HUMAN).kept=True; healing.player(AI).kept=True; healing.player(AI).hand=[]; healing.player(AI).life=17
+        salve=self.add(healing,AI,"lea:22","hand"); self.add(healing,AI,"plains")
+        healing.active_index=0; healing.phase="precombat_main"; healing.priority_user=AI; healing.player(AI).land_played=True
+        advance_solo(healing); self.assertEqual(healing.stack[-1].uid,salve); self.assertEqual(healing.stack[-1].target,f"life:{AI}")
+        healing.pass_priority(HUMAN); advance_solo(healing); self.assertEqual(healing.player(AI).life,20)
+
     def test_ai_uses_samite_healer_for_pending_creature_damage(self):
         game=solo(order=(HUMAN,AI)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         healer=self.add(game,AI,"lea:37"); bear=self.add(game,AI,"giant"); shock=self.add(game,HUMAN,"lea:161","hand"); self.add(game,HUMAN,"mountain")

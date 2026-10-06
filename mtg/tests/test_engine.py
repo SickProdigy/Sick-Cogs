@@ -2010,6 +2010,42 @@ class AlphaHiveTokenTests(unittest.TestCase):
         self.assertEqual(game.attackers,[wasp.uid]); self.assertIn("flying",game.current_keywords(wasp))
 
 
+class AlphaHealingSalveTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_life_mode_is_explicit_targets_either_player_and_rejects_bad_modes_atomically(self):
+        game=ready(); salve=self.add(game,10,"lea:22","hand"); plains=self.add(game,10,"plains"); game.player(20).life=10
+        for target in (None,"10","gain:20","life:20:1"):
+            with self.subTest(target=target):
+                with self.assertRaisesRegex(GameError,"life:PLAYER_ID"): game.play(10,1,target)
+                self.assertIn(salve,game.player(10).hand); self.assertFalse(plains.tapped)
+        game.play(10,1,"life:20"); self.assertEqual(game.stack[-1].target,"life:20"); self.resolve_top(game)
+        self.assertEqual(game.player(20).life,13); self.assertIn(salve,game.player(10).graveyard)
+
+    def test_prevention_modes_use_stable_player_or_creature_targets_and_persist(self):
+        player=ready(); salve=self.add(player,10,"lea:22","hand"); self.add(player,10,"plains"); player.play(10,1,"prevent:10")
+        restored=Game.from_raw(player.to_raw()); self.resolve_top(restored); self.assertEqual(restored.player(10).damage_prevention,3)
+
+        creature=ready(); salve=self.add(creature,10,"lea:22","hand"); self.add(creature,10,"plains"); bear=self.add(creature,20,"bear")
+        creature.play(10,1,"prevent:20:1"); self.assertEqual(creature.stack[-1].target,f"prevent:20:{bear.uid}")
+        self.resolve_top(creature); self.assertEqual(bear.damage_prevention,3)
+
+    def test_creature_prevention_respects_protection_and_fizzles_if_target_leaves(self):
+        protected=ready(); salve=self.add(protected,10,"lea:22","hand"); plains=self.add(protected,10,"plains"); self.add(protected,20,"lea:94")
+        with self.assertRaisesRegex(GameError,"protection"): protected.play(10,1,"prevent:20:1")
+        self.assertIn(salve,protected.player(10).hand); self.assertFalse(plains.tapped)
+
+        vanished=ready(); salve=self.add(vanished,10,"lea:22","hand"); self.add(vanished,10,"plains"); bear=self.add(vanished,20,"bear")
+        vanished.play(10,1,"prevent:20:1"); vanished.player(20).battlefield.remove(bear); vanished.player(20).graveyard.append(bear.uid)
+        self.resolve_top(vanished); self.assertIn(salve,vanished.player(10).graveyard); self.assertIn("fizzled",vanished.log[-1])
+
+
 class AlphaSamiteHealerTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield",sick=False):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

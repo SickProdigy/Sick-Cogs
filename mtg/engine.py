@@ -587,6 +587,26 @@ class Game:
             permanent=battlefield[pos-1]
             if not self._aura_can_attach(c,permanent): raise GameError(f"{c.name} cannot enchant that permanent.")
             return f"{target_user}:{permanent.uid}"
+        if c.effect=="healing_salve":
+            if not target: raise GameError("Healing Salve target must be life:PLAYER_ID, prevent:PLAYER_ID, or prevent:USER_ID:POSITION.")
+            parts=target.casefold().split(":")
+            if parts[0]=="life" and len(parts)==2:
+                try: target_user=int(parts[1])
+                except ValueError as error: raise GameError("Healing Salve target must be life:PLAYER_ID, prevent:PLAYER_ID, or prevent:USER_ID:POSITION.") from error
+                self.player(target_user); return f"life:{target_user}"
+            if parts[0]=="prevent" and len(parts)==2:
+                try: target_user=int(parts[1])
+                except ValueError as error: raise GameError("Healing Salve target must be life:PLAYER_ID, prevent:PLAYER_ID, or prevent:USER_ID:POSITION.") from error
+                self.player(target_user); return f"prevent:{target_user}"
+            if parts[0]=="prevent" and len(parts)==3:
+                try: target_user,pos=int(parts[1]),int(parts[2])
+                except ValueError as error: raise GameError("Healing Salve target must be life:PLAYER_ID, prevent:PLAYER_ID, or prevent:USER_ID:POSITION.") from error
+                battlefield=self.player(target_user).battlefield
+                if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+                permanent=battlefield[pos-1]
+                if not self.is_creature(permanent): raise GameError("Healing Salve prevention target is not a creature.")
+                return f"prevent:{target_user}:{permanent.uid}"
+            raise GameError("Healing Salve target must be life:PLAYER_ID, prevent:PLAYER_ID, or prevent:USER_ID:POSITION.")
         if c.effect in ("counter_spell","elemental_blast"):
             if target and target.upper().startswith("S:"):
                 spell=self._target_stack(target); target_card=self.card(spell.uid)
@@ -1050,6 +1070,16 @@ class Game:
         elif c.effect in ("draw_target","draw_target_x"): self._draw(self.player(int(s.target)),s.x_value if c.effect=="draw_target_x" else c.amount); p.graveyard.append(s.uid)
         elif c.effect=="life_target_x": self.player(int(s.target)).life+=s.x_value; p.graveyard.append(s.uid)
         elif c.effect=="life": p.life+=c.amount; p.graveyard.append(s.uid)
+        elif c.effect=="healing_salve":
+            parts=s.target.split(":"); target_player=self.player(int(parts[1]))
+            if parts[0]=="life": target_player.life+=c.amount
+            elif len(parts)==2: target_player.damage_prevention+=c.amount
+            else:
+                target=next((permanent for permanent in target_player.battlefield if permanent.uid==int(parts[2])),None)
+                if target is None or not self.is_creature(target):
+                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                target.damage_prevention+=c.amount
+            p.graveyard.append(s.uid)
         elif c.effect=="prevent_combat_damage": self.prevent_combat_damage=True; p.graveyard.append(s.uid)
         elif c.effect in ("damage","damage_any","damage_x_exile"):
             amount=s.x_value if c.effect=="damage_x_exile" else c.amount
