@@ -2,7 +2,7 @@
 
 Persistent cross-guild Pokémon catching and wild battles for Red.
 
-Player commands use `[p]pokemon`, with `[p]poke` and `[p]pkmn` available as shorter aliases.
+Player commands use `[p]pokemon`, with `[p]poke` and `[p]pkmn` available as shorter aliases. Setup commands use `[p]pokemonset`, with `[p]pokeset` and `[p]pkmnset` as aliases.
 
 ## Included
 
