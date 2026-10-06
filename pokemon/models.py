@@ -360,6 +360,36 @@ class Battle:
             else:self.wild_status=""
         return True,""
 
+    @staticmethod
+    def effectiveness_line(move,target_id):
+        if move.power<=0:return ""
+        value=effectiveness(move.type,SPECIES[target_id].types)
+        if value==0:return f"It doesn't affect {SPECIES[target_id].name}..."
+        if value>1:return "It's super effective!"
+        if value<1:return "It's not very effective..."
+        return ""
+
+    @staticmethod
+    def status_line(name,status):
+        return {
+            "burn":f"{name} was burned!",
+            "poison":f"{name} was poisoned!",
+            "paralysis":f"{name} is paralyzed! It may be unable to move!",
+            "sleep":f"{name} fell asleep!",
+            "freeze":f"{name} was frozen solid!",
+            "confusion":f"{name} became confused!",
+        }.get(status,"")
+
+    @classmethod
+    def attack_line(cls,attacker,target_id,move,damage,critical=False,status="",extra=()):
+        parts=[f"{attacker} used {move.name} and dealt {damage} damage."]
+        if critical and damage>0:parts.append("A critical hit!")
+        matchup=cls.effectiveness_line(move,target_id)
+        if matchup:parts.append(matchup)
+        if status:parts.append(cls.status_line(SPECIES[target_id].name,status))
+        parts.extend(f"{item}." for item in extra if item)
+        return " ".join(parts)
+
     def _player_attack(self, move):
         rng=self.rng();allowed,message=self._can_act(True,rng)
         if not allowed:return message
@@ -374,9 +404,10 @@ class Battle:
         self.wild_hp=max(0,self.wild_hp-damage)
         if move.drain>0:self.player_hp=min(self.max_hp(self.player),self.player_hp+max(1,damage*move.drain//100))
         elif move.drain<0:self.player_hp=max(0,self.player_hp-max(1,damage*(-move.drain)//100))
-        if move.status and not self.wild_status and rng.randrange(100)<move.status_chance:self.wild_status=move.status
-        if move.stat_changes and rng.randrange(100)<move.stat_chance:self._apply_stat_changes(move,True)
-        return f"{SPECIES[self.player.species_id].name} used {move.name} and dealt {damage} damage"+(" (critical)." if critical else ".")
+        applied_status="";stat_changes=[]
+        if move.status and not self.wild_status and rng.randrange(100)<move.status_chance:self.wild_status=move.status;applied_status=move.status
+        if move.stat_changes and rng.randrange(100)<move.stat_chance:stat_changes=self._apply_stat_changes(move,True)
+        return self.attack_line(SPECIES[self.player.species_id].name,self.wild_species_id,move,damage,critical,applied_status,stat_changes)
 
     def _wild_attack(self, move):
         rng=self.rng();allowed,message=self._can_act(False,rng)
@@ -392,9 +423,10 @@ class Battle:
         self.player_hp=max(0,self.player_hp-damage)
         if move.drain>0:self.wild_hp=min(self.wild_max_hp,self.wild_hp+max(1,damage*move.drain//100))
         elif move.drain<0:self.wild_hp=max(0,self.wild_hp-max(1,damage*(-move.drain)//100))
-        if move.status and not self.player_status and rng.randrange(100)<move.status_chance:self.player_status=move.status
-        if move.stat_changes and rng.randrange(100)<move.stat_chance:self._apply_stat_changes(move,False)
-        return f"{wild.name} used {move.name} and dealt {damage} damage"+(" (critical)." if critical else ".")
+        applied_status="";stat_changes=[]
+        if move.status and not self.player_status and rng.randrange(100)<move.status_chance:self.player_status=move.status;applied_status=move.status
+        if move.stat_changes and rng.randrange(100)<move.stat_chance:stat_changes=self._apply_stat_changes(move,False)
+        return self.attack_line(wild.name,self.player.species_id,move,damage,critical,applied_status,stat_changes)
 
     def _end_turn_status(self):
         if self.player_status in {"poison", "burn"} and self.player_hp > 0:
@@ -403,12 +435,12 @@ class Battle:
             self.wild_hp = max(0, self.wild_hp - max(1, self.wild_max_hp // 8))
 
     def _award_experience(self,amount):
-        self.experience_award=max(0,int(amount))
+        self.experience_award=max(0,int(amount));previous_name=SPECIES[self.player.species_id].name
         levels,evolved,learned=self.player.gain_experience(self.experience_award)
-        detail=f" Gained {self.experience_award} XP."
-        if levels:detail+=f" Reached level {self.player.level}."
-        if evolved:detail+=f" Evolved into {SPECIES[self.player.species_id].name}."
-        if learned:detail+=" Learned "+", ".join(MOVES[key].name for key in learned)+"."
+        current_name=SPECIES[self.player.species_id].name;detail=f" Gained {self.experience_award} XP."
+        if levels:detail+=f" {previous_name} grew to Lv. {self.player.level}!"
+        if evolved:detail+=f" What? {previous_name} evolved into {current_name}!"
+        if learned:detail+=f" {current_name} learned "+", ".join(MOVES[key].name for key in learned)+"!"
         for index,item in enumerate(self.party):
             if item.instance_id==self.player.instance_id:self.party[index]=self.player
         return detail
@@ -436,6 +468,7 @@ class Battle:
         if defense is None:defense=(target.special_defense or target.defense) if move.category=="special" else target.defense
         base=max(1,(((2*level//5+2)*move.power*attack//max(1,defense))//50)+2)
         modifier=effectiveness(move.type,target.types)
+        if modifier==0:return 0
         if move.type in attacker_types:modifier*=1.5
         if critical:modifier*=1.5
         per_hit=max(1,int(base*modifier*(85+rng.randrange(16))/100))
