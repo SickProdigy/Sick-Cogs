@@ -19,7 +19,16 @@ class ArtTests(unittest.TestCase):
         with Image.open(io.BytesIO(payload)) as image:
             self.assertEqual(image.format,"PNG")
             self.assertLessEqual(image.width,964)
-            self.assertLessEqual(image.height,708)
+            self.assertLessEqual(image.height,744)
+
+    def test_hand_position_label_does_not_cover_card_art(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"card.jpg"
+            Image.new("RGB",(220,307),(255,255,255)).save(path,format="JPEG")
+            output=render_hand([next(iter(CARDS.values()))],[path],0)
+            with Image.open(output) as image:
+                self.assertEqual(image.getpixel((43,75)),(255,255,255))
+                self.assertNotEqual(image.getpixel((126,373)),(255,255,255))
 
     def test_public_battlefield_render_is_bounded_png(self):
         game=Game(1,[10,20],1)
