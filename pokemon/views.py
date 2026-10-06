@@ -10,12 +10,15 @@ class StarterView(discord.ui.View):
     def __init__(self,cog,user_id,encounter_id=None,setup_hint=None):
         super().__init__(timeout=180)
         self.cog=cog;self.user_id=user_id;self.encounter_id=encounter_id;self.setup_hint=setup_hint;self.selected=0
+        self._sync_choose_label()
 
     @property
     def species_id(self):return STARTERS[self.selected]
 
+    def _sync_choose_label(self):self.choose.label=f"Choose {SPECIES[self.species_id].name}"
+
     def cycle(self,offset):
-        self.selected=(self.selected+offset)%len(STARTERS)
+        self.selected=(self.selected+offset)%len(STARTERS);self._sync_choose_label()
         return self.species_id
 
     async def interaction_check(self,interaction):
@@ -24,7 +27,8 @@ class StarterView(discord.ui.View):
         return False
 
     async def refresh(self,interaction):
-        await interaction.response.edit_message(embed=self.cog.starter_embed(interaction.user,self.selected,self.setup_hint),view=self)
+        embed,files=await self.cog.rendered_starter_choice(interaction.user,self.selected,self.setup_hint)
+        await interaction.response.edit_message(embed=embed,attachments=files,view=self)
 
     @discord.ui.button(label="◀",style=discord.ButtonStyle.secondary,custom_id="pokemon:starter:previous")
     async def previous(self,interaction,button):

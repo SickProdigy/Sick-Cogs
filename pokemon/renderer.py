@@ -124,6 +124,13 @@ class BattleRenderer:
         except (OSError,ValueError) as exc:
             raise RenderError("Starter reveal rendering failed.") from exc
 
+    async def starter_choice(self,species_id):
+        data=await self.get_sprite(species_id)
+        try:
+            return await self._render(self._starter_sync,None,data,"",species_id)
+        except (OSError,ValueError) as exc:
+            raise RenderError("Starter selection rendering failed.") from exc
+
     async def battle(self, battle):
         front = await self.get_sprite(battle.wild_species_id)
         try:
@@ -183,7 +190,7 @@ class BattleRenderer:
         inner=max(3,button//2)
         draw.ellipse((cx-inner,cy-inner,cx+inner,cy+inner),fill=RETRO[5],outline=RETRO[1],width=2)
 
-    def _starter_sync(self,pokemon,data,trainer_name):
+    def _starter_sync(self,pokemon,data,trainer_name,choice_species_id=None):
         canvas=Image.new("RGB",(800,450),(224,227,222));draw=ImageDraw.Draw(canvas)
         # Original retro research lab inspired by the early games: stocked shelves and woodwork.
         draw.rectangle((0,0,800,245),fill=(218,222,216))
@@ -232,13 +239,18 @@ class BattleRenderer:
         self._pokeball(draw,(545,276),34)
         image=self._open(data,(250,220),trim=True,upscale=True)
         canvas.paste(image,(400-image.width//2,310-image.height),image)
-        species=SPECIES[pokemon.species_id]
-        trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"
+        species=SPECIES[choice_species_id or pokemon.species_id]
         draw.rounded_rectangle((20,350,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
-        draw.text((45,370),f"@{trainer} received {species.name}!",fill=RETRO[0],font=ImageFont.load_default(size=26))
-        draw.text((45,407),f"Lv.{pokemon.level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
-        self._gender_mark(draw,(84,410),pokemon.gender,RETRO[1])
-        draw.text((104,407),"Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
+        if choice_species_id is not None:
+            types=" / ".join(value.title() for value in species.types)
+            draw.text((45,370),f"{species.name} — {types}-type Pokémon",fill=RETRO[0],font=ImageFont.load_default(size=25))
+            draw.text((45,407),"Use ◀ and ▶, then choose your partner.",fill=RETRO[1],font=ImageFont.load_default(size=18))
+        else:
+            trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"
+            draw.text((45,370),f"@{trainer} received {species.name}!",fill=RETRO[0],font=ImageFont.load_default(size=26))
+            draw.text((45,407),f"Lv.{pokemon.level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
+            self._gender_mark(draw,(84,410),pokemon.gender,RETRO[1])
+            draw.text((104,407),"Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):
