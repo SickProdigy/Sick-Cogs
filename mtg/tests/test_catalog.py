@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),303)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),303)
+        self.assertEqual(len(CARDS),305)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),305)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),243)
-        self.assertEqual(len(REFERENCE_ALPHA),52)
+        self.assertEqual(len(PLAYABLE_ALPHA),245)
+        self.assertEqual(len(REFERENCE_ALPHA),50)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -134,6 +134,8 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(all(CARDS[key].protection_self_exception for key in ("lea:5","lea:8","lea:20","lea:33","lea:44")))
         self.assertTrue(CARDS["lea:59"].aura_blocked_except_wall)
         self.assertTrue(CARDS["lea:134"].aura_hostile)
+        self.assertTrue(all(CARDS[key].aura_control and CARDS[key].aura_hostile for key in ("lea:52","lea:81")))
+        self.assertEqual(CARDS["lea:52"].aura_target_types,("Creature",)); self.assertEqual(CARDS["lea:81"].aura_target_types,("Artifact",))
         self.assertEqual((CARDS["lea:24"].aura_power,CARDS["lea:24"].aura_toughness),(1,2))
         self.assertTrue(CARDS["lea:23"].activation_attached); self.assertEqual(CARDS["lea:23"].ability_text,"{W}: Enchanted creature gets +0/+1 until end of turn, Enchanted creature gets +0/+2")
         self.assertTrue(CARDS["lea:7"].activation_attached); self.assertEqual(CARDS["lea:7"].ability_text,"{W}: Enchanted creature gets +1/+1 until end of turn")
@@ -203,7 +205,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("303 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("305 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

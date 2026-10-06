@@ -9,7 +9,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 67 creatures playable through 0.84.0; 10 remain |
 | Instants and sorceries | 70 | 52 spells playable through 0.85.0; 18 remain |
-| Enchantments | 68 | 57 enchantments playable through 0.80.0; 11 remain |
+| Enchantments | 68 | 59 enchantments playable through 0.86.0; 9 remain |
 | Artifacts | 42 | Thirty-three artifacts playable through 0.83.0; 9 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
@@ -192,3 +192,5 @@ The 0.83.0 Swamp-animation promotion adds Kormus Bell. Every land with the curre
 The 0.84.0 source-bound land-type promotion adds Gaea’s Liege. Its live power and toughness count Forests controlled by its controller while it is not attacking and by the defending player while it is attacking. Its tap ability puts a persisted timestamped Forest-setting effect on any target land; current intrinsic mana, landwalk, typed effects, continuous animation, combat, state actions, and public rendering all consume that derived type. The effect remains through reloads, expires when that exact battlefield object leaves, cannot reattach to a returned Liege with the same card UID, and respects later type-setting layers. Discord uses the existing stable-target activation command, while solo AI prefers an opponent’s non-Forest land and avoids casting zero-toughness characteristic creatures.
 
 The 0.85.0 additional-cost promotion adds Sacrifice. Casting requires an explicit `sacrifice:FIELD_POSITION` choice, validates a creature the caster controls before mutation, atomically pays {B} and sacrifices it without regeneration, snapshots its battlefield mana value, and places ordinary death and land triggers above the spell. On resolution it adds that much black mana; tokens contribute zero and cease normally. Stack rendering, persistence, and solo AI share the persisted choice.
+
+The 0.86.0 control-change promotion adds Control Magic and Steal Artifact. Permanents now persist their owner separately from their current controller. Control Auras move their attached permanent under the newest applicable Aura controller, apply summoning sickness on every control change, revert through older effects or to the owner when an Aura leaves, and remove a changing permanent from combat. Bounce, destruction, exile, sacrifice, and state actions send stolen cards to their owner while controller-based rewards and triggers still use the controller at the event. Public state labels stolen ownership, legacy saves infer owners safely, and solo AI targets useful opposing creatures or artifacts.

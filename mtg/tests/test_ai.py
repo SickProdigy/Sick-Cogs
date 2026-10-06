@@ -855,5 +855,11 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual((game.stack[0].uid,game.stack[0].choice_value),(spell,game.card(bear.uid).cost)); self.assertIn(bear.uid,game.player(AI).graveyard); self.assertIn(giant,game.player(AI).battlefield)
 
 
+    def test_ai_targets_opposing_permanents_with_control_auras(self):
+        creature_game=solo(); giant=self.add(creature_game,HUMAN,"giant")
+        self.assertEqual(_target(creature_game,AI,CARDS["lea:52"]),f"{HUMAN}:1")
+        artifact_game=solo(); ring=self.add(artifact_game,HUMAN,"lea:269")
+        self.assertEqual(_target(artifact_game,AI,CARDS["lea:81"]),f"{HUMAN}:1")
+
 if __name__ == "__main__":
     unittest.main()

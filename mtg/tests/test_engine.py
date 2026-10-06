@@ -51,12 +51,12 @@ class TurnTests(unittest.TestCase):
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("attacked_this_turn"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("lands_played_this_turn"); player.pop("channel_active")
-            for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
+            for permanent in player["battlefield"]: permanent.pop("owner",None); permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.combat_participants,[]); self.assertEqual(restored.extra_turns,[]); self.assertEqual(restored.untap_pending,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
         self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
-        self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] for player in restored.players.values() for permanent in player.battlefield))
+        self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] and permanent.owner==player.user_id for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
     def test_time_walk_queue_persists_and_gives_a_full_extra_turn(self):
@@ -3403,6 +3403,54 @@ class AlphaSacrificeTests(unittest.TestCase):
         token_game.play(10,1,"sacrifice:1"); self.assertNotIn(token.uid,token_game.cards); self.assertEqual(token_game.stack[0].choice_value,0)
         self.resolve_top(token_game); self.assertEqual(token_game.player(10).mana_pool,{})
 
+
+class AlphaControlAuraTests(unittest.TestCase):
+    def add(self,game,user,key,**kwargs):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,sick=False,**kwargs); game.player(user).battlefield.append(permanent)
+        return permanent
+
+    def resolve_aura(self,game,user,key,target):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        game._resolve(Spell(user,uid,key,f"{game.find_permanent(target.uid)[0].user_id}:{target.uid}"))
+        return game.find_permanent(uid)[1]
+
+    def test_control_magic_changes_control_persists_and_reverts(self):
+        game=ready(); creature=self.add(game,20,"giant"); first=self.resolve_aura(game,10,"lea:52",creature)
+        self.assertIn(creature,game.player(10).battlefield); self.assertEqual(creature.owner,20); self.assertTrue(creature.sick)
+        restored=Game.from_raw(game.to_raw()); controlled=restored.find_permanent(creature.uid)[1]
+        self.assertEqual((restored.find_permanent(creature.uid)[0].user_id,controlled.owner),(10,20))
+        second=self.resolve_aura(restored,20,"lea:52",controlled)
+        self.assertIn(controlled,restored.player(20).battlefield)
+        restored._destroy(restored.player(20),second); restored._sba()
+        self.assertIn(controlled,restored.player(10).battlefield)
+        restored._destroy(restored.player(10),restored.find_permanent(first.uid)[1]); restored._sba()
+        self.assertIn(controlled,restored.player(20).battlefield)
+
+    def test_stolen_permanents_go_to_owner_zones(self):
+        death=ready(); creature=self.add(death,20,"giant"); self.resolve_aura(death,10,"lea:52",creature)
+        death._destroy(death.player(10),creature)
+        self.assertIn(creature.uid,death.player(20).graveyard); self.assertNotIn(creature.uid,death.player(10).graveyard)
+
+        bounce=ready(); creature=self.add(bounce,20,"bear"); self.resolve_aura(bounce,10,"lea:52",creature)
+        spell=bounce.next_uid; bounce.next_uid+=1; bounce.cards[spell]="lea:86"
+        bounce._resolve(Spell(10,spell,"lea:86",f"10:{creature.uid}"))
+        self.assertIn(creature.uid,bounce.player(20).hand); self.assertNotIn(creature.uid,bounce.player(10).hand)
+
+        exile=ready(); creature=self.add(exile,20,"giant"); self.resolve_aura(exile,10,"lea:52",creature)
+        spell=exile.next_uid; exile.next_uid+=1; exile.cards[spell]="lea:40"
+        exile._resolve(Spell(10,spell,"lea:40",f"10:{creature.uid}"))
+        self.assertIn(creature.uid,exile.player(20).exile); self.assertEqual(exile.player(10).life,23)
+
+    def test_steal_artifact_transfers_activated_access(self):
+        game=ready(); artifact=self.add(game,20,"lea:269")
+        aura=self.resolve_aura(game,10,"lea:81",artifact)
+        self.assertIn(artifact,game.player(10).battlefield)
+        artifact.tapped=False; game.phase="precombat_main"; game.priority_user=10
+        position=game.player(10).battlefield.index(artifact)+1; game.activate_mana(10,position)
+        self.assertEqual(game.player(10).mana_pool.get("C"),2)
+        game._destroy(game.player(10),aura); game._sba()
+        self.assertIn(artifact,game.player(20).battlefield)
 
 class AlphaChannelTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):

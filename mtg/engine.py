@@ -12,6 +12,7 @@ class GameError(ValueError): pass
 class Permanent:
     uid: int
     key: str
+    owner: int = 0
     tapped: bool = False
     sick: bool = True
     damage: int = 0
@@ -190,6 +191,12 @@ class Game:
         else:
             return card.power,card.toughness
         return value,value
+    def permanent_owner(self,permanent,fallback=None):
+        if permanent.owner in self.players: return self.player(permanent.owner)
+        controller,_=self.find_permanent(permanent.uid)
+        owner=controller or fallback
+        if owner is not None: permanent.owner=owner.user_id
+        return owner
     def find_permanent(self,uid):
         for player in self.players.values():
             permanent=next((x for x in player.battlefield if x.uid==uid),None)
@@ -197,6 +204,22 @@ class Game:
         return None,None
     def attached_auras(self,permanent):
         return [aura for player in self.players.values() for aura in player.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_target_types]
+    def _reconcile_control(self):
+        moves=[]
+        for controller in self.players.values():
+            for permanent in list(controller.battlefield):
+                if permanent.owner not in self.players: permanent.owner=controller.user_id
+                control_auras=[]
+                for aura in self.attached_auras(permanent):
+                    if self.card(aura.uid).aura_control:
+                        aura_controller,_=self.find_permanent(aura.uid)
+                        if aura_controller is not None: control_auras.append((aura.layer_timestamp,aura_controller.user_id))
+                desired=max(control_auras)[1] if control_auras else permanent.owner
+                if desired!=controller.user_id: moves.append((controller,self.player(desired),permanent))
+        for old,new,permanent in moves:
+            if permanent not in old.battlefield: continue
+            self._remove_from_combat(permanent.uid); old.battlefield.remove(permanent); permanent.sick=True; new.battlefield.append(permanent)
+            self.log.append(f"{new.user_id} gained control of {self.card(permanent.uid).name}.")
     def aura_stats(self,aura):
         card=self.card(aura.uid)
         if not card.aura_forest_scaling: return card.aura_power,card.aura_toughness
@@ -768,7 +791,7 @@ class Game:
             if self.phase not in ("precombat_main","postcombat_main") or self.stack: raise GameError("Land requires an empty-stack main phase.")
             if not self.can_play_land(user): raise GameError("You already played a land.")
             prior_plays=max(p.lands_played_this_turn,int(p.land_played)); played_extra=prior_plays>0
-            p.hand.pop(index-1); p.battlefield.append(self._make_permanent(uid,c.key)); p.land_played=True; p.lands_played_this_turn=prior_plays+1; self.phase_passes=0
+            p.hand.pop(index-1); p.battlefield.append(self._make_permanent(uid,c.key,owner=user)); p.land_played=True; p.lands_played_this_turn=prior_plays+1; self.phase_passes=0
             self.stack.extend(self._land_event_triggers(user,"enter",played_extra))
             self.log.append(f"{user} played {c.name}."); return
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
@@ -1055,7 +1078,7 @@ class Game:
             elif trigger.ability_effect=="graveyard_return":
                 if not self._graveyard_upkeep_return_eligible(user,trigger.source_uid):
                     self.stack.append(trigger); raise GameError(f"{card.name} no longer has three creature cards above it.")
-                player.graveyard.remove(trigger.source_uid); player.battlefield.append(self._make_permanent(trigger.source_uid,card.key)); result=" and returned it to the battlefield"
+                player.graveyard.remove(trigger.source_uid); player.battlefield.append(self._make_permanent(trigger.source_uid,card.key,owner=player.user_id)); result=" and returned it to the battlefield"
             elif trigger.ability_effect in ("cast_life","death_life"):
                 player.life+=1; result=" and gained 1 life"
             elif trigger.ability_effect=="aura_upkeep_life":
@@ -1319,8 +1342,8 @@ class Game:
 
     def _dies(self,controller,permanent,batch_id=None,death_sources=None):
         dies=not permanent.exile_on_death
-        token=self.is_token(permanent.uid)
-        if not token: (controller.graveyard if dies else controller.exile).append(permanent.uid)
+        token=self.is_token(permanent.uid); owner=self.permanent_owner(permanent,controller)
+        if not token: (owner.graveyard if dies else owner.exile).append(permanent.uid)
         if dies and self.is_creature(permanent):
             self.creatures_died_this_turn+=1
             self._death_triggers(permanent,self.next_uid if batch_id is None else batch_id,death_sources,controller)
@@ -1346,7 +1369,7 @@ class Game:
         if permanent in controller.battlefield:
             self._remember_source_power(permanent); controller.battlefield.remove(permanent)
         self._dies(controller,permanent,trigger_batch,death_sources)
-        if was_land and permanent.uid in controller.graveyard: self.stack.extend(self._land_event_triggers(controller.user_id,"grave"))
+        if was_land and permanent.uid in self.permanent_owner(permanent).graveyard: self.stack.extend(self._land_event_triggers(controller.user_id,"grave"))
         return True
 
     def _queue_state_triggers(self):
@@ -1466,7 +1489,7 @@ class Game:
             target.animated_until_end_combat=True
         elif effect=="create_token":
             uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.creates_token
-            self.player(s.owner).battlefield.append(self._make_permanent(uid,card.creates_token))
+            self.player(s.owner).battlefield.append(self._make_permanent(uid,card.creates_token,owner=s.owner))
         elif effect=="add_power_counters":
             if target is None or target.uid!=s.source_uid: fizzle("its source was gone"); return
             target.power_counters+=min(s.choice_value,max(0,7-target.power_counters))
@@ -1539,12 +1562,13 @@ class Game:
             parts=s.target.split(":"); chosen_land_type=parts[0] if len(parts)==3 else ""; user,uid=(int(x) for x in parts[-2:]); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
             if target is None or not self._aura_can_attach(c,target,colors=self.spell_colors(s)):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
-            aura=self._make_permanent(s.uid,c.key,sick=False,attached_to=target.uid,color_override=s.color_override,chosen_land_type=chosen_land_type); p.battlefield.append(aura)
+            aura=self._make_permanent(s.uid,c.key,owner=s.owner,sick=False,attached_to=target.uid,color_override=s.color_override,chosen_land_type=chosen_land_type); p.battlefield.append(aura)
+            if c.aura_control: self._reconcile_control()
             if c.aura_enters_tapped: self._tap_permanent(user,target)
             if c.aura_enter_flying_damage and "flying" in self.current_keywords(target):
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=c.key
                 self.stack.append(Spell(s.owner,uid,c.key,f"{user}:{target.uid}",ability_effect="earthbind_enter",source_uid=aura.uid,color_override=aura.color_override))
-        elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(self._make_permanent(s.uid,c.key,tapped=c.enters_tapped,color_override=s.color_override))
+        elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(self._make_permanent(s.uid,c.key,owner=s.owner,tapped=c.enters_tapped,color_override=s.color_override))
         elif c.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
             if s.target.startswith("S:"):
                 target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid),None)
@@ -1664,9 +1688,9 @@ class Game:
             target=next((x for x in controller.battlefield if x.uid==uid),None)
             if target is None or not self.is_creature(target):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
-            self._remember_source_power(target); controller.battlefield.remove(target)
+            self._remember_source_power(target); owner=self.permanent_owner(target,controller); controller.battlefield.remove(target)
             if self.is_token(target.uid): self.cards.pop(target.uid,None)
-            else: controller.hand.append(target.uid)
+            else: owner.hand.append(target.uid)
             self._remove_from_combat(target.uid)
             p.graveyard.append(s.uid)
         elif c.effect in ("return_grave_creature_hand","return_grave_card_hand","reanimate_creature"):
@@ -1674,7 +1698,7 @@ class Game:
             if uid not in p.graveyard or (creature_only and not self.card(uid).creature):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             p.graveyard.remove(uid)
-            if c.effect=="reanimate_creature": p.battlefield.append(self._make_permanent(uid,self.cards[uid]))
+            if c.effect=="reanimate_creature": p.battlefield.append(self._make_permanent(uid,self.cards[uid],owner=p.user_id))
             else: p.hand.append(uid)
             p.graveyard.append(s.uid)
         elif c.effect in ("destroy_creature","exile_creature_life"):
@@ -1686,9 +1710,9 @@ class Game:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             life_gain=max(0,self.current_stats(target)[0]) if c.effect=="exile_creature_life" else 0
             if c.effect=="exile_creature_life":
-                self._remember_source_power(target); self._remove_from_combat(target.uid); controller.battlefield.remove(target)
+                self._remember_source_power(target); self._remove_from_combat(target.uid); owner=self.permanent_owner(target,controller); controller.battlefield.remove(target)
                 if self.is_token(target.uid): self.cards.pop(target.uid,None)
-                else: controller.exile.append(target.uid)
+                else: owner.exile.append(target.uid)
                 controller.life+=life_gain
             else: self._destroy(controller,target,allow_regeneration=False)
             p.graveyard.append(s.uid)
@@ -1731,6 +1755,7 @@ class Game:
         return next(x for x in p.battlefield if x.uid==uid)
     def _sba(self):
         while True:
+            self._reconcile_control()
             affected=False; trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
             all_permanents={permanent.uid:permanent for player in self.players.values() for permanent in player.battlefield}
             for controller in self.players.values():
@@ -1739,7 +1764,7 @@ class Game:
                     if card.aura_target_types:
                         target=all_permanents.get(permanent.attached_to)
                         if target is None or not self._aura_can_attach(card,target,permanent):
-                            self._remember_source_power(permanent); controller.battlefield.remove(permanent); controller.graveyard.append(permanent.uid); affected=True
+                            self._remember_source_power(permanent); owner=self.permanent_owner(permanent,controller); controller.battlefield.remove(permanent); owner.graveyard.append(permanent.uid); affected=True
                         continue
                     if not self.is_creature(permanent): continue
                     toughness=self.current_stats(permanent)[1]
@@ -1814,6 +1839,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

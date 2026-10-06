@@ -542,6 +542,13 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:124"; game.stack=[spell_type(10,uid,"lea:124",choice_value=3)]
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Sacrifice (adds {B}×3)",rendered)
 
+    async def test_public_embed_identifies_a_stolen_permanents_owner(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=f"Player {user_id}"))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="giant"
+        game.player(10).battlefield=[permanent_type(uid,"giant",owner=20,sick=True)]
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("owned by Player 20",rendered)
+
     async def test_public_embed_shows_mass_redraw_spell_on_stack(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell

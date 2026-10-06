@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.85.0"
+    __version__="0.86.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -116,6 +116,7 @@ class MTG(commands.Cog):
             p=g.players[user]; field=[]
             for n,x in enumerate(p.battlefield,1):
                 c=g.card(x.uid); state=" ↷" if x.tapped else ""
+                if x.owner in g.players and x.owner!=user: state+=f" - owned by {names[x.owner]}"
                 stats=(lambda value:f" {value[0]}/{value[1]}")(g.current_stats(x)) if g.is_creature(x) else ""
                 current_keywords=g.current_keywords(x); active=sorted(current_keywords-set(c.keywords)); suppressed=sorted(set(c.keywords)-current_keywords)
                 active_protection=sorted(g.current_protections(x)-set(c.protection_colors))
