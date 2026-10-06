@@ -277,6 +277,19 @@ class PokedexTests(unittest.TestCase):
         self.assertIn("Catch rate",caught_text)
         self.assertIn("Speed",caught_text)
 
+    def test_retro_list_uses_names_without_redundant_status_symbols(self):
+        session=PokedexSession(1,{25,26},{25},page=1)
+        text=render_pokedex(session).description
+        self.assertIn("| #025  PIKACHU",text)
+        self.assertIn("| #026  RAICHU",text)
+        unseen_text=render_pokedex(PokedexSession(1,set(),set())).description
+        self.assertIn("| #001  ???",unseen_text)
+        self.assertNotIn("| O #",text)
+        self.assertNotIn("| o #",text)
+        session.selected_id=25
+        self.assertIn("| CAUGHT",render_pokedex(session).description)
+        self.assertNotIn("O CAUGHT",render_pokedex(session).description)
+
     def test_styles_are_modular_and_fall_back_to_retro(self):
         self.assertEqual(set(POKEDEX_STYLES),{"retro","compact"})
         self.assertEqual(resolve_style("missing").key,"retro")
