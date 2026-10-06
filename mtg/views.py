@@ -99,6 +99,16 @@ class VesuvanSelect(discord.ui.Select):
         else: action=lambda g:g.choose_vesuvan_copy(i.user.id,accept=value=="accept")
         await self.cog.act(i,self.game_id,action,"vesuvan_copy_choice")
 
+class FalseOrdersSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id; spell=game.stack[-1]
+        options=[discord.SelectOption(label="Do not assign a new blocker",value="decline",description="Only remove the targeted creature from its current combat assignments")]
+        options.extend(discord.SelectOption(label=f"A:{position}. {game.card(attacker.uid).name}"[:100],description="Have the targeted creature block this attacker",value=str(position)) for position,attacker in game.false_orders_choices(spell.choice_owner)[:24])
+        super().__init__(placeholder="Resolve False Orders",min_values=1,max_values=1,options=options,custom_id=f"mtg:{game_id}:false_orders")
+    async def callback(self,i):
+        value=self.values[0]; position=None if value=="decline" else int(value)
+        await self.cog.act(i,self.game_id,lambda g:g.choose_false_orders(i.user.id,position),"false_orders_choice")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -134,6 +144,8 @@ class GameView(discord.ui.View):
             self.add_item(CopySelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="vesuvan_copy":
             self.add_item(VesuvanSelect(self.cog,self.game_id,game))
+        if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="false_orders":
+            self.add_item(FalseOrdersSelect(self.cog,self.game_id,game))
         if game and game.phase=="untap" and game.untap_choices(): self.add_item(UntapSelect(self.cog,self.game_id,game))
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)

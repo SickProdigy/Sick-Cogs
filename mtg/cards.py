@@ -557,6 +557,7 @@ ALPHA_SPELLS = {
     "lea:98": {"effect":"add_mana", "mana_color":"B", "mana_amount":3},
     "lea:178": {"effect":"destroy_wall"},
     "lea:6": {"effect":"blaze_of_glory"},
+    "lea:147": {"effect":"false_orders"},
     "lea:220": {"effect":"destroy_all_enchantments"},
     "lea:193": {"effect":"prevent_combat_damage"},
     "lea:50": {"effect":"draw_target_x"},

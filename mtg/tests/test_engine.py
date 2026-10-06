@@ -4053,4 +4053,31 @@ class AlphaLureTests(unittest.TestCase):
     def test_legacy_state_defaults_multiple_block_fields(self):
         raw=ready().to_raw(); raw.pop("additional_blocks"); raw.pop("attacker_damage_assignments"); restored=Game.from_raw(raw); self.assertEqual(restored.additional_blocks,{}); self.assertEqual(restored.attacker_damage_assignments,{})
 
+class AlphaFalseOrdersTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; permanent=Permanent(uid,key,owner=user,sick=False); game.player(user).battlefield.append(permanent); return permanent
+    def pending(self,target_key="lea:179"):
+        game=ready(); first=self.add(game,10,"bear"); second=self.add(game,10,"giant"); target=self.add(game,20,target_key); other=self.add(game,20,"bear"); game.active_index=0; game.attackers=[first.uid,second.uid]; game.blocks={first.uid:target.uid}; game.blocked_attackers=[first.uid]; game.combat_participants=[first.uid,second.uid,target.uid]; game.phase="after_blockers"; game.priority_user=10
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:147"; game.stack=[Spell(10,spell,"lea:147",f"20:{target.uid}")]; return game,first,second,target,other,spell
+
+    def test_resolution_choice_persists_unblocks_and_reassigns(self):
+        game,first,second,target,other,spell=self.pending(); game.pass_priority(10); game.pass_priority(20); self.assertTrue(game.stack[-1].decision_pending); self.assertEqual(game.priority_user,10)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual([position for position,_ in restored.false_orders_choices(10)],[1,2]); restored.choose_false_orders(10,2)
+        self.assertNotIn(first.uid,restored.blocked_attackers); self.assertEqual(restored.blockers_for(first.uid),[]); self.assertEqual(restored.blockers_for(second.uid),[target.uid]); self.assertIn(second.uid,restored.blocked_attackers); self.assertIn(spell,restored.player(10).graveyard)
+
+    def test_decline_removes_multi_blocker_and_only_sole_blocks_become_unblocked(self):
+        game,first,second,target,other,spell=self.pending(); game.blocks={first.uid:target.uid,second.uid:target.uid}; game.additional_blocks={second.uid:[other.uid]}; game.blocked_attackers=[first.uid,second.uid]; game.pass_priority(10); game.pass_priority(20); game.choose_false_orders(10)
+        self.assertNotIn(first.uid,game.blocked_attackers); self.assertIn(second.uid,game.blocked_attackers); self.assertEqual(game.blockers_for(second.uid),[other.uid])
+
+    def test_target_can_be_nonblocking_and_reassignment_schedules_combat_trigger(self):
+        game,first,second,target,other,spell=self.pending("lea:189"); game.blocks={}; game.blocked_attackers=[]; game.pass_priority(10); game.pass_priority(20); game.choose_false_orders(10,1)
+        self.assertEqual(game.blockers_for(first.uid),[target.uid]); self.assertTrue(any(item.source_uid==target.uid and item.target==f"10:{first.uid}" for item in game.end_combat_destroys))
+
+    def test_timing_target_controller_and_resolution_protection_are_enforced(self):
+        game,first,second,target,other,spell=self.pending(); timing=ready(); creature=self.add(timing,20,"bear"); mountain=self.add(timing,10,"mountain"); false_uid=timing.next_uid; timing.next_uid+=1; timing.cards[false_uid]="lea:147"; timing.player(10).hand.insert(0,false_uid); timing.phase="after_attackers"; timing.priority_user=10
+        with self.assertRaisesRegex(GameError,"after blockers"): timing.play(10,1,"20:1")
+        game.phase="after_blockers"
+        with self.assertRaisesRegex(GameError,"defending player"): game._target_for_cast(CARDS["lea:147"],10,"10:1")
+        ward=self.add(game,20,"lea:33"); ward.attached_to=target.uid; game.pass_priority(10); game.pass_priority(20); self.assertFalse(game.stack); self.assertIn("fizzled",game.log[-1])
+
 if __name__=="__main__": unittest.main()

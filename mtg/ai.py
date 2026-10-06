@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory"}
+TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory","false_orders"}
 
 
 def _target(game, user, card):
@@ -12,6 +12,16 @@ def _target(game, user, card):
         if game.phase!="after_attackers" or user==game.active_user: return None
         choices=[(sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent) and not permanent.tapped and _can_target(game,card,permanent)]
         return f"{user}:{max(choices)[1]}" if choices else None
+    if card.effect=="false_orders":
+        if game.phase!="after_blockers": return None
+        defender=game.opponent(game.active_user); choices=[]
+        for position,permanent in enumerate(game.player(defender).battlefield,1):
+            if not game.is_creature(permanent) or not _can_target(game,card,permanent): continue
+            blocked=game.attackers_for(permanent.uid)
+            if user==game.active_user and not blocked: continue
+            threat=max((game.current_stats(game.find_permanent(uid)[1])[0] for uid in blocked),default=0)
+            choices.append((threat+sum(game.current_stats(permanent)),position))
+        return f"{defender}:{max(choices)[1]}" if choices else None
     if card.aura_reanimate:
         choices=[]
         for target_user in (user,game.opponent(user)):
@@ -840,6 +850,9 @@ def advance_solo(game: Game):
                 _,target,entries=game.natural_selection_decision(user)
                 valued=sorted(entries,key=lambda item:(item[1].cost+item[1].power+item[1].toughness+2*len(item[1].keywords),-item[0]),reverse=target.user_id==user)
                 game.choose_natural_selection(user,tuple(position for position,_ in valued)); game.record(user,"ai_natural_selection"); changed=True; continue
+            if not trigger.ability_effect and game.card(trigger.uid).effect=="false_orders":
+                choices=game.false_orders_choices(user); position=max(choices,key=lambda item:game.current_stats(item[1])[0])[0] if choices and user!=game.active_user else None
+                game.choose_false_orders(user,position); game.record(user,"ai_false_orders_block" if position is not None else "ai_false_orders_decline"); changed=True; continue
             if trigger.ability_effect=="vesuvan_copy":
                 if trigger.choice_value==0:
                     owner,position,_=max(game.vesuvan_choices(trigger),key=lambda item:(sum(game.current_stats(item[2])),item[0]==user,-item[1])); game.choose_vesuvan_copy(user,owner,position); action="ai_vesuvan_target"

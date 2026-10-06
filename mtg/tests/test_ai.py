@@ -958,6 +958,13 @@ class SoloAITests(unittest.TestCase):
         source=self.add(attacking,AI,"giant"); one=self.add(attacking,HUMAN,"bear"); two=self.add(attacking,HUMAN,"bear"); attacking.active_index=0; attacking.attackers=[source.uid]; attacking.blocks={source.uid:one.uid}; attacking.additional_blocks={source.uid:[two.uid]}; attacking.blocked_attackers=[source.uid]; attacking.phase="after_blockers"; attacking.priority_user=AI
         advance_solo(attacking); self.assertIn(source.uid,attacking.attacker_damage_assignments); self.assertTrue(any(event["action"]=="ai_attacker_damage" for event in attacking.history))
 
+    def test_ai_resolves_false_orders_for_attacker_and_defender(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        attacking=solo(order=(AI,HUMAN)); attacking.player(AI).battlefield=[]; attacking.player(HUMAN).battlefield=[]; attacker=self.add(attacking,AI,"giant"); blocker=self.add(attacking,HUMAN,"bear"); attacking.active_index=0; attacking.attackers=[attacker.uid]; attacking.blocks={attacker.uid:blocker.uid}; attacking.blocked_attackers=[attacker.uid]; uid=attacking.next_uid; attacking.next_uid+=1; attacking.cards[uid]="lea:147"; attacking.stack=[spell_type(AI,uid,"lea:147",f"{HUMAN}:{blocker.uid}",decision_pending=True,choice_owner=AI)]; attacking.phase="after_blockers"; attacking.priority_user=AI
+        advance_solo(attacking); self.assertEqual(attacking.blockers_for(attacker.uid),[]); self.assertTrue(any(event["action"]=="ai_false_orders_decline" for event in attacking.history))
+        defending=solo(order=(HUMAN,AI)); defending.player(HUMAN).battlefield=[]; defending.player(AI).battlefield=[]; weak=self.add(defending,HUMAN,"bear"); strong=self.add(defending,HUMAN,"giant"); target=self.add(defending,AI,"bear"); defending.active_index=0; defending.attackers=[weak.uid,strong.uid]; uid=defending.next_uid; defending.next_uid+=1; defending.cards[uid]="lea:147"; defending.stack=[spell_type(AI,uid,"lea:147",f"{AI}:{target.uid}",decision_pending=True,choice_owner=AI)]; defending.phase="after_blockers"; defending.priority_user=AI
+        advance_solo(defending); self.assertEqual(defending.blockers_for(strong.uid),[target.uid]); self.assertTrue(any(event["action"]=="ai_false_orders_block" for event in defending.history))
+
     def test_ai_targets_best_creature_in_either_graveyard_for_animate_dead(self):
         game=solo(); game.player(AI).graveyard=[]; game.player(HUMAN).graveyard=[]
         cheap=game.next_uid; game.next_uid+=1; game.cards[cheap]="bear"; game.player(AI).graveyard.append(cheap)

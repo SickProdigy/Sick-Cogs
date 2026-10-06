@@ -644,6 +644,14 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         _,mutation,action=cog.mutate_ctx.await_args.args; game=SimpleNamespace(assign_attacker_damage=Mock()); mutation(game)
         game.assign_attacker_damage.assert_called_once_with(10,2,[(1,2),(3,1)]); self.assertEqual(action,"attacker_damage")
 
+    async def test_false_orders_command_and_select_use_shared_choice(self):
+        cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
+        await MTG.orders.callback(cog,ctx,"2"); _,mutation,action=cog.mutate_ctx.await_args.args; game=SimpleNamespace(choose_false_orders=Mock()); mutation(game)
+        game.choose_false_orders.assert_called_once_with(10,2); self.assertEqual(action,"false_orders_choice")
+        cog=cog_fixture(); game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        attacker=game.next_uid; game.next_uid+=1; game.cards[attacker]="bear"; target=game.next_uid; game.next_uid+=1; game.cards[target]="bear"; game.player(10).battlefield=[permanent_type(attacker,"bear",owner=10,sick=False)]; game.player(20).battlefield=[permanent_type(target,"bear",owner=20,sick=False)]; game.attackers=[attacker]; game.active_index=0; game.phase="after_blockers"; spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:147"; game.stack=[spell_type(10,spell,"lea:147",f"20:{target}",decision_pending=True,choice_owner=10)]; game.priority_user=10; cog.games={1:game}
+        view=GameView(cog,1); select=next(item for item in view.children if item.custom_id.endswith(":false_orders")); self.assertEqual([option.value for option in select.options],["decline","1"])
+
     async def test_play_command_accepts_x_and_dash_for_no_target(self):
         cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
         await MTG.play.callback(cog,ctx,position=2,target="-",x_value=3)

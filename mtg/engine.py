@@ -1029,6 +1029,8 @@ class Game:
             raise GameError("Berserk can be cast only before the combat damage step.")
         if c.effect=="blaze_of_glory" and (self.phase!="after_attackers" or user==self.active_user):
             raise GameError("Blaze of Glory can be cast only while defending after attackers and before blockers.")
+        if c.effect=="false_orders" and self.phase!="after_blockers":
+            raise GameError("False Orders can be cast only after blockers and before combat damage.")
         if c.effect=="siren_call" and (user==self.active_user or self.phase not in ("upkeep","draw","precombat_main")):
             raise GameError("Siren’s Call can be cast only during an opponent’s turn before attackers are declared.")
         sacrificed=None
@@ -1205,6 +1207,10 @@ class Game:
             target_user,permanent=self._target_creature(target)
             if target_user!=self.opponent(self.active_user) or target_user!=user: raise GameError("Blaze of Glory must target a creature the defending player controls.")
             return f"{target_user}:{permanent.uid}"
+        if c.effect=="false_orders":
+            target_user,permanent=self._target_creature(target)
+            if target_user!=self.opponent(self.active_user): raise GameError("False Orders must target a creature the defending player controls.")
+            return f"{target_user}:{permanent.uid}"
         if c.effect=="return_creature_hand":
             target_user,permanent=self._target_creature(target)
             return f"{target_user}:{permanent.uid}"
@@ -1303,6 +1309,10 @@ class Game:
                     s.decision_pending=True; self.priority_user=s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="natural_selection" and self.player(int(s.target)).library:
                     s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
+                if not s.ability_effect and self.card(s.uid).effect=="false_orders":
+                    target=self._stable_target_permanent(s.target)
+                    if target is not None and self.find_permanent(target.uid)[0].user_id==self.opponent(self.active_user) and self.is_creature(target) and not self._protected_from(target,self.card(s.uid),self.spell_colors(s)):
+                        s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="drain_power" and self._drain_power_lands(s):
                     s.decision_pending=True; self.priority_user=s.choice_owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="power_sink" and self._power_sink_target(s) is not None:
@@ -1321,6 +1331,48 @@ class Game:
                     self._resolve_end_step_sacrifices(); self.priority_user=self.active_user
                 else:
                     self._empty_mana(); self._advance()
+
+    def false_orders_choices(self,user):
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect or self.card(self.stack[-1].uid).effect!="false_orders":
+            raise GameError("You do not have a resolving False Orders choice.")
+        target=self._stable_target_permanent(self.stack[-1].target)
+        if target is None: return []
+        return [(position,attacker) for position,uid in enumerate(self.attackers,1) if (attacker:=self.find_permanent(uid)[1]) is not None and self.can_block(uid,target.uid)[0]]
+
+    def choose_false_orders(self,user,attacker_position=None):
+        choices={position:attacker for position,attacker in self.false_orders_choices(user)}; spell=self.stack[-1]; target=self._stable_target_permanent(spell.target)
+        if attacker_position is not None:
+            try: attacker_position=int(attacker_position)
+            except (TypeError,ValueError) as error: raise GameError("Choose an attacking-creature position or decline.") from error
+            if attacker_position not in choices: raise GameError("That creature cannot be blocked by the False Orders target.")
+        self.stack.pop(); prior=list(self.attackers_for(target.uid))
+        for attacker_uid in prior:
+            before=self.blockers_for(attacker_uid); remaining=[uid for uid in before if uid!=target.uid]
+            if remaining: self.blocks[attacker_uid]=remaining[0]
+            else: self.blocks.pop(attacker_uid,None)
+            if len(remaining)>1: self.additional_blocks[attacker_uid]=remaining[1:]
+            else: self.additional_blocks.pop(attacker_uid,None)
+            if len(before)==1 and attacker_uid in self.blocked_attackers: self.blocked_attackers.remove(attacker_uid)
+            self.attacker_damage_assignments.pop(attacker_uid,None); self.trample_assignments.pop(attacker_uid,None)
+        self.blocker_damage_assignments.pop(target.uid,None)
+        if attacker_position is not None:
+            attacker=choices[attacker_position]; blockers=self.blockers_for(attacker.uid)
+            self.attacker_damage_assignments.pop(attacker.uid,None); self.trample_assignments.pop(attacker.uid,None)
+            if target.uid not in blockers: blockers.append(target.uid)
+            self.blocks[attacker.uid]=blockers[0]
+            if len(blockers)>1: self.additional_blocks[attacker.uid]=blockers[1:]
+            else: self.additional_blocks.pop(attacker.uid,None)
+            if attacker.uid not in self.blocked_attackers: self.blocked_attackers.append(attacker.uid)
+            if target.uid not in self.combat_participants: self.combat_participants.append(target.uid)
+            active=self.player(self.active_user); defending=self.player(self.opponent(self.active_user)); pending=[]
+            for owner,source,other,other_owner in ((active.user_id,attacker,target,defending.user_id),(defending.user_id,target,attacker,active.user_id)):
+                source_card=self.card(source.uid)
+                if source_card.combat_destroy_nonwall and not self._has_subtype(self.card(other.uid),"Wall"):
+                    uid=self.next_uid; self.next_uid+=1; self.cards[uid]=source_card.key; pending.append(Spell(owner,uid,source_card.key,f"{other_owner}:{other.uid}",ability_effect="end_combat_destroy",source_uid=source.uid,color_override=source.color_override))
+            pending.sort(key=lambda trigger:0 if trigger.owner==self.active_user else 1); self.end_combat_destroys.extend(pending)
+        self.player(spell.owner).graveyard.append(spell.uid); spell.decision_pending=False; self.log.append(f"{user} resolved False Orders"+(f" and blocked with {self.card(target.uid).name}." if attacker_position is not None else " without a new block."))
+        if self.stack: self.stack[-1].passes=0
+        self.priority_user=self.stack[-1].choice_owner if self.stack and self.stack[-1].decision_pending else self.active_user; self.phase_passes=0
 
     def vesuvan_choices(self,trigger=None):
         trigger=trigger or (self.stack[-1] if self.stack else None)
@@ -2346,6 +2398,8 @@ class Game:
             user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
             if target is None or user!=self.opponent(self.active_user) or not self.is_creature(target): p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             target.temporary_max_blocks=max(target.temporary_max_blocks,len(self.attackers)); target.must_block_all=True; p.graveyard.append(s.uid)
+        elif c.effect=="false_orders":
+            p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal.")
         elif c.effect=="power_sink":
             p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone.")
         elif c.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
@@ -2652,6 +2706,7 @@ class Game:
             raise GameError("The active player must choose whether to skip their draw for Island Sanctuary first.")
         if self.stack and self.stack[-1].decision_pending:
             if self.stack[-1].ability_effect=="vesuvan_copy": message="The pending Vesuvan target must be chosen first." if self.stack[-1].choice_value==0 else "The pending Vesuvan copy decision must be completed first."
+            elif not self.stack[-1].ability_effect and self.card(self.stack[-1].uid).effect=="false_orders": message="The resolving False Orders assignment must be chosen first."
             elif self.stack[-1].ability_effect: message="The pending trigger controller must pay or decline first."
             elif self.card(self.stack[-1].uid).enters_copy_types: message="The pending copy choice must be completed first."
             else: message="The pending private library search must be completed first."
