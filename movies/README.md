@@ -15,7 +15,7 @@ runtime, genres, status, and TMDb rating.
 4. Optional: let users opt in to notifications by assigning them a role, then set `[p]movieset role @MovieNews`.
 5. Start scheduled checks with `[p]movieset enable`; stop them with `[p]movieset disable`.
 
-The cog checks hourly, posts at most one unposted movie per check, and enforces a configurable per-day cap so the channel is not spammed.
+The cog checks each server on its own persisted hourly schedule, posts at most one unposted movie per check, and enforces a configurable per-day cap. Reloading or restarting the cog preserves the next check time, so a release backlog cannot cause rapid-fire posts.
 
 ## Commands
 
@@ -31,5 +31,5 @@ The cog checks hourly, posts at most one unposted movie per check, and enforces 
 - `[p]movieset minvotes <count>` - avoid very low-signal releases.
 - `[p]movieset preview` - list matching releases without posting.
 - `[p]movieset force` - post the next unposted release immediately.
-- `[p]movieset settings` - show current settings.
+- `[p]movieset settings` - show current settings, readiness, and the next scheduled check.
 - `[p]movieset clearhistory` - allow previously-posted movie IDs to post again.
