@@ -1876,6 +1876,48 @@ class SpellTests(unittest.TestCase):
         g.pass_priority(10); self.assertEqual(len(g.stack),1)
         g.pass_priority(20); self.assertFalse(g.stack); self.assertEqual(opponent.life,16)
 
+class AlphaIslandDependentCreatureTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_attack_requires_defender_island_and_typed_dual_counts(self):
+        game=ready(); serpent=self.add(game,10,"lea:76"); own_island=self.add(game,10,"island")
+        self.assertFalse(game.can_attack_permanent(serpent))
+        dual=self.add(game,20,"lea:283"); self.assertTrue(game.can_attack_permanent(serpent))
+        game.player(20).battlefield.remove(dual); self.assertFalse(game.can_attack_permanent(serpent))
+        game._destroy(game.player(10),own_island,allow_regeneration=False); game._sba()
+        self.assertEqual(game.stack[-1].source_uid,serpent.uid)
+
+    def test_no_island_queues_one_persisted_trigger_and_later_island_does_not_cancel_it(self):
+        game=ready(); serpent=self.add(game,10,"lea:76"); serpent.regeneration_shields=1
+        game._sba(); self.assertEqual(len(game.stack),1); self.assertEqual(game.stack[-1].ability_effect,"no_land_sacrifice")
+        game._sba(); self.assertEqual(len(game.stack),1)
+        self.add(game,10,"island"); restored=Game.from_raw(game.to_raw()); self.resolve_top(restored)
+        self.assertIn(serpent.uid,restored.player(10).graveyard); self.assertEqual([restored.card(x.uid).name for x in restored.player(10).battlefield],["Island"])
+
+    def test_source_removal_fizzles_trigger_and_sacrifice_creates_death_trigger(self):
+        removed=ready(); serpent=self.add(removed,10,"lea:76"); removed._sba()
+        removed.player(10).battlefield.remove(serpent); removed.player(10).graveyard.append(serpent.uid); self.resolve_top(removed)
+        self.assertIn("source was gone",removed.log[-1])
+
+        game=ready(); self.add(game,10,"lea:270"); serpent=self.add(game,10,"lea:76"); game._sba(); self.resolve_top(game)
+        self.assertIn(serpent.uid,game.player(10).graveyard); self.assertEqual(game.stack[-1].ability_effect,"death_life")
+
+    def test_simultaneous_state_triggers_use_apnap_order(self):
+        game=ready(); active=self.add(game,10,"lea:76"); nonactive=self.add(game,20,"lea:76")
+        game._sba(); self.assertEqual([(item.owner,item.source_uid) for item in game.stack],[(10,active.uid),(20,nonactive.uid)])
+        game._sba(); self.assertEqual(len(game.stack),2)
+
+    def test_pirate_ship_reuses_any_target_tap_damage(self):
+        game=ready(); pirate=self.add(game,10,"lea:70"); self.add(game,10,"island")
+        game.activate_ability(10,1,"20"); self.assertTrue(pirate.tapped); self.assertEqual(game.stack[-1].ability_effect,"damage_any")
+        self.resolve_top(game); self.assertEqual(game.player(20).life,19)
+
+
 class AlphaFastbondTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

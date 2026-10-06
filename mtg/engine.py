@@ -214,7 +214,10 @@ class Game:
     def can_attack_permanent(self,permanent):
         card=self.card(permanent.uid); keywords=self.current_keywords(permanent)
         defender_override=any(self.card(aura.uid).aura_attack_override for aura in self.attached_auras(permanent))
-        return self.is_creature(permanent) and not permanent.tapped and (not permanent.sick or card.haste) and ("defender" not in keywords or defender_override)
+        defender=self.player(self.opponent(self.active_user))
+        required=card.attack_requires_defender_land_type
+        has_required=not required or any(self.card(x.uid).has_land_type(required) for x in defender.battlefield)
+        return self.is_creature(permanent) and not permanent.tapped and (not permanent.sick or card.haste) and ("defender" not in keywords or defender_override) and has_required
 
     def _draw(self,p,n=1):
         for _ in range(n):
@@ -1017,6 +1020,18 @@ class Game:
         if was_land and permanent.uid in controller.graveyard: self.stack.extend(self._land_event_triggers(controller.user_id,"grave"))
         return True
 
+    def _queue_state_triggers(self):
+        pending={item.source_uid for item in self.stack if item.ability_effect=="no_land_sacrifice"}
+        for controller_id in (self.active_user,self.opponent(self.active_user)):
+            controller=self.player(controller_id)
+            land_types={land_type for permanent in controller.battlefield for land_type in ("plains","island","swamp","mountain","forest") if self.card(permanent.uid).has_land_type(land_type)}
+            for source in controller.battlefield:
+                card=self.card(source.uid); required=card.sacrifice_without_land_type
+                if not required or required in land_types or source.uid in pending: continue
+                uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
+                self.stack.append(Spell(controller_id,uid,card.key,f"{controller_id}:{source.uid}",ability_effect="no_land_sacrifice",source_uid=source.uid,color_override=source.color_override))
+                pending.add(source.uid)
+
     def _resolve_ability(self,s):
         card=CARDS[s.key]; effect=s.ability_effect
         def target_permanent():
@@ -1027,8 +1042,12 @@ class Game:
             self.cards.pop(s.uid,None); self.log.append(f"{card.name} ability fizzled because {reason}.")
         controller,target=target_permanent()
         target_card=self.card(target.uid) if target is not None else None
-        if target is not None and effect not in ("self","regenerate","end_combat_destroy") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
-        if effect=="end_combat_destroy":
+        if target is not None and effect not in ("self","regenerate","end_combat_destroy","no_land_sacrifice") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
+        if effect=="no_land_sacrifice":
+            if target is None or target.uid!=s.source_uid: fizzle("its source was gone"); return
+            trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
+            self._remove_from_combat(target.uid); controller.battlefield.remove(target); self._dies(controller,target,trigger_batch,death_sources)
+        elif effect=="end_combat_destroy":
             if target is None: fizzle("its combatant was gone"); return
             self._destroy(controller,target)
         elif effect=="self":
@@ -1320,7 +1339,8 @@ class Game:
                         self._remove_from_combat(permanent.uid); controller.battlefield.remove(permanent); self._dies(controller,permanent,trigger_batch,death_sources); affected=True
                     elif permanent.damage>=toughness:
                         self._destroy(controller,permanent,allow_regeneration=not permanent.cant_regenerate,trigger_batch=trigger_batch,death_sources=death_sources); affected=True
-            if not affected: return
+            if not affected:
+                self._queue_state_triggers(); return
     def _cleanup(self):
         self.prevent_combat_damage=False
         for p in self.players.values():

@@ -585,6 +585,17 @@ class SoloAITests(unittest.TestCase):
         self.assertTrue(forest.tapped); self.assertEqual(game.stack[-1].uid,birds)
         self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
 
+    def test_ai_casts_island_dependent_creature_only_with_an_island(self):
+        stranded=solo(order=(AI,HUMAN)); stranded.player(AI).kept=True; stranded.player(HUMAN).kept=True; stranded.player(AI).hand=[]
+        pirate=self.add(stranded,AI,"lea:70","hand"); [self.add(stranded,AI,"forest") for _ in range(4)]; self.add(stranded,AI,"lea:265")
+        stranded.active_index=0; stranded.phase="precombat_main"; stranded.priority_user=AI; stranded.player(AI).land_played=True
+        advance_solo(stranded); self.assertIn(pirate,stranded.player(AI).hand); self.assertFalse(stranded.stack)
+
+        supported=solo(order=(AI,HUMAN)); supported.player(AI).kept=True; supported.player(HUMAN).kept=True; supported.player(AI).hand=[]
+        pirate=self.add(supported,AI,"lea:70","hand"); self.add(supported,AI,"island"); [self.add(supported,AI,"forest") for _ in range(4)]
+        supported.active_index=0; supported.phase="precombat_main"; supported.priority_user=AI; supported.player(AI).land_played=True
+        advance_solo(supported); self.assertEqual(supported.stack[-1].uid,pirate)
+
     def test_ai_casts_fastbond_and_avoids_lethal_extra_land(self):
         casting=solo(order=(AI,HUMAN)); casting.player(AI).kept=True; casting.player(HUMAN).kept=True; casting.player(AI).hand=[]
         spell=self.add(casting,AI,"lea:192","hand"); self.add(casting,AI,"forest","hand"); self.add(casting,AI,"forest")

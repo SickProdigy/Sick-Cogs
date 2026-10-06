@@ -179,6 +179,8 @@ def _play_one(game, user, difficulty):
                 x_value=game.spell_mana_value(target_spell)
         if card.land or (x_value is not None and x_value<1 and card.effect!="counter_mana_value_x") or not game.can_pay(user,card,x_value or 0):
             continue
+        if card.sacrifice_without_land_type and not any(game.card(permanent.uid).has_land_type(card.sacrifice_without_land_type) for permanent in player.battlefield):
+            continue
         if card.effect=="prevent_combat_damage" and not _fog_useful(game,user):
             continue
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):

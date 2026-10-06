@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 54 creatures playable through 0.55.0; 23 remain |
+| Creatures with abilities | 77 | 56 creatures playable through 0.61.0; 21 remain |
 | Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
 | Enchantments | 68 | 37 enchantments playable through 0.60.0; 31 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
@@ -142,3 +142,5 @@ The 0.58.0 restricted-X promotion adds Drain Life. The mana solver now supports 
 The 0.59.0 exact-mana-value-counter promotion adds Spell Blast. A shared spell mana-value calculation includes the chosen value of every X in a spell on the stack. Spell Blast requires its caster's X to equal that mana value before any mana is committed, persists the target spell UID and X, and rechecks both target existence and mana value on resolution. Zero-mana spells remain legal with X=0, while activated and triggered abilities remain illegal targets. Discord displays X and the public stack target, and solo AI selects an opposing spell only when it can pay the exact required X.
 
 The 0.60.0 extra-land promotion adds Fastbond. A persisted per-turn land count preserves old saves while distinguishing the first land from every later land. Each Fastbond controlled by the land player creates its own independent, preventable damage trigger for every extra land; triggers use APNAP ordering alongside Ankh of Mishra, persist through reload, and survive source removal. Removing the final Fastbond immediately restores the ordinary land-play limit. Discord renders the permission and pending triggers, while solo AI values extra lands but refuses a play whose known Fastbond triggers would be lethal.
+
+The 0.61.0 Island-dependent-creature promotion adds Pirate Ship and Sea Serpent. Attack declaration checks the defending battlefield for the Island land type, including Alpha dual lands. A shared state-trigger path detects when either creature's controller has no Islands, creates one persisted trigger per source in APNAP order without duplicates, and sacrifices the source on resolution even if an Island appears later; source removal safely fizzles the trigger, and regeneration cannot replace sacrifice. Pirate Ship reuses the validated summoning-sick tap activation and any-target damage path. Discord renders both restrictions and pending triggers, while solo AI refuses to cast either creature without an Island and obeys the attack restriction.

@@ -105,6 +105,8 @@ class Card:
     creates_token: str = ""
     opponent_damage_discard_random: bool = False
     combat_destroy_nonwall: bool = False
+    attack_requires_defender_land_type: str = ""
+    sacrifice_without_land_type: str = ""
     type_line: str = ""
     set_code: str = ""
 
@@ -174,6 +176,8 @@ class Card:
         if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
         if self.opponent_damage_discard_random: abilities.append("Whenever this creature deals damage to an opponent, that player discards a card at random")
         if self.combat_destroy_nonwall: abilities.append("Whenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat")
+        if self.attack_requires_defender_land_type: abilities.append(f"Can't attack unless defending player controls a {self.attack_requires_defender_land_type.title()}")
+        if self.sacrifice_without_land_type: abilities.append(f"When you control no {self.sacrifice_without_land_type.title()}s, sacrifice this creature")
         if self.death_life: abilities.append("Whenever a creature dies, you may pay {1} to gain 1 life")
         if self.animate_combat: abilities.append("{2}: Becomes a 3/6 Golem artifact creature until end of combat; activate only during combat")
         if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
@@ -326,6 +330,11 @@ ALPHA_ACTIVATED_CREATURES = {
     "lea:155": {"activation_cost":"{R}", "activated_toughness":1},
     "lea:174": {"activation_cost":"{R}", "activated_power":1},
     "lea:181": {"activation_cost":"{R}", "activated_power":1},
+}
+
+ALPHA_ISLAND_DEPENDENT_CREATURES = {
+    "lea:70": {"attack_requires_defender_land_type":"island", "sacrifice_without_land_type":"island", "activation_tap":True, "activation_effect":"damage_any", "activation_amount":1, "activation_text":"Deals 1 damage to any target"},
+    "lea:76": {"attack_requires_defender_land_type":"island", "sacrifice_without_land_type":"island"},
 }
 
 ALPHA_PROTECTIONS = {
@@ -497,15 +506,15 @@ for reference in PLAYABLE_ALPHA:
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
         characteristic_pt=ALPHA_CHARACTERISTIC_CREATURES.get(reference.key),
-        activation_cost=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_cost",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_cost",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_cost",""))),
+        activation_cost=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_cost",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_cost",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_cost",""))),
         activated_power=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activated_power",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_power",0)),
         activated_toughness=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activated_toughness",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_toughness",0)),
         activated_keyword=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_keyword",""),
         sacrifice_after_activations=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("sacrifice_after_activations",0),
-        activation_effect=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_effect",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_effect",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_effect",""))),
-        activation_tap=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_tap",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_tap",False)),
-        activation_text=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_text",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_text",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_text",""))),
-        activation_amount=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_amount",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_amount",0)),
+        activation_effect=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_effect",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_effect",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_effect",""))),
+        activation_tap=ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_tap",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_tap",False)),
+        activation_text=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_text",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_text",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_text",""))),
+        activation_amount=ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_amount",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_amount",0)),
         activation_self_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_self_damage",0),
         enters_tapped=ALPHA_ARTIFACTS.get(reference.key,{}).get("enters_tapped",False),
         conditional_swamp_bonus=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("conditional_swamp_bonus",False),
@@ -547,6 +556,8 @@ for reference in PLAYABLE_ALPHA:
         creates_token=ALPHA_ARTIFACTS.get(reference.key,{}).get("creates_token",""),
         opponent_damage_discard_random=ALPHA_DAMAGE_TRIGGERS.get(reference.key,{}).get("opponent_damage_discard_random",False),
         combat_destroy_nonwall=ALPHA_COMBAT_TRIGGERS.get(reference.key,{}).get("combat_destroy_nonwall",False),
+        attack_requires_defender_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("attack_requires_defender_land_type",""),
+        sacrifice_without_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("sacrifice_without_land_type",""),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 
@@ -567,7 +578,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:
