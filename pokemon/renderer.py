@@ -215,11 +215,10 @@ class BattleRenderer:
         draw.polygon(((165,258),(635,258),(700,350),(100,350)),fill=(132,82,48),outline=RETRO[0])
         draw.polygon(((180,245),(620,245),(650,280),(150,280)),fill=(189,125,67),outline=RETRO[0])
         draw.line((180,258,620,258),fill=(231,170,94),width=5)
-        self._pokeball(draw,(255,297),34)
-        self._pokeball(draw,(545,297),34)
-        for end in ((355,175),(400,150),(445,175),(480,205),(320,205)):draw.line((400,235,*end),fill=RETRO[3],width=5)
+        self._pokeball(draw,(255,276),34)
+        self._pokeball(draw,(545,276),34)
         image=self._open(data,(250,220),trim=True,upscale=True)
-        canvas.paste(image,(400-image.width//2,250-image.height),image)
+        canvas.paste(image,(400-image.width//2,310-image.height),image)
         species=SPECIES[pokemon.species_id]
         trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"
         draw.rounded_rectangle((20,350,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
