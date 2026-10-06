@@ -1731,6 +1731,38 @@ class SpellTests(unittest.TestCase):
         g.pass_priority(10); self.assertEqual(len(g.stack),1)
         g.pass_priority(20); self.assertFalse(g.stack); self.assertEqual(opponent.life,16)
 
+class AlphaLandEventArtifactTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_ankh_land_entry_triggers_persist_and_survive_source_removal(self):
+        game=ready(); first=self.add(game,20,"lea:230"); second=self.add(game,20,"lea:230"); land=self.add(game,10,"forest","hand")
+        game.play(10,1); self.assertEqual(len(game.stack),2); self.assertTrue(all(x.ability_effect=="land_event_damage" and x.target=="10" for x in game.stack))
+        restored=Game.from_raw(game.to_raw())
+        for source in (first,second):
+            controller,permanent=restored.find_permanent(source.uid); controller.battlefield.remove(permanent); controller.graveyard.append(source.uid)
+        self.resolve_top(restored); self.resolve_top(restored)
+        self.assertEqual(restored.player(10).life,16); self.assertIn(land,[x.uid for x in restored.player(10).battlefield])
+        lethal=ready(); self.add(lethal,20,"lea:230"); self.add(lethal,10,"forest","hand"); lethal.player(10).life=2; lethal.play(10,1); self.resolve_top(lethal)
+        self.assertTrue(lethal.finished); self.assertEqual(lethal.winner,20); self.assertIsNone(lethal.priority_user)
+
+    def test_dingus_egg_triggers_for_targeted_and_mass_land_destruction(self):
+        game=ready(); egg=self.add(game,10,"lea:241"); spell=self.add(game,10,"lea:177","hand"); [self.add(game,10,"mountain") for _ in range(3)]; target=self.add(game,20,"forest")
+        game.play(10,1,"20:1"); self.resolve_top(game); self.assertEqual(len(game.stack),1); self.assertEqual(game.stack[-1].target,"20")
+        controller,source=game.find_permanent(egg.uid); controller.battlefield.remove(source); controller.graveyard.append(source.uid); self.resolve_top(game)
+        self.assertEqual(game.player(20).life,18); self.assertIn(target.uid,game.player(20).graveyard)
+
+        mass=ready(); self.add(mass,10,"lea:241"); armageddon=self.add(mass,10,"lea:2","hand"); [self.add(mass,10,"plains") for _ in range(4)]; [self.add(mass,20,"forest") for _ in range(2)]
+        mass.play(10,1); self.resolve_top(mass)
+        self.assertEqual(len(mass.stack),6); self.assertEqual(sum(x.target=="10" for x in mass.stack),4); self.assertEqual(sum(x.target=="20" for x in mass.stack),2)
+        self.assertFalse(any(mass.card(x.uid).land for p in mass.players.values() for x in p.battlefield)); self.assertEqual(Game.from_raw(mass.to_raw()).to_raw(),mass.to_raw())
+
+
 class AlphaReusableArtifactTests(unittest.TestCase):
     def add(self,game,user,key):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

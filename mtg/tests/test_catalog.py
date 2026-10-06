@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),226)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),226)
+        self.assertEqual(len(CARDS),228)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),228)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),166)
-        self.assertEqual(len(REFERENCE_ALPHA),129)
+        self.assertEqual(len(PLAYABLE_ALPHA),168)
+        self.assertEqual(len(REFERENCE_ALPHA),127)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -111,6 +111,8 @@ class CatalogTests(unittest.TestCase):
         promoted_artifacts={card.key for card in PLAYABLE_ALPHA if card.support_family=="artifact"}
         self.assertEqual(promoted_artifacts,set(ALPHA_ARTIFACTS))
         self.assertTrue(all(CARDS[key].kind=="Artifact" for key in ALPHA_ARTIFACTS))
+        self.assertEqual(CARDS["lea:230"].land_enter_damage,2); self.assertIn("Whenever a land enters",CARDS["lea:230"].ability_text)
+        self.assertEqual(CARDS["lea:241"].land_grave_damage,2); self.assertIn("battlefield to graveyard",CARDS["lea:241"].ability_text)
         self.assertTrue(all(CARDS[key].produces for key in ("lea:231","lea:232","lea:234","lea:261","lea:262","lea:263","lea:264","lea:265","lea:269")))
         self.assertIn("{3}: Untap this artifact",CARDS["lea:231"].ability_text)
         self.assertIn("Doesn't untap during your untap step",CARDS["lea:231"].ability_text)
@@ -164,7 +166,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("226 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("228 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

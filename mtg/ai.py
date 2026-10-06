@@ -169,6 +169,10 @@ def _play_one(game, user, difficulty):
             own=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in player.battlefield)
             enemy=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
             score=5+own-enemy
+        elif card.land_enter_damage or card.land_grave_damage:
+            own=sum(game.card(permanent.uid).land for permanent in player.battlefield)
+            enemy=sum(game.card(permanent.uid).land for permanent in game.player(game.opponent(user)).battlefield)
+            score=5+enemy-own
         elif card.opponent_forest_tap_life:
             score=5+sum(game.card(permanent.uid).has_land_type("forest") and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
         elif card.land_tap_damage:

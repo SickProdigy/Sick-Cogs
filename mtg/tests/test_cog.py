@@ -253,6 +253,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.activate_ability(10,1,"S:1"); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Counter target green spell",rendered); self.assertIn("Deathgrip ability",rendered)
 
+    async def test_public_embed_shows_land_event_artifacts_and_trigger(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        for key in ("lea:230","lea:241"):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(20).battlefield.append(permanent_type(uid,key,sick=False))
+        land=game.next_uid; game.next_uid+=1; game.cards[land]="forest"; game.player(10).hand.insert(0,land); game.phase="precombat_main"; game.priority_user=10
+        game.play(10,1); rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Whenever a land enters",rendered); self.assertIn("battlefield to graveyard",rendered); self.assertIn("Ankh of Mishra ability",rendered)
+
     async def test_public_embed_shows_gauntlet_and_lifetap_trigger(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

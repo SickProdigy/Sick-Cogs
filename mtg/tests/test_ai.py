@@ -459,6 +459,14 @@ class SoloAITests(unittest.TestCase):
         self.assertTrue(forest.tapped); self.assertEqual(game.stack[-1].uid,birds)
         self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
 
+    def test_ai_casts_land_event_artifacts_when_opponent_has_more_lands(self):
+        for key in ("lea:230","lea:241"):
+            with self.subTest(key=key):
+                game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+                self.add(game,HUMAN,"forest"); self.add(game,HUMAN,"forest"); spell=self.add(game,AI,key,"hand"); [self.add(game,AI,"forest") for _ in range(4)]
+                game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+                advance_solo(game); self.assertEqual(game.stack[-1].uid,spell)
+
     def test_ai_uses_paid_and_multi_mana_artifacts_to_enable_spells(self):
         prism=solo(order=(AI,HUMAN)); prism.player(HUMAN).kept=True; prism.player(AI).kept=True; prism.player(AI).hand=[]
         source=self.add(prism,AI,"lea:234"); self.add(prism,AI,"mountain"); self.add(prism,AI,"mountain"); spell=self.add(prism,AI,"lea:38","hand")

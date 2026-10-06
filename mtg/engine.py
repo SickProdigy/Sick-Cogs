@@ -251,6 +251,16 @@ class Game:
                 if extra: output[extra]=output.get(extra,0)+1
         return output
 
+    def _land_event_triggers(self,user,event):
+        field="land_enter_damage" if event=="enter" else "land_grave_damage"
+        triggers=[]
+        for controller in self.players.values():
+            for source in controller.battlefield:
+                if not getattr(self.card(source.uid),field): continue
+                uid=self.next_uid; self.next_uid+=1; card=self.card(source.uid); self.cards[uid]=card.key
+                triggers.append(Spell(controller.user_id,uid,card.key,str(user),ability_effect="land_event_damage",source_uid=source.uid,color_override=source.color_override))
+        return triggers
+
     def _tap_triggers(self,user,permanent,mana_symbol):
         tapped_card=self.card(permanent.uid)
         if not tapped_card.land: return []
@@ -457,6 +467,7 @@ class Game:
             if self.phase not in ("precombat_main","postcombat_main") or self.stack: raise GameError("Land requires an empty-stack main phase.")
             if p.land_played: raise GameError("You already played a land.")
             p.hand.pop(index-1); p.battlefield.append(Permanent(uid,c.key,sick=False)); p.land_played=True; self.phase_passes=0
+            self.stack.extend(self._land_event_triggers(user,"enter"))
             self.log.append(f"{user} played {c.name}."); return
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
         target=self._target_for_cast(c,user,target)
@@ -770,8 +781,11 @@ class Game:
             self.log.append(f"{self.card(permanent.uid).name} regenerated.")
             return False
         self._remove_from_combat(permanent.uid)
+        was_land=self.card(permanent.uid).land
         if permanent in controller.battlefield: controller.battlefield.remove(permanent)
-        self._dies(controller,permanent); return True
+        self._dies(controller,permanent)
+        if was_land and permanent.uid in controller.graveyard: self.stack.extend(self._land_event_triggers(controller.user_id,"grave"))
+        return True
 
     def _resolve_ability(self,s):
         card=CARDS[s.key]; effect=s.ability_effect
@@ -800,6 +814,8 @@ class Game:
             self.player(int(s.target)).life-=card.land_tap_damage or card.aura_tap_damage
         elif effect=="tap_life":
             self.player(int(s.target)).life+=card.opponent_forest_tap_life
+        elif effect=="land_event_damage":
+            self.player(int(s.target)).life-=card.land_enter_damage or card.land_grave_damage
         elif effect=="draw_self":
             self._draw(self.player(s.owner),1)
         elif effect=="untap_self":
@@ -971,12 +987,11 @@ class Game:
             target=next((x for x in controller.battlefield if x.uid==uid),None)
             if target is None or not self.card(target.uid).land:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
-            controller.battlefield.remove(target); controller.graveyard.append(target.uid); p.graveyard.append(s.uid)
+            self._destroy(controller,target,allow_regeneration=False); p.graveyard.append(s.uid)
         elif c.effect in ("destroy_all_lands","destroy_land_type"):
             for controller in self.players.values():
                 destroyed=[x for x in controller.battlefield if self.card(x.uid).land and (c.effect=="destroy_all_lands" or self.card(x.uid).has_land_type(c.land_type))]
-                controller.battlefield=[x for x in controller.battlefield if x not in destroyed]
-                controller.graveyard.extend(x.uid for x in destroyed)
+                for permanent in destroyed: self._destroy(controller,permanent,allow_regeneration=False)
             p.graveyard.append(s.uid)
         self.log.append(f"{c.name} resolved."); self._sba(); self._life()
 

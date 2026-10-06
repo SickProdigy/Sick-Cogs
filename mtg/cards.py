@@ -82,6 +82,8 @@ class Card:
     aura_tap_damage: int = 0
     mountain_extra_red: bool = False
     opponent_forest_tap_life: int = 0
+    land_enter_damage: int = 0
+    land_grave_damage: int = 0
     type_line: str = ""
     set_code: str = ""
 
@@ -141,6 +143,8 @@ class Card:
         if self.aura_tap_damage: abilities.append(f"Whenever enchanted land becomes tapped, deals {self.aura_tap_damage} damage to its controller")
         if self.mountain_extra_red: abilities.append("Mountains tapped for mana add an additional R")
         if self.opponent_forest_tap_life: abilities.append(f"Whenever an opponent taps a Forest, you gain {self.opponent_forest_tap_life} life")
+        if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
+        if self.land_grave_damage: abilities.append(f"Whenever a land goes from battlefield to graveyard, deals {self.land_grave_damage} damage to its controller")
         if self.skip_untap: abilities.append("Doesn't untap during your untap step")
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
@@ -214,6 +218,8 @@ ALPHA_ENCHANTMENTS = {
 }
 
 ALPHA_ARTIFACTS = {
+    "lea:230": {"land_enter_damage":2},
+    "lea:241": {"land_grave_damage":2},
     "lea:231": {"produces":("C",), "mana_amount":3, "skip_untap":True, "activation_cost":"{3}", "activation_effect":"untap_self", "activation_text":"Untap this artifact"},
     "lea:234": {"produces":("W","U","B","R","G"), "mana_activation_cost":"{2}"},
     "lea:244": {"global_buff_color":"R", "global_power":1, "global_toughness":1, "mountain_extra_red":True},
@@ -427,6 +433,8 @@ for reference in PLAYABLE_ALPHA:
         aura_tap_damage=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("aura_tap_damage",0),
         mountain_extra_red=ALPHA_ARTIFACTS.get(reference.key,{}).get("mountain_extra_red",False),
         opponent_forest_tap_life=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("opponent_forest_tap_life",0),
+        land_enter_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("land_enter_damage",0),
+        land_grave_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("land_grave_damage",0),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 
