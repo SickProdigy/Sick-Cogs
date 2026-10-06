@@ -53,6 +53,7 @@ class Spell:
     source_uid: Optional[int] = None
     color_override: str = ""
     decision_pending: bool = False
+    batch_id: int = 0
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -488,7 +489,7 @@ class Game:
         for produced,count in output.items(): player.mana_pool[produced]=player.mana_pool.get(produced,0)+count
         self.stack.extend(pending_triggers)
         if card.sacrifice_for_mana:
-            player.battlefield.remove(permanent); player.graveyard.append(permanent.uid)
+            player.battlefield.remove(permanent); self._dies(player,permanent)
         self._sba(); self._life()
         self.phase_passes=0
         for spell in self.stack: spell.passes=0
@@ -671,7 +672,7 @@ class Game:
         if self.stack:
             s=self.stack[-1]; s.passes+=1
             if s.passes==2:
-                if s.ability_effect in ("cast_life","upkeep_untap"):
+                if s.ability_effect in ("cast_life","death_life","upkeep_untap"):
                     s.decision_pending=True; self.priority_user=s.owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
@@ -704,7 +705,7 @@ class Game:
             sources,remaining,choices=payment
             for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending)
             player.mana_pool=remaining
-            if trigger.ability_effect=="cast_life":
+            if trigger.ability_effect in ("cast_life","death_life"):
                 player.life+=1; result=" and gained 1 life"
             else:
                 _,source=self.find_permanent(trigger.source_uid)
@@ -844,9 +845,27 @@ class Game:
     def _end_combat(self):
         self.attackers=[]; self.blocks={}; self.blocked_attackers=[]; self.trample_assignments={}
 
-    @staticmethod
-    def _dies(controller,permanent):
-        (controller.exile if permanent.exile_on_death else controller.graveyard).append(permanent.uid)
+    def _death_trigger_sources(self):
+        return [(controller.user_id,source.uid,self.card(source.uid).key,source.color_override) for controller in self.players.values() for source in controller.battlefield if self.card(source.uid).death_life]
+
+    def _death_triggers(self,dead_uid,batch_id,sources=None):
+        triggers=[]
+        by_owner={owner:[] for owner in self.order}
+        for owner,source_uid,key,color_override in (sources if sources is not None else self._death_trigger_sources()):
+            uid=self.next_uid; self.next_uid+=1; self.cards[uid]=key
+            by_owner[owner].append(Spell(owner,uid,key,str(dead_uid),ability_effect="death_life",source_uid=source_uid,color_override=color_override,batch_id=batch_id))
+        for owner in (self.active_user,self.opponent(self.active_user)): triggers.extend(by_owner.get(owner,()))
+        start=len(self.stack)
+        while start and self.stack[start-1].ability_effect=="death_life" and self.stack[start-1].batch_id==batch_id: start-=1
+        merged=self.stack[start:]+triggers
+        merged.sort(key=lambda trigger:0 if trigger.owner==self.active_user else 1)
+        self.stack[start:]=merged
+
+    def _dies(self,controller,permanent,batch_id=None,death_sources=None):
+        dies=not permanent.exile_on_death
+        (controller.graveyard if dies else controller.exile).append(permanent.uid)
+        if dies and self.card(permanent.uid).creature:
+            self._death_triggers(permanent.uid,self.next_uid if batch_id is None else batch_id,death_sources)
 
     def _remove_from_combat(self,uid):
         if uid in self.attackers:
@@ -855,7 +874,7 @@ class Game:
         for attacker,blocker in list(self.blocks.items()):
             if blocker==uid: self.blocks.pop(attacker)
 
-    def _destroy(self,controller,permanent,allow_regeneration=True):
+    def _destroy(self,controller,permanent,allow_regeneration=True,trigger_batch=None,death_sources=None):
         if allow_regeneration and permanent.regeneration_shields:
             permanent.regeneration_shields-=1; permanent.tapped=True; permanent.damage=0
             self._remove_from_combat(permanent.uid)
@@ -864,7 +883,7 @@ class Game:
         self._remove_from_combat(permanent.uid)
         was_land=self.card(permanent.uid).land
         if permanent in controller.battlefield: controller.battlefield.remove(permanent)
-        self._dies(controller,permanent)
+        self._dies(controller,permanent,trigger_batch,death_sources)
         if was_land and permanent.uid in controller.graveyard: self.stack.extend(self._land_event_triggers(controller.user_id,"grave"))
         return True
 
@@ -912,10 +931,11 @@ class Game:
             if target is None: fizzle("its source was gone"); return
             target.tapped=False
         elif effect=="destroy_all_nonland":
+            trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
             for player in self.players.values():
                 for permanent in list(player.battlefield):
                     if any(self.card(permanent.uid).has_type(kind) for kind in ("Artifact","Creature","Enchantment")):
-                        self._destroy(player,permanent)
+                        self._destroy(player,permanent,trigger_batch=trigger_batch,death_sources=death_sources)
         elif effect=="damage_any":
             if ":" in (s.target or ""):
                 if target_card is None or not target_card.creature: fizzle("its target was gone or illegal"); return
@@ -1067,9 +1087,10 @@ class Game:
                     if affected and not self._protected_from(permanent,c,self.spell_colors(s)): permanent.damage+=s.x_value
             p.graveyard.append(s.uid)
         elif c.effect=="destroy_all_creatures":
+            trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
             for controller in self.players.values():
                 for permanent in list(controller.battlefield):
-                    if self.card(permanent.uid).creature: self._destroy(controller,permanent,allow_regeneration=False)
+                    if self.card(permanent.uid).creature: self._destroy(controller,permanent,allow_regeneration=False,trigger_batch=trigger_batch,death_sources=death_sources)
             p.graveyard.append(s.uid)
         elif c.effect=="destroy_permanent":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
@@ -1094,7 +1115,7 @@ class Game:
         return next(x for x in p.battlefield if x.uid==uid)
     def _sba(self):
         while True:
-            affected=False
+            affected=False; trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
             all_permanents={permanent.uid:permanent for player in self.players.values() for permanent in player.battlefield}
             for controller in self.players.values():
                 for permanent in list(controller.battlefield):
@@ -1107,9 +1128,9 @@ class Game:
                     if not card.creature: continue
                     toughness=self.current_stats(permanent)[1]
                     if toughness<=0:
-                        self._remove_from_combat(permanent.uid); controller.battlefield.remove(permanent); self._dies(controller,permanent); affected=True
+                        self._remove_from_combat(permanent.uid); controller.battlefield.remove(permanent); self._dies(controller,permanent,trigger_batch,death_sources); affected=True
                     elif permanent.damage>=toughness:
-                        self._destroy(controller,permanent,allow_regeneration=not permanent.cant_regenerate); affected=True
+                        self._destroy(controller,permanent,allow_regeneration=not permanent.cant_regenerate,trigger_batch=trigger_batch,death_sources=death_sources); affected=True
             if not affected: return
     def _cleanup(self):
         for p in self.players.values():
@@ -1126,11 +1147,12 @@ class Game:
                 if permanent.uid in self.end_step_sacrifices: permanent.sacrifice_at_end_step=False
     def _resolve_end_step_sacrifices(self):
         pending=set(self.end_step_sacrifices); self.end_step_sacrifices=[]
+        trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
         for p in self.players.values():
             sacrificed=[x for x in p.battlefield if x.uid in pending]
             p.battlefield=[x for x in p.battlefield if x not in sacrificed]
             for permanent in sacrificed:
-                p.graveyard.append(permanent.uid)
+                self._dies(p,permanent,trigger_batch,death_sources)
                 self.log.append(f"{self.card(permanent.uid).name} was sacrificed by its end-step trigger.")
     def _life(self):
         losers=[p.user_id for p in self.players.values() if p.life<=0]

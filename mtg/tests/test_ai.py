@@ -481,6 +481,14 @@ class SoloAITests(unittest.TestCase):
         conversion.active_index=0; conversion.phase="precombat_main"; conversion.priority_user=AI; conversion.player(AI).land_played=True
         advance_solo(conversion); self.assertEqual(conversion.stack[-1].uid,glasses)
 
+    def test_ai_pays_soul_net_death_trigger_when_mana_is_available(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
+        self.add(game,AI,"lea:270"); self.add(game,AI,"forest"); victim=self.add(game,HUMAN,"bear")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI
+        game._destroy(game.player(HUMAN),victim,allow_regeneration=False)
+        advance_solo(game); game.pass_priority(HUMAN); before=game.player(AI).life; advance_solo(game)
+        self.assertEqual(game.player(AI).life,before+1); self.assertTrue(any(event["action"]=="ai_trigger_pay" for event in game.history))
+
     def test_ai_pays_or_declines_mana_vault_upkeep_choice(self):
         paid=solo(order=(AI,HUMAN)); paid.player(AI).kept=True; paid.player(HUMAN).kept=True; paid.player(AI).hand=[]
         vault=self.add(paid,AI,"lea:259"); vault.tapped=True; [self.add(paid,AI,"forest") for _ in range(4)]

@@ -1855,6 +1855,59 @@ class AlphaManaVaultTests(unittest.TestCase):
         game.active_index=1; game._start_turn(); self.assertEqual(game.stack[-1].ability_effect,"upkeep_untap")
 
 
+class AlphaSoulNetTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_creature_death_creates_persisted_optional_life_trigger(self):
+        game=ready(); net=self.add(game,10,"lea:270"); victim=self.add(game,20,"bear"); land=self.add(game,10,"forest")
+        game._destroy(game.player(20),victim,allow_regeneration=False)
+        self.assertEqual(game.stack[-1].ability_effect,"death_life"); self.assertEqual(game.stack[-1].source_uid,net.uid)
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored); restored.choose_trigger(10,True)
+        self.assertEqual(restored.player(10).life,21); self.assertTrue(next(x for x in restored.player(10).battlefield if x.uid==land.uid).tapped)
+
+    def test_regeneration_and_exile_do_not_trigger_soul_net(self):
+        regenerated=ready(); self.add(regenerated,10,"lea:270"); victim=self.add(regenerated,20,"bear"); victim.regeneration_shields=1
+        self.assertFalse(regenerated._destroy(regenerated.player(20),victim)); self.assertFalse(regenerated.stack)
+        exiled=ready(); self.add(exiled,10,"lea:270"); victim=self.add(exiled,20,"bear"); victim.exile_on_death=True
+        exiled._destroy(exiled.player(20),victim,allow_regeneration=False)
+        self.assertIn(victim.uid,exiled.player(20).exile); self.assertFalse(exiled.stack)
+
+    def test_simultaneous_deaths_batch_soul_nets_in_apnap_order(self):
+        game=ready(); self.add(game,10,"lea:270"); self.add(game,20,"lea:270")
+        self.add(game,10,"bear"); self.add(game,20,"bear")
+        batch=game.next_uid; sources=game._death_trigger_sources()
+        for player in game.players.values():
+            for permanent in list(player.battlefield):
+                if game.card(permanent.uid).creature:
+                    game._destroy(player,permanent,allow_regeneration=False,trigger_batch=batch,death_sources=sources)
+        triggers=[x for x in game.stack if x.ability_effect=="death_life"]
+        self.assertEqual(len(triggers),4); self.assertEqual([x.owner for x in triggers],[10,10,20,20])
+        self.assertEqual(len({x.batch_id for x in triggers}),1); self.assertEqual(Game.from_raw(game.to_raw()).to_raw(),game.to_raw())
+
+    def test_disk_destruction_uses_last_known_soul_net_source(self):
+        game=ready(); net=self.add(game,10,"lea:270"); disk=self.add(game,10,"lea:266"); self.add(game,10,"plains"); victim=self.add(game,20,"bear")
+        game.activate_ability(10,2); self.resolve_top(game)
+        self.assertIn(net.uid,game.player(10).graveyard); self.assertIn(victim.uid,game.player(20).graveyard)
+        self.assertEqual(len(game.stack),1); self.assertEqual(game.stack[-1].source_uid,net.uid)
+        self.resolve_top(game); game.choose_trigger(10,False); self.assertFalse(game.stack)
+
+    def test_state_based_creature_death_triggers_once(self):
+        game=ready(); self.add(game,10,"lea:270"); victim=self.add(game,20,"bear"); victim.toughness_bonus=-2
+        game._sba(); self.assertIn(victim.uid,game.player(20).graveyard)
+        self.assertEqual(sum(x.ability_effect=="death_life" for x in game.stack),1)
+
+    def test_end_step_creature_sacrifice_triggers_soul_net(self):
+        game=ready(); self.add(game,10,"lea:270"); whelp=self.add(game,20,"lea:141"); whelp.sacrifice_at_end_step=True
+        game.end_step_sacrifices=[whelp.uid]; game._resolve_end_step_sacrifices()
+        self.assertIn(whelp.uid,game.player(20).graveyard); self.assertEqual(game.stack[-1].ability_effect,"death_life")
+
+
 class AlphaStaticArtifactTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
