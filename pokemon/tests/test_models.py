@@ -32,6 +32,25 @@ class DataTests(unittest.TestCase):
         self.assertEqual(SPECIES[132].moves,("transform",))
 
 class BattleTests(unittest.TestCase):
+    def test_classic_battle_narration_and_immunity(self):
+        moves=__import__("pokemon.data",fromlist=["MOVES"]).MOVES
+        self.assertEqual(Battle.effectiveness_line(moves["ember"],10),"It's super effective!")
+        self.assertEqual(Battle.effectiveness_line(moves["water_gun"],1),"It's not very effective...")
+        self.assertEqual(Battle.effectiveness_line(moves["scratch"],92),"It doesn't affect Gastly...")
+        line=Battle.attack_line("Charmander",10,moves["ember"],4,critical=True,status="burn")
+        self.assertIn("A critical hit!",line)
+        self.assertIn("It's super effective!",line)
+        self.assertIn("Caterpie was burned!",line)
+        current=battle();scratch=moves["scratch"]
+        self.assertEqual(current._damage(10,92,5,scratch,current.rng(),attacker_types=("normal",),defense=10),0)
+
+    def test_classic_level_and_move_learning_narration(self):
+        player=OwnedPokemon.create("learner",4,8,seed=3);player.experience=8*8*10-1
+        current=Battle(1,100,1,2,3,player,10,3,20,20,seed=4)
+        detail=current._award_experience(1)
+        self.assertIn("Charmander grew to Lv. 9!",detail)
+        self.assertIn("Charmander learned Ember!",detail)
+
     def test_status_and_fixed_damage_moves_are_not_tackle_substitutes(self):
         bulbasaur=OwnedPokemon.create("bulba",1,5,seed=2)
         current=Battle(1,100,1,2,3,bulbasaur,10,5,30,30,seed=4)

@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import textwrap
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -186,6 +187,12 @@ class BattleRenderer:
         return output
 
     @staticmethod
+    def _dialogue(draw,text,origin,width=88,max_lines=2,size=16):
+        lines=textwrap.wrap(" ".join(str(text).split()),width=width,break_long_words=False,break_on_hyphens=False) or [""]
+        font=ImageFont.load_default(size=size);x,y=origin
+        for index,line in enumerate(lines[:max_lines]):draw.text((x,y+index*(size+3)),line,fill=RETRO[0],font=font)
+
+    @staticmethod
     def _gender_mark(draw,origin,gender,fill=RETRO[0]):
         x,y=origin
         if gender=="male":
@@ -320,7 +327,7 @@ class BattleRenderer:
     def battle_result_text(battle):
         wild=SPECIES[battle.wild_species_id];player=SPECIES[battle.player.species_id]
         if battle.state=="caught":return f"Gotcha! {wild.name} was caught!"
-        if battle.state=="won":return f"{wild.name} fainted. {player.name} gained {battle.experience_award} XP."
+        if battle.state=="won":return (battle.result or f"{wild.name} fainted. {player.name} gained {battle.experience_award} XP.").replace("Pokémon","Pokemon")
         if battle.state=="lost":return f"{wild.name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
         return f"{wild.name} escaped!"
 
@@ -338,7 +345,7 @@ class BattleRenderer:
                 draw.rounded_rectangle((430,275,750,345),12,fill=RETRO[7],outline=RETRO[0],width=4)
                 draw.text((474,298),"ESCAPED",fill=RETRO[0],font=ImageFont.load_default(size=24))
             draw.rectangle((0,390,800,450),fill=RETRO[5],outline=RETRO[0],width=5)
-            draw.text((20,410),message[:105],fill=RETRO[0],font=ImageFont.load_default(size=18))
+            self._dialogue(draw,message,(20,400))
             return self._save(canvas)
 
         canvas=Image.new("RGB",(800,450),(229,214,145));draw=ImageDraw.Draw(canvas)
@@ -357,7 +364,7 @@ class BattleRenderer:
             draw.ellipse((235,225,565,340),fill=(182,168,89),outline=RETRO[0],width=4)
             image=self._open(data,(250,215),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,300-image.height),image)
         draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
-        draw.text((70,370),message[:78],fill=RETRO[0],font=ImageFont.load_default(size=20))
+        self._dialogue(draw,message,(70,360),width=76,size=16)
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):
@@ -410,7 +417,7 @@ class BattleRenderer:
         self._status_box(draw,(430,270),player.name,battle.player.level,battle.player_hp,battle.max_hp(battle.player),battle.player_status,battle.player.gender)
         draw.rectangle((0, 390, 800, 450), fill=RETRO[5], outline=RETRO[0], width=5)
         text = battle.result or battle.last_action or f"What will {player.name} do?"
-        draw.text((20, 410), text[:105], fill=RETRO[0], font=ImageFont.load_default(size=18))
+        self._dialogue(draw,text,(20,400))
         return self._save(canvas)
 
     @staticmethod
