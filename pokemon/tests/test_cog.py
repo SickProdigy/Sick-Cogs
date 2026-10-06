@@ -12,7 +12,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import GUILD, PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, migrate_ball_items, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
+from pokemon.pokemon import GUILD, PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, migrate_ball_items, migrated_pokedex_stats, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
@@ -68,6 +68,12 @@ class CogPolicyTests(unittest.TestCase):
         data={"items":{"potion":2,"great_ball":9}}
         self.assertEqual(migrate_ball_items(data)["items"],{"potion":2,"great_ball":9,"ultra_ball":1})
         self.assertEqual(migrate_ball_items(data)["items"],{"potion":2,"great_ball":9,"ultra_ball":1})
+
+    def test_pokedex_stat_migration_preserves_known_minimums(self):
+        data={"pokedex_seen":[63,25],"pokedex_caught":[25],"collection":[{"species_id":25},{"species_id":25}]}
+        stats=migrated_pokedex_stats(data)
+        self.assertEqual(stats["63"],{"seen":1,"battled":0,"defeated":0,"caught":0,"escaped":0})
+        self.assertEqual((stats["25"]["seen"],stats["25"]["caught"]),(1,2))
 
     def test_first_catch_only_requires_pokedex_registration_once(self):
         self.assertTrue(first_pokedex_registration({"pokedex_caught":[]},25))
@@ -260,8 +266,9 @@ class PokedexTests(unittest.TestCase):
         unseen_text=render_pokedex(unseen).description
         self.assertNotIn("Pikachu",unseen_text)
         self.assertNotIn("Electric",unseen_text)
-        seen=PokedexSession(1,{25},set(),selected_id=25)
+        seen=PokedexSession(1,{25},set(),selected_id=25,stats={"25":{"seen":3,"battled":2,"defeated":1,"caught":0,"escaped":1}})
         seen_text=render_pokedex(seen).description
+        self.assertIn("Seen: 3 | Battled: 2 | Defeated: 1 | Caught: 0 | Escaped: 1",seen_text)
         self.assertIn("Electric",seen_text)
         self.assertNotIn("Catch rate",seen_text)
         caught=PokedexSession(1,{25},{25},selected_id=25)
@@ -403,6 +410,14 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         Pokemon.consume_ball(conf,"poke_ball");Pokemon.consume_ball(conf,"great_ball");Pokemon.consume_ball(conf,"ultra_ball")
         self.assertEqual((conf["balls"],conf["items"]["great_ball"],conf["items"]["ultra_ball"]),(9,2,0))
 
+    async def test_pokedex_goals_award_once_at_collection_and_victory_milestones(self):
+        current=battle();current.state="won"
+        conf={"pokedex_caught":[1,2,3,4,5],"pokedex_stats":{"1":{"defeated":4}},"recorded_battles":[],"achievement_rewards":[],"balls":2,"items":{"potion":1}}
+        cog=Pokemon.__new__(Pokemon);rewards=cog.record_battle_result(conf,current)
+        self.assertEqual((conf["balls"],conf["items"]["potion"]),(7,6))
+        self.assertEqual(set(conf["achievement_rewards"]),{"collection:5","victories:5"});self.assertEqual(len(rewards),2)
+        self.assertEqual(cog.record_battle_result(conf,current),[]);self.assertEqual((conf["balls"],conf["items"]["potion"]),(7,6))
+
     async def test_battle_potion_consumes_inventory_and_wild_turn(self):
         current=battle();maximum=current.max_hp(current.player);current.player_hp=max(1,maximum-8);current.party_hp[current.player.instance_id]=current.player_hp
         conf={"collection":[current.player.raw()],"party":[current.player.instance_id],"items":{"potion":1,"revive":0}};section=StoredSection(conf)
@@ -464,9 +479,9 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         conf={"collection":[player.raw()],"party":["starter"],"badges":[]}
         active=StoredValue(None);timeout=StoredValue(1800);next_encounter_value=StoredValue(12)
         cog=Pokemon.__new__(Pokemon)
-        cog.battles={};cog.locks={}
+        cog.battles={};cog.locks={};user_section=StoredSection(conf)
         cog.config=SimpleNamespace(
-            user=lambda user:SimpleNamespace(all=AsyncMock(return_value=conf)),
+            user=lambda user:user_section,
             guild=lambda guild:SimpleNamespace(active_encounter=active,battle_timeout=timeout),
             next_encounter=next_encounter_value,
         )
