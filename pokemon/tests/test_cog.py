@@ -562,6 +562,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Activity: **5/12**",message)
         self.assertIn("Needs 7 more activity points",message)
         self.assertIn("Rarity: **friendly**",message)
+        self.assertIn("Expired unattended cards: **delete**",message)
 
     async def test_channel_command_reports_already_enabled_state(self):
         channels=StoredValue([10]);enabled=StoredValue(True);next_spawn=StoredValue(None);section=SimpleNamespace(channels=channels,enabled=enabled,spawn_mode=StoredValue("timed"),next_spawn_at=next_spawn,timer_minutes=StoredValue(60))
@@ -571,7 +572,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited_once_with("Wild encounters were already enabled in <#10>.")
 
     async def test_timed_mode_defaults_to_hourly_and_spawns_in_configured_channel(self):
-        self.assertEqual((GUILD["spawn_mode"],GUILD["timer_minutes"]),("timed",60))
+        self.assertEqual((GUILD["spawn_mode"],GUILD["timer_minutes"],GUILD["expired_card_mode"]),("timed",60,"delete"))
         now=datetime.now(timezone.utc);channel=SimpleNamespace(id=20)
         conf={"enabled":True,"spawn_mode":"timed","channels":[20],"timer_minutes":60,"next_spawn_at":(now-timedelta(minutes=1)).isoformat(),"active_encounter":None}
         next_spawn=StoredValue(conf["next_spawn_at"]);section=SimpleNamespace(next_spawn_at=next_spawn)
@@ -646,24 +647,35 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(view.children),7)
         self.assertNotIn("Display style",[getattr(item,"placeholder",None) for item in view.children])
 
+    async def test_expired_card_command_updates_server_policy(self):
+        setting=StoredValue("delete");section=SimpleNamespace(expired_card_mode=setting)
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section)
+        ctx=SimpleNamespace(guild=SimpleNamespace(id=1),send=AsyncMock())
+        await Pokemon.expired_cards.callback(cog,ctx,"keep")
+        self.assertEqual(setting.value,"keep")
+        ctx.send.assert_awaited_once_with("Expired unattended encounter cards will remain as dimmed got-away cards.")
+
+    async def test_expired_unattended_cards_delete_or_keep_dimmed_result(self):
+        raw={"guild_id":1,"channel_id":55,"message_id":99,"species_id":25}
+        message=SimpleNamespace(delete=AsyncMock(),edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=message))
+        section=SimpleNamespace(expired_card_mode=StoredValue("delete"))
+        cog=Pokemon.__new__(Pokemon);cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel);cog.config=SimpleNamespace(guild_from_id=lambda guild_id:section)
+        cog.rendered_expired_encounter=AsyncMock(return_value=(discord.Embed(title="The wild Pikachu got away!"),[object()]))
+        await cog.expire_unclaimed_message(raw)
+        message.delete.assert_awaited_once();message.edit.assert_not_awaited()
+        message.delete.reset_mock();message.edit.reset_mock()
+        await cog.expire_unclaimed_message(raw,"keep")
+        message.delete.assert_not_awaited();message.edit.assert_awaited_once()
+
     async def test_clear_encounter_disables_original_message(self):
-        active=StoredValue(7)
-        store=StoredEncounters();store.value={"7":{"channel_id":55,"message_id":99,"species_id":25,"state":"open"}}
-        section=SimpleNamespace(active_encounter=active)
-        message=SimpleNamespace(edit=AsyncMock())
-        channel=SimpleNamespace(fetch_message=AsyncMock(return_value=message))
-        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={7:SimpleNamespace()}
-        cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel if channel_id==55 else None)
-        cog.config=SimpleNamespace(guild=lambda guild:section,encounters=store)
-        expired_embed=discord.Embed(title="The wild Pikachu got away!");expired_files=[object()]
-        cog.rendered_expired_encounter=AsyncMock(return_value=(expired_embed,expired_files))
+        active=StoredValue(7);raw={"channel_id":55,"message_id":99,"species_id":25,"state":"open"}
+        store=StoredEncounters();store.value={"7":raw};section=SimpleNamespace(active_encounter=active)
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={7:SimpleNamespace()};cog.bot=SimpleNamespace(get_channel=lambda channel_id:None)
+        cog.config=SimpleNamespace(guild=lambda guild:section,encounters=store);cog.expire_unclaimed_message=AsyncMock()
         ctx=SimpleNamespace(guild=SimpleNamespace(id=1),send=AsyncMock())
         await Pokemon.clear_encounter.callback(cog,ctx)
-        self.assertIsNone(active.value)
-        self.assertEqual(store.value,{})
-        self.assertNotIn(7,cog.battles)
-        cog.rendered_expired_encounter.assert_awaited_once()
-        message.edit.assert_awaited_once_with(content=None,embed=expired_embed,attachments=expired_files,view=None)
+        self.assertIsNone(active.value);self.assertEqual(store.value,{});self.assertNotIn(7,cog.battles)
+        cog.expire_unclaimed_message.assert_awaited_once_with(raw)
 
     async def test_encounter_writes_are_serialized_without_lost_updates(self):
         cog = Pokemon.__new__(Pokemon)

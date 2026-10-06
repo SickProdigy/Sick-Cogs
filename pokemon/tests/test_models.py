@@ -361,6 +361,8 @@ class BattleTests(unittest.TestCase):
         with Image.open(encounter) as live,Image.open(expired) as inactive:
             self.assertEqual(inactive.size,(800,450))
             self.assertNotEqual(live.getpixel((400,200)),inactive.getpixel((400,200)))
+            live_sprite=live.getpixel((440,200));expired_sprite=inactive.getpixel((440,200))
+            self.assertLess(max(expired_sprite)-min(expired_sprite),max(live_sprite)-min(live_sprite))
         with Image.open(choice) as image:
             self.assertEqual(image.size,(800,450))
             self.assertEqual(image.getpixel((255,259)),(205,63,58))

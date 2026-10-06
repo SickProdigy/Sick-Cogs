@@ -19,7 +19,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete"}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[]}
 GLOBAL={"schema":7,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
 BOX_SIZE=30
@@ -114,7 +114,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.35.1";__author__="SickProdigy"
+    __version__="0.36.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -156,17 +156,14 @@ class Pokemon(commands.Cog):
         for eid,raw in expired:
             if raw.get("battle"):await self.settle_expired_battle(raw)
             self.battles.pop(eid,None);await self.clear_guild(int(raw["guild_id"]),eid)
-            channel=self.bot.get_channel(int(raw["channel_id"]))
-            if channel:
-                try:
-                    message=await channel.fetch_message(int(raw["message_id"]))
-                    if raw.get("battle"):
-                        species=SPECIES.get(int(raw.get("species_id",0)));name=species.name if species else "Pokemon"
+            if raw.get("battle"):
+                channel=self.bot.get_channel(int(raw["channel_id"]))
+                if channel:
+                    try:
+                        message=await channel.fetch_message(int(raw["message_id"]));species=SPECIES.get(int(raw.get("species_id",0)));name=species.name if species else "Pokemon"
                         await message.edit(content=f"The wild {name} escaped.",view=None)
-                    else:
-                        embed,files=await self.rendered_expired_encounter(raw)
-                        await message.edit(content=None,embed=embed,attachments=files,view=None)
-                except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
+                    except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
+            else:await self.expire_unclaimed_message(raw)
         await self.process_timed_spawns(now)
     async def settle_expired_battle(self,raw):
         try:battle=Battle.from_raw(raw["battle"])
@@ -363,6 +360,20 @@ class Pokemon(commands.Cog):
             log.exception("Expired encounter rendering failed")
             if species:embed.set_image(url=sprite(species.id))
             return embed,[]
+    async def expire_unclaimed_message(self,raw,mode=None):
+        channel=self.bot.get_channel(int(raw.get("channel_id",0)))
+        if not channel:return
+        try:message=await channel.fetch_message(int(raw["message_id"]))
+        except (discord.Forbidden,discord.NotFound,discord.HTTPException,KeyError,TypeError,ValueError):return
+        if mode is None:mode=await self.config.guild_from_id(int(raw["guild_id"])).expired_card_mode()
+        if mode=="delete":
+            try:await message.delete();return
+            except discord.NotFound:return
+            except (discord.Forbidden,discord.HTTPException):pass
+        try:
+            embed,files=await self.rendered_expired_encounter(raw);await message.edit(content=None,embed=embed,attachments=files,view=None)
+        except (discord.Forbidden,discord.NotFound,discord.HTTPException,KeyError,TypeError,ValueError):pass
+
     async def rendered_progression(self,pokemon,evolved_from=None,move_key=None,pending=False):
         species=SPECIES[pokemon.species_id]
         if evolved_from:title=f"{SPECIES[evolved_from].name} evolved!";description=f"Congratulations! Your {SPECIES[evolved_from].name} evolved into {species.name}!"
@@ -1103,12 +1114,20 @@ class Pokemon(commands.Cog):
             next_spawn=f"Blocked by active encounter #{active}" if active else (f"Needs {target-activity} more activity points" if activity<target else "Ready on the next qualifying message")
         generations=effective_generations(conf.get("generations",[1]),policy.get("allowed_generations",[1]));generation_text=", ".join(map(str,generations))
         enabled=conf.get("enabled",False);encounter_minutes=int(policy.get("encounter_timeout",900))//60;battle_minutes=int(conf.get("battle_timeout",1800))//60
-        rarity=policy.get("rarity_profile","friendly");specials="enabled" if policy.get("allow_special_species") else "event-only"
+        rarity=policy.get("rarity_profile","friendly");specials="enabled" if policy.get("allow_special_species") else "event-only";expired_cards=conf.get("expired_card_mode","delete")
         await ctx.send(
             f"**Pokémon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}**\nSpawn channels: {channels}\nPokémon Center: {center}\n"
             f"{progress}\nNext spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** · Battle lifetime: **{battle_minutes}m**\n"
-            f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nCatalog species: **{len(SPECIES)}**"
+            f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nExpired unattended cards: **{expired_cards}**\nCatalog species: **{len(SPECIES)}**"
         )
+
+    @pokemon_set.command(name="expiredcards",aliases=["missedcards"])
+    async def expired_cards(self,ctx,mode:str):
+        """Delete expired wild cards or keep their dimmed result."""
+        mode=mode.casefold()
+        if mode not in {"delete","keep"}:await ctx.send("Choose delete or keep.");return
+        await self.config.guild(ctx.guild).expired_card_mode.set(mode)
+        await ctx.send("Expired unattended encounter cards will be deleted." if mode=="delete" else "Expired unattended encounter cards will remain as dimmed got-away cards.")
 
     @pokemon_set.command(name="mode")
     async def spawn_mode(self,ctx,mode:str):
@@ -1287,21 +1306,17 @@ class Pokemon(commands.Cog):
                 encounters=await self.config.encounters();raw=encounters.pop(str(eid),None)
                 await self.config.encounters.set(encounters);self.battles.pop(eid,None)
         await self.config.guild(ctx.guild).active_encounter.set(None)
-        if raw:
+        if raw and not raw.get("battle") and raw.get("kind")!="gym":await self.expire_unclaimed_message(raw)
+        elif raw:
             channel=self.bot.get_channel(int(raw.get("channel_id",0)))
             if channel:
                 try:
                     message=await channel.fetch_message(int(raw["message_id"]))
-                    if raw.get("kind")=="gym":
-                        await message.edit(content="This Gym challenge was ended by server staff.",view=None)
-                    elif raw.get("battle"):
+                    if raw.get("kind")=="gym":await message.edit(content="This Gym challenge was ended by server staff.",view=None)
+                    else:
                         species=SPECIES.get(int(raw.get("species_id",0)));name=species.name if species else "Pokemon"
                         await message.edit(content=f"The wild {name} escaped.",view=None)
-                    else:
-                        embed,files=await self.rendered_expired_encounter(raw)
-                        await message.edit(content=None,embed=embed,attachments=files,view=None)
-                except (discord.Forbidden,discord.NotFound,discord.HTTPException,KeyError,TypeError,ValueError):
-                    pass
+                except (discord.Forbidden,discord.NotFound,discord.HTTPException,KeyError,TypeError,ValueError):pass
         await ctx.send("Active encounter cleared.")
     @pokemon_set.command(name="disable")
     async def disable(self,ctx):
