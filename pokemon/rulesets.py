@@ -60,6 +60,12 @@ class BattleRuleset:
     def burned_attack(attack):
         return max(1,attack//2)
 
+    @staticmethod
+    def catch_status_multiplier(status):
+        if status in {"sleep","freeze"}:return 2.5
+        if status in {"paralysis","poison","burn"}:return 1.5
+        return 1.0
+
 
 STANDARD = BattleRuleset("standard", mechanics_generation=9, catch_experience=True)
 RULESETS = {STANDARD.key: STANDARD}

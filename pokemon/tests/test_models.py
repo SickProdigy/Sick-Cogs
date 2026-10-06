@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from PIL import Image
+from pokemon.catching import BALLS,attempt_catch,calculate_catch_value
 from pokemon.data import EVOLUTIONS,SPECIES,effectiveness,experience_to_next,total_experience
 from pokemon.models import Battle,BattleError,OwnedPokemon
 from pokemon.renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RETRO
@@ -115,6 +116,21 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(b.state,"won")
         self.assertGreater(b.experience_award,0)
         self.assertGreater(b.player.experience,0)
+    def test_ball_and_status_modifiers_raise_catch_value(self):
+        current=battle();species=SPECIES[current.wild_species_id];rules=current.rules()
+        poke=calculate_catch_value(species,current.wild_max_hp,current.wild_hp,"",BALLS["poke_ball"],rules)
+        great=calculate_catch_value(species,current.wild_max_hp,current.wild_hp,"",BALLS["great_ball"],rules)
+        ultra=calculate_catch_value(species,current.wild_max_hp,current.wild_hp,"sleep",BALLS["ultra_ball"],rules)
+        self.assertLess(poke,great);self.assertLess(great,ultra)
+
+    def test_catch_service_records_four_deterministic_shakes(self):
+        current=battle();species=SPECIES[current.wild_species_id];current.wild_hp=1
+        first=attempt_catch(species,current.wild_max_hp,1,"sleep","ultra_ball",current.rules(),current.rng())
+        clone=battle();clone.wild_hp=1
+        second=attempt_catch(species,clone.wild_max_hp,1,"sleep","ultra_ball",clone.rules(),clone.rng())
+        self.assertEqual(first,second)
+        self.assertEqual(first.shakes,4);self.assertTrue(first.caught)
+
     def test_ball_is_deterministic_and_consumable_once(self):
         a=battle(22);b=battle(22)
         self.assertEqual(a.throw_ball(),b.throw_ball())

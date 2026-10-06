@@ -81,7 +81,8 @@ def trainer_profile_embed(user,conf,max_collection):
     embed.add_field(name=f"Badge Case · {len(badges)}/8",value=badge_case(badges)+"\n"+badge_names,inline=False)
     embed.add_field(name="Pokédex",value=f"{len(conf.get('pokedex_seen',[]))} seen\n{len(conf.get('pokedex_caught',[]))} caught",inline=True)
     embed.add_field(name="Collection",value=f"{len(conf.get('collection',[]))}/{max_collection} Pokémon\n{len(conf.get('party',[]))}/6 in party",inline=True)
-    embed.add_field(name="Bag",value=f"{conf.get('balls',0)} Poké Balls",inline=True)
+    items=conf.get("items",{})
+    embed.add_field(name="Bag",value=f"{conf.get('balls',0)} Poké · {items.get('great_ball',0)} Great · {items.get('ultra_ball',0)} Ultra",inline=True)
     if lead:
         needed=experience_to_next(lead["species_id"],lead["level"])
         progress="MAX" if not needed else f"{lead.get('experience',0)}/{needed} XP"

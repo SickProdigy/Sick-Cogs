@@ -237,11 +237,21 @@ class BagView(BattleMenu):
     def __init__(self, cog, encounter_id):
         super().__init__(cog, encounter_id)
         self.ball.custom_id = f"pokemon:{encounter_id}:bag:ball"
+        self.great_ball.custom_id = f"pokemon:{encounter_id}:bag:great"
+        self.ultra_ball.custom_id = f"pokemon:{encounter_id}:bag:ultra"
         self.back.custom_id = f"pokemon:{encounter_id}:bag:back"
 
     @discord.ui.button(label="Poké Ball", emoji="🔴", style=discord.ButtonStyle.success, custom_id="ball")
     async def ball(self, interaction, button):
-        await self.cog.throw_ball(interaction, self.encounter_id)
+        await self.cog.throw_ball(interaction,self.encounter_id,"poke_ball")
+
+    @discord.ui.button(label="Great Ball",emoji="🔵",style=discord.ButtonStyle.primary,custom_id="great")
+    async def great_ball(self,interaction,button):
+        await self.cog.throw_ball(interaction,self.encounter_id,"great_ball")
+
+    @discord.ui.button(label="Ultra Ball",emoji="🟡",style=discord.ButtonStyle.primary,custom_id="ultra")
+    async def ultra_ball(self,interaction,button):
+        await self.cog.throw_ball(interaction,self.encounter_id,"ultra_ball")
 
     @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, custom_id="back")
     async def back(self, interaction, button):
