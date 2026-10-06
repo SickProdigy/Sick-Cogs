@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.113.0"
+    __version__="0.114.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -184,6 +184,8 @@ class MTG(commands.Cog):
             e.add_field(name="Time Vault turn choice",value=f"{names[g.turn_start_pending_user]} must take their {kind} or choose a tapped Time Vault and skip it.",inline=False)
         if g.sanctuary_draw_pending:
             e.add_field(name="Island Sanctuary draw choice",value=f"{names[g.active_user]} must choose Draw or Skip ({g.sanctuary_pending_draws} draw{'s' if g.sanctuary_pending_draws!=1 else ''} remaining).",inline=False)
+        if g.phase=="cleanup_discard":
+            e.add_field(name="Cleanup discard",value=f"{names[g.active_user]} must privately discard {max(0,len(g.player(g.active_user).hand)-7)} card(s) to reach seven.",inline=False)
         protected=[names[user] for user in g.order if g.player(user).island_sanctuary_active]
         if protected: e.add_field(name="Island Sanctuary protection",value=", ".join(protected)+" can be attacked only by creatures with flying or islandwalk.",inline=False)
         if g.prevent_combat_damage:
@@ -245,6 +247,7 @@ class MTG(commands.Cog):
                     elif not item.ability_effect and g.card(item.uid).effect=="power_sink": label+=f" (targeted spell's controller may {g.trigger_accept_label(item)} or decline)"
                     elif item.ability_effect=="discard_choice": label+=" (target player is choosing a card privately)"
                     elif item.ability_effect=="look_hand": label+=" (controller is viewing the targeted hand privately)"
+                    elif item.ability_effect=="leng_discard": label+=f" ({item.choice_owner} is privately choosing a discard destination with Library of Leng)"
                     elif item.ability_effect=="power_leak": label+=" (enchanted enchantment's controller must choose how much mana to pay)"
                     elif item.ability_effect=="vesuvan_copy": label+=(" (controller must choose its creature target before responses)" if item.choice_value==0 else " (controller must choose whether to become the targeted copy)")
                     elif item.ability_effect=="kudzu_move": label+=" (the controller of the destroyed land may reattach Kudzu or decline)"
@@ -362,12 +365,15 @@ class MTG(commands.Cog):
             else: await interaction.followup.send(content,ephemeral=True)
             return
         pages=max(1,math.ceil(len(entries)/PrivateHandDecisionView.page_size)); page=max(0,min(page,pages-1)); start=page*PrivateHandDecisionView.page_size
-        visible=entries[start:start+PrivateHandDecisionView.page_size]; name=game.card(item.uid).name
-        if item.ability_effect=="discard_choice": heading=f"{name} - choose one card to discard"
-        elif item.ability_effect=="balance_hand": heading=f"{name} - privately choose {game._balance_required(item,user)} cards to discard"
+        visible=entries[start:start+PrivateHandDecisionView.page_size]
+        effect=item.ability_effect if item is not None else "cleanup_discard"; name=game.card(item.uid).name if item is not None else "Cleanup"
+        if effect=="discard_choice": heading=f"{name} - choose one card to discard"
+        elif effect=="balance_hand": heading=f"{name} - privately choose {game._balance_required(item,user)} cards to discard"
+        elif effect=="cleanup_discard": heading=f"Cleanup - privately choose {len(game.player(user).hand)-7} cards to discard"
+        elif effect=="leng_discard": heading=f"Library of Leng - choose a destination for {visible[0][1].name}"
         else: heading=f"{name} - targeted hand"
         text=heading+"\n"+("\n".join(f"**{position}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for position,card in visible) or "The targeted hand is empty.")
-        view=PrivateHandDecisionView(self,game_id,user,page,pages,item.ability_effect,entries)
+        view=PrivateHandDecisionView(self,game_id,user,page,pages,effect,entries)
         if editing: await interaction.edit_original_response(content=text,view=view)
         else: await interaction.followup.send(text,view=view,ephemeral=True)
     async def complete_private_hand_interaction(self,interaction,game_id,position):
@@ -376,14 +382,26 @@ class MTG(commands.Cog):
             await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
         async with self.lock(game.game_id):
             try:
-                effect=game.stack[-1].ability_effect
-                if effect=="balance_hand": game.choose_balance(interaction.user.id,position); action="balance_hand_choice"
+                effect="cleanup_discard" if game.phase=="cleanup_discard" else game.stack[-1].ability_effect
+                if effect=="cleanup_discard": game.choose_cleanup_discard(interaction.user.id,position if isinstance(position,(list,tuple)) else [position]); action="cleanup_discard"
+                elif effect=="balance_hand": game.choose_balance(interaction.user.id,position); action="balance_hand_choice"
                 else: game.choose_private_hand(interaction.user.id,position); action="private_discard" if effect=="discard_choice" else "private_hand_view"
                 game.record(interaction.user.id,action); advance_solo(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
         message="Card discarded." if position is not None else "Hand view completed."
         await interaction.response.edit_message(content=message,view=None); await self.refresh_message(game)
+
+    async def complete_discard_destination(self,interaction,game_id,to_library):
+        game=self.games.get(game_id)
+        if not game:
+            await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
+        async with self.lock(game.game_id):
+            try:
+                game.choose_discard_destination(interaction.user.id,to_library); game.record(interaction.user.id,"library_of_leng_top" if to_library else "library_of_leng_graveyard"); advance_solo(game); await self.save(game)
+            except (GameError,IndexError,ValueError) as error:
+                await interaction.response.send_message(str(error),ephemeral=True); return
+        await interaction.response.edit_message(content="Discard destination chosen.",view=None); await self.refresh_message(game)
 
     async def choose_library_interaction(self,interaction,game_id,position):
         game=self.games.get(game_id)

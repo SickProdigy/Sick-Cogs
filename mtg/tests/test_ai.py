@@ -92,7 +92,9 @@ class SoloAITests(unittest.TestCase):
         for _ in range(1000):
             if game.finished:
                 break
-            if game.phase == "attackers" and game.active_user == HUMAN:
+            if game.phase == "cleanup_discard" and game.active_user == HUMAN:
+                game.choose_cleanup_discard(HUMAN,[1])
+            elif game.phase == "attackers" and game.active_user == HUMAN:
                 game.declare_attackers(HUMAN, [])
             elif game.phase == "blockers" and game.opponent(game.active_user) == HUMAN:
                 game.declare_blockers(HUMAN, {})
@@ -1013,6 +1015,15 @@ class SoloAITests(unittest.TestCase):
         game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(AI).hand=[]; orb=self.add(game,AI,"lea:235"); target=self.add(game,HUMAN,"lea:269"); self.add(game,HUMAN,"token:wasp")
         game.player(AI).mana_pool={"C":1}; game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; advance_solo(game)
         self.assertTrue(orb.tapped); self.assertEqual((game.stack[-1].ability_effect,game.stack[-1].target),("chaos_orb_destroy",f"{HUMAN}:{target.uid}")); self.assertTrue(any(event["action"]=="ai_activate" for event in game.history))
+
+    def test_ai_resolves_library_of_leng_and_cleanup_choices(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; game=solo(order=(AI,HUMAN)); game.player(AI).hand=[]; game.player(AI).library=[]
+        top=game.next_uid; game.next_uid+=1; game.cards[top]="giant"; filler=game.next_uid; game.next_uid+=1; game.cards[filler]="forest"; game.player(AI).library=[filler]
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:115"; game.stack=[spell_type(HUMAN,spell,"lea:115",str(AI),ability_effect="leng_discard",decision_pending=True,choice_owner=AI,discard_queue=[{"user":AI,"uid":top}],discard_resume="discard_random_spell")]; game.priority_user=AI; game.phase="precombat_main"
+        advance_solo(game); self.assertEqual(game.player(AI).library[-1],top); self.assertTrue(any(event["action"]=="ai_library_of_leng_top" for event in game.history))
+        game.stack=[]; game.player(AI).hand=[]
+        for _ in range(9): uid=game.next_uid; game.next_uid+=1; game.cards[uid]="bear"; game.player(AI).hand.append(uid)
+        game.phase="cleanup_discard"; game.priority_user=AI; advance_solo(game); self.assertNotEqual(game.phase,"cleanup_discard"); self.assertTrue(any(event["action"]=="ai_cleanup_discard" for event in game.history))
 
 if __name__ == "__main__":
     unittest.main()

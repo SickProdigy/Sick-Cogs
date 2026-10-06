@@ -153,6 +153,8 @@ class Card:
     animate_combat: bool = False
     creates_token: str = ""
     opponent_damage_discard_random: bool = False
+    no_maximum_hand: bool = False
+    discard_to_library: bool = False
     combat_destroy_nonwall: bool = False
     enchantment_cast_draw: bool = False
     dealt_damage_plus_counter: bool = False
@@ -255,6 +257,8 @@ class Card:
         if self.draw_step_sanctuary: abilities.append("At your draw step, you may skip your draw; until your next turn, only creatures with flying or islandwalk can attack you")
         if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
         if self.opponent_damage_discard_random: abilities.append("Whenever this creature deals damage to an opponent, that player discards a card at random")
+        if self.no_maximum_hand: abilities.append("You have no maximum hand size")
+        if self.discard_to_library: abilities.append("Cards discarded by effects may be put on top of your library")
         if self.combat_destroy_nonwall: abilities.append("Whenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat")
         if self.enchantment_cast_draw: abilities.append("Whenever you cast an enchantment spell, you may draw a card")
         if self.dealt_damage_plus_counter: abilities.append("Whenever dealt damage, put a +1/+1 counter on this creature")
@@ -412,6 +416,7 @@ ALPHA_ENCHANTMENTS = {
 }
 
 ALPHA_ARTIFACTS = {
+    "lea:257": {"no_maximum_hand":True, "discard_to_library":True},
     "lea:235": {"activation_cost":"{1}", "activation_tap":True, "activation_effect":"chaos_orb_destroy", "activation_text":"Digital adaptation: destroy target nontoken permanent, then destroy this artifact"},
     "lea:246": {"activation_cost":"{1}", "activation_tap":True, "activation_effect":"grant_banding", "activation_text":"Target creature gains banding until end of turn"},
     "lea:230": {"land_enter_damage":2},
@@ -816,6 +821,8 @@ for reference in PLAYABLE_ALPHA:
         animate_combat=ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_combat",False),
         creates_token=ALPHA_ARTIFACTS.get(reference.key,{}).get("creates_token",""),
         opponent_damage_discard_random=ALPHA_DAMAGE_TRIGGERS.get(reference.key,{}).get("opponent_damage_discard_random",False),
+        no_maximum_hand=ALPHA_ARTIFACTS.get(reference.key,{}).get("no_maximum_hand",False),
+        discard_to_library=ALPHA_ARTIFACTS.get(reference.key,{}).get("discard_to_library",False),
         combat_destroy_nonwall=ALPHA_COMBAT_TRIGGERS.get(reference.key,{}).get("combat_destroy_nonwall",False),
         enchantment_cast_draw=ALPHA_OPTIONAL_TRIGGERS.get(reference.key,{}).get("enchantment_cast_draw",False),
         dealt_damage_plus_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("dealt_damage_plus_counter",False),

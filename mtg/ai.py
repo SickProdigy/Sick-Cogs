@@ -836,6 +836,11 @@ def advance_solo(game: Game):
             game.record(user, "ai_attack")
             changed = True
             continue
+        if game.phase == "cleanup_discard":
+            if game.active_user != user: return changed
+            choices=game.private_hand_decision(user)[1]; required=len(choices)-7
+            positions=[position for position,_ in sorted(choices,key=lambda item:(item[1].cost+item[1].power+item[1].toughness,item[0]))[:required]]
+            game.choose_cleanup_discard(user,positions); game.record(user,"ai_cleanup_discard"); changed=True; continue
         if game.phase == "blockers":
             if game.opponent(game.active_user) != user:
                 return changed
@@ -849,6 +854,9 @@ def advance_solo(game: Game):
         if _assign_blocker_damage(game,user): game.record(user,"ai_blocker_damage"); changed=True; continue
         if game.stack and game.stack[-1].decision_pending:
             trigger=game.stack[-1]
+            if trigger.ability_effect=="leng_discard":
+                _,choices=game.private_hand_decision(user); card=choices[0][1]; to_library=bool(game.player(user).library) and card.cost+card.power+card.toughness>=3
+                game.choose_discard_destination(user,to_library); game.record(user,"ai_library_of_leng_top" if to_library else "ai_library_of_leng_graveyard"); changed=True; continue
             if trigger.ability_effect in ("discard_choice","look_hand"):
                 if trigger.ability_effect=="discard_choice":
                     _,choices=game.private_hand_decision(user); position,_=min(choices,key=lambda item:(item[1].cost+item[1].power+item[1].toughness,item[0]))

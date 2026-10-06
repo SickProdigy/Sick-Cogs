@@ -147,7 +147,7 @@ class GameView(discord.ui.View):
             item.custom_id=f"mtg:{game_id}:{item.custom_id}"
             action=item.custom_id.rsplit(":",1)[-1]
             if game and action in ("keep","mulligan"): item.disabled=game.phase!="opening"
-            if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or game.turn_start_pending_user is not None or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
+            if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase in ("untap","cleanup_discard") or game.turn_start_pending_user is not None or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
                 mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak","vesuvan_copy","kudzu_move","balance_lands","balance_hand","balance_creatures"))
@@ -157,7 +157,7 @@ class GameView(discord.ui.View):
             if game and action=="search":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
             if game and action=="private_hand":
-                item.disabled=not bool(game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand","balance_hand"))
+                item.disabled=not bool(game.phase=="cleanup_discard" or (game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand","balance_hand","leng_discard")))
             if game and action=="natural_selection":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="natural_selection")
             if game and action=="vault_take": item.disabled=game.turn_start_pending_user is None
@@ -297,6 +297,14 @@ class PrivateHandSelect(discord.ui.Select):
     async def callback(self,interaction):
         await self.browser.cog.complete_private_hand_interaction(interaction,self.browser.game_id,int(self.values[0]))
 
+class DiscardDestinationSelect(discord.ui.Select):
+    def __init__(self,browser):
+        self.browser=browser
+        options=[discord.SelectOption(label="Top of library",description="Use Library of Leng",value="library"),discord.SelectOption(label="Graveyard",description="Decline the replacement",value="graveyard")]
+        super().__init__(placeholder="Choose where the discarded card goes",min_values=1,max_values=1,options=options,row=0)
+    async def callback(self,interaction):
+        await self.browser.cog.complete_discard_destination(interaction,self.browser.game_id,self.values[0]=="library")
+
 class BalanceHandSelect(discord.ui.Select):
     def __init__(self,browser,entries,required):
         self.browser=browser; start=browser.page*browser.page_size; visible=entries[start:start+browser.page_size]
@@ -309,10 +317,12 @@ class PrivateHandDecisionView(discord.ui.View):
     page_size=25
     def __init__(self,cog,game_id,user_id,page,pages,effect,entries):
         super().__init__(timeout=300); self.cog,self.game_id,self.user_id,self.page,self.pages,self.effect=cog,game_id,user_id,page,pages,effect
-        if effect=="discard_choice": self.add_item(PrivateHandSelect(self,entries))
+        if effect in ("discard_choice","cleanup_discard"): self.add_item(PrivateHandSelect(self,entries))
         if effect=="balance_hand":
-            required=cog.games[game_id]._balance_required(cog.games[game_id].stack[-1],user_id)
+            game=cog.games[game_id]; required=game._balance_required(game.stack[-1],user_id)
             if pages==1 and 1<=required<=25: self.add_item(BalanceHandSelect(self,entries,required))
+        if effect=="leng_discard":
+            self.add_item(DiscardDestinationSelect(self))
         self.previous.disabled=page<=0; self.next.disabled=page>=pages-1
         self.done.disabled=effect!="look_hand"
     async def interaction_check(self,interaction):

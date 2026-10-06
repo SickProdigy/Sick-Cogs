@@ -99,6 +99,8 @@ class Spell:
     mana_choices: Dict[str, str] = field(default_factory=dict)
     land_word_changes: Dict[str, str] = field(default_factory=dict)
     color_word_changes: Dict[str, str] = field(default_factory=dict)
+    discard_queue: List[Dict[str, int]] = field(default_factory=list)
+    discard_resume: str = ""
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -1415,7 +1417,7 @@ class Game:
                     s.decision_pending=True; self.priority_user=s.choice_owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
-                if not self.finished: self.priority_user=self.active_user
+                if not self.finished: self.priority_user=self.stack[-1].choice_owner if self.stack and self.stack[-1].decision_pending else self.active_user
             else: self.priority_user=self.opponent(user)
         else:
             if self.phase in ("attackers","blockers"): raise GameError("Complete the required combat declaration.")
@@ -1596,9 +1598,13 @@ class Game:
 
     def private_hand_decision(self,user):
         if self.finished: raise GameError("Game is over.")
-        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect not in ("discard_choice","look_hand","balance_hand"):
+        if self.phase=="cleanup_discard" and user==self.active_user:
+            return None,[(position,self.card(uid)) for position,uid in enumerate(self.player(user).hand,1)]
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect not in ("discard_choice","look_hand","balance_hand","leng_discard"):
             raise GameError("You do not have a private hand decision to complete.")
-        item=self.stack[-1]; target=self.player(user) if item.ability_effect=="balance_hand" else self.player(int(item.target))
+        item=self.stack[-1]
+        if item.ability_effect=="leng_discard": return item,[(1,self.card(item.discard_queue[0]["uid"]))]
+        target=self.player(user) if item.ability_effect=="balance_hand" else self.player(int(item.target))
         return item,[(position,self.card(uid)) for position,uid in enumerate(target.hand,1)]
 
     def choose_private_hand(self,user,position=None):
@@ -1607,8 +1613,10 @@ class Game:
             try: position=int(position)
             except (TypeError,ValueError) as error: raise GameError("Choose a valid private hand position.") from error
             if not 1<=position<=len(choices): raise GameError("Choose a valid private hand position.")
-            target=self.player(int(item.target)); chosen=target.hand.pop(position-1); target.graveyard.append(chosen)
-            result=f"{target.user_id} discarded {self.card(chosen).name} for {card.name}."
+            target=self.player(int(item.target)); chosen=target.hand[position-1]; self.stack.pop()
+            self._begin_effect_discard(item,[(target.user_id,[chosen])],"discard_choice")
+            result=f"{target.user_id} discarded a card for {card.name}."
+            self.log.append(result); return
         else:
             if position is not None: raise GameError("Glasses of Urza only needs confirmation after viewing the hand.")
             result=f"{user} looked at {self.player(int(item.target)).user_id}'s hand with {card.name}."
@@ -1617,6 +1625,19 @@ class Game:
         self.phase_passes=0
         if not self.finished: self.priority_user=self.active_user
         self.log.append(result); self._sba(); self._life()
+
+    def choose_cleanup_discard(self,user,positions):
+        item,choices=self.private_hand_decision(user)
+        if item is not None or self.phase!="cleanup_discard": raise GameError("You do not have a cleanup discard to complete.")
+        required=max(0,len(choices)-7)
+        try: positions=tuple(int(position) for position in positions)
+        except (TypeError,ValueError) as error: raise GameError("Choose valid distinct hand positions.") from error
+        if not positions or len(positions)>required or len(set(positions))!=len(positions) or any(not 1<=position<=len(choices) for position in positions): raise GameError(f"Choose between 1 and {required} distinct cards to discard.")
+        player=self.player(user); selected={player.hand[position-1] for position in positions}
+        player.hand=[uid for uid in player.hand if uid not in selected]; player.graveyard.extend(selected)
+        count=len(selected); self.log.append(f"{user} discarded {count} card{'s' if count!=1 else ''} during cleanup.")
+        if len(player.hand)>7: self.priority_user=user; return
+        self.phase="ending"; self._advance()
 
     def _power_sink_target(self,spell):
         if not spell.target or not spell.target.startswith("S:"): return None
@@ -1718,9 +1739,9 @@ class Game:
     def _apply_balance_stage(self,spell,stage):
         self.stack.pop(); before=len(self.stack)
         if stage=="hand":
-            for user in self.order:
-                player=self.player(user); selected=self._balance_selected(spell,stage,user); discarded=[uid for uid in player.hand if uid in selected]
-                player.hand=[uid for uid in player.hand if uid not in selected]; player.graveyard.extend(discarded)
+            selections=[(user,[uid for uid in self.player(user).hand if uid in self._balance_selected(spell,stage,user)]) for user in (self.active_user,self.opponent(self.active_user))]
+            if self._begin_effect_discard(spell,selections,"balance_hand"): return
+            return
         else:
             doomed=[]
             for user in self.order:
@@ -1744,8 +1765,8 @@ class Game:
                 continue
             spell.decision_pending=True; spell.passes=0; self.priority_user=user; return
         spell.decision_pending=False; self._apply_balance_stage(spell,stage)
+        if stage=="hand": return
         if stage=="lands": next_stage="hand"; counts=[len(player.hand) for player in self.players.values()]
-        elif stage=="hand": next_stage="creatures"; counts=[sum(self.is_creature(x) for x in player.battlefield) for player in self.players.values()]
         else:
             self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append("Balance resolved."); self._sba(); self._life()
             if self.stack: self.stack[-1].passes=0
@@ -1956,6 +1977,9 @@ class Game:
         elif self.phase=="end_combat": self.phase="postcombat_main"
         elif self.phase=="postcombat_main": self.phase="ending"; self._begin_end_step()
         elif self.phase=="ending":
+            active=self.player(self.active_user)
+            if len(active.hand)>7 and not self._has_no_maximum_hand(self.active_user):
+                self.phase="cleanup_discard"; self.priority_user=self.active_user; return
             next_extra=bool(self.extra_turns); next_user=self.extra_turns.pop(0) if next_extra else self.opponent(self.active_user)
             self._offer_turn_start(next_user,next_extra); return
         else: raise GameError("Complete combat first.")
@@ -2229,10 +2253,55 @@ class Game:
             self.stack[start:]=sorted(self.stack[start:],key=lambda trigger:0 if trigger.owner==self.active_user else 1)
         return dealt
 
-    def _discard_random(self,player,amount):
-        chosen=random.SystemRandom().sample(player.hand,min(max(0,int(amount)),len(player.hand)))
-        for uid in chosen: player.hand.remove(uid); player.graveyard.append(uid)
-        return chosen
+    def _has_library_of_leng(self,user):
+        return any(self.card(permanent.uid).discard_to_library for permanent in self.player(user).battlefield)
+
+    def _has_no_maximum_hand(self,user):
+        return any(self.card(permanent.uid).no_maximum_hand for permanent in self.player(user).battlefield)
+
+    def _random_discard_uids(self,player,amount):
+        return random.SystemRandom().sample(player.hand,min(max(0,int(amount)),len(player.hand)))
+
+    def _begin_effect_discard(self,spell,selections,resume):
+        queue=[]
+        for user,uids in selections:
+            player=self.player(user)
+            for uid in uids:
+                if uid not in player.hand: continue
+                player.hand.remove(uid)
+                if self._has_library_of_leng(user): queue.append({"user":user,"uid":uid})
+                else: player.graveyard.append(uid)
+        if queue:
+            spell.discard_queue=queue; spell.discard_resume=resume; spell.ability_effect="leng_discard"; spell.decision_pending=True; spell.choice_owner=queue[0]["user"]; spell.passes=0
+            self.stack.append(spell); self.priority_user=spell.choice_owner
+            return True
+        self._finish_effect_discard(spell,resume); return False
+
+    def _finish_effect_discard(self,spell,resume):
+        spell.discard_queue=[]; spell.discard_resume=""; spell.decision_pending=False
+        if resume=="wheel_seven":
+            self._draw_each(7); self.player(spell.owner).graveyard.append(spell.uid)
+        elif resume=="balance_hand":
+            spell.ability_effect="balance_creatures"; spell.mana_choices={}; spell.choice_value=min(sum(self.is_creature(x) for x in player.battlefield) for player in self.players.values()); self.stack.append(spell); self._advance_balance(spell); return
+        elif resume in ("discard_random_spell",): self.player(spell.owner).graveyard.append(spell.uid)
+        else: self.cards.pop(spell.uid,None)
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0
+        if not self.finished: self.priority_user=self.active_user
+        self._sba(); self._life()
+
+    def choose_discard_destination(self,user,to_library):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].ability_effect!="leng_discard" or self.stack[-1].choice_owner!=user or not self.stack[-1].discard_queue:
+            raise GameError("You do not have a Library of Leng discard choice to make.")
+        spell=self.stack[-1]; entry=spell.discard_queue.pop(0); player=self.player(user)
+        if to_library: player.library.append(entry["uid"])
+        else: player.graveyard.append(entry["uid"])
+        self.log.append(f"{user} put a discarded card on top of their library with Library of Leng." if to_library else f"{user} put a discarded card into their graveyard.")
+        if spell.discard_queue:
+            spell.choice_owner=spell.discard_queue[0]["user"]; self.priority_user=spell.choice_owner; return
+        self.stack.pop(); resume=spell.discard_resume; self._finish_effect_discard(spell,resume)
+
 
     def _damage_player(self,user,amount,source=None,source_controller=None,source_uid=None,combat=False):
         player=self.player(user); amount=max(0,int(amount)); identity=source_uid if source_uid is not None else getattr(source,"uid",None)
@@ -2527,7 +2596,7 @@ class Game:
             _,source=self.find_permanent(s.source_uid)
             if source is not None and source.tapped: self._damage_player(int(s.target),card.draw_tapped_damage,source_uid=s.source_uid)
         elif effect=="opponent_damage_discard_random":
-            self._discard_random(self.player(int(s.target)),1)
+            target_player=self.player(int(s.target)); self._begin_effect_discard(s,[(target_player.user_id,self._random_discard_uids(target_player,1))],"discard_random_trigger"); return
         elif effect=="draw_self":
             self._draw(self.player(s.owner),1)
         elif effect=="take_extra_turn":
@@ -2700,11 +2769,11 @@ class Game:
         elif c.effect=="draw": self._draw(p,c.amount); p.graveyard.append(s.uid)
         elif c.effect in ("draw_target","draw_target_x"): self._draw(self.player(int(s.target)),s.x_value if c.effect=="draw_target_x" else c.amount); p.graveyard.append(s.uid)
         elif c.effect=="life_target_x": self.player(int(s.target)).life+=s.x_value; p.graveyard.append(s.uid)
-        elif c.effect=="discard_random_x": self._discard_random(self.player(int(s.target)),s.x_value); p.graveyard.append(s.uid)
+        elif c.effect=="discard_random_x":
+            target_player=self.player(int(s.target)); self._begin_effect_discard(s,[(target_player.user_id,self._random_discard_uids(target_player,s.x_value))],"discard_random_spell")
         elif c.effect=="wheel_seven":
-            for player in self.players.values():
-                player.graveyard.extend(player.hand); player.hand=[]
-            self._draw_each(7); p.graveyard.append(s.uid)
+            selections=[(user,list(self.player(user).hand)) for user in (self.active_user,self.opponent(self.active_user))]
+            self._begin_effect_discard(s,selections,"wheel_seven")
         elif c.effect=="timetwister":
             for player in self.players.values():
                 player.library.extend(player.hand); player.library.extend(player.graveyard); player.hand=[]; player.graveyard=[]
@@ -2997,6 +3066,8 @@ class Game:
     def _finish(self,winner,reason): self.winner=winner; self.finished_reason=reason; self.phase="finished"; self.priority_user=None
     def _priority(self,user):
         if self.finished: raise GameError("Game is over.")
+        if self.phase=="cleanup_discard":
+            raise GameError("The active player must discard to their maximum hand size first.")
         if self.turn_start_pending_user is not None:
             raise GameError("The incoming player must choose whether to skip their turn for Time Vault first.")
         if self.sanctuary_draw_pending:

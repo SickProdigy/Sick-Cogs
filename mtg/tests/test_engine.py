@@ -60,7 +60,7 @@ class TurnTests(unittest.TestCase):
         self.assertGreater(restored.updated_at,0)
 
     def test_time_walk_queue_persists_and_gives_a_full_extra_turn(self):
-        game=ready(); player=game.player(10); before=len(player.hand)
+        game=ready(); [setattr(game.player(user),"hand",game.player(user).hand[:7]) for user in game.order]; player=game.player(10); before=len(player.hand)
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:83"
         game._resolve(Spell(10,uid,"lea:83"))
         self.assertEqual(game.extra_turns,[10]); self.assertIn(uid,player.graveyard)
@@ -71,16 +71,16 @@ class TurnTests(unittest.TestCase):
         self.assertEqual((restored.active_user,restored.turn),(10,2)); self.assertEqual(restored.extra_turns,[])
         self.assertFalse(restored.player(10).battlefield[0].tapped); self.assertFalse(restored.player(10).land_played)
         self.assertEqual(len(restored.player(10).hand),before+1)
-        restored.phase="ending"; restored._advance(); self.assertEqual((restored.active_user,restored.turn),(20,3))
+        restored.player(10).hand=restored.player(10).hand[:7]; restored.phase="ending"; restored._advance(); self.assertEqual((restored.active_user,restored.turn),(20,3))
 
     def test_extra_turns_use_newest_created_first(self):
-        game=ready()
+        game=ready(); [setattr(game.player(user),"hand",game.player(user).hand[:7]) for user in game.order]
         for owner in (10,20):
             uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:83"; game._resolve(Spell(owner,uid,"lea:83"))
         self.assertEqual(game.extra_turns,[20,10])
         game.phase="ending"; game._advance(); self.assertEqual(game.active_user,20)
-        game.phase="ending"; game._advance(); self.assertEqual(game.active_user,10)
-        game.phase="ending"; game._advance(); self.assertEqual(game.active_user,20)
+        game.player(20).hand=game.player(20).hand[:7]; game.phase="ending"; game._advance(); self.assertEqual(game.active_user,10)
+        game.player(10).hand=game.player(10).hand[:7]; game.phase="ending"; game._advance(); self.assertEqual(game.active_user,20)
 
     def test_declaration_steps_do_not_grant_spell_priority(self):
         g=ready(); p=g.players[10]
@@ -4235,5 +4235,34 @@ class AlphaChaosOrbTests(unittest.TestCase):
         game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; orb=self.add(game,10,"lea:235"); token=self.add(game,20,"token:wasp"); game.player(10).mana_pool={"C":1}; game.phase="precombat_main"; game.priority_user=10
         with self.assertRaisesRegex(GameError,"nontoken"): game.activate_ability(10,1,"20:1")
         self.assertFalse(orb.tapped); self.assertEqual(game.player(10).mana_pool,{"C":1}); self.assertFalse(game.stack); self.assertIsNotNone(game.find_permanent(token.uid)[1])
+
+class LibraryOfLengTests(unittest.TestCase):
+    def add(self,game,user,key,zone):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; getattr(game.player(user),zone).append(uid); return uid
+    def leng(self,game,user):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:257"; game.player(user).battlefield.append(Permanent(uid,"lea:257",owner=user,sick=False)); return uid
+
+    def test_effect_discard_replacement_persists_and_finishes_spell(self):
+        game=ready(); game.player(10).hand=[]; game.player(20).hand=[]; game.player(20).battlefield=[]; self.leng(game,20)
+        first=self.add(game,20,"bear","hand"); second=self.add(game,20,"giant","hand"); spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:115"
+        game.stack=[Spell(10,spell,"lea:115","20",x_value=2)]; game.phase="precombat_main"; game.priority_user=20; game.pass_priority(20); game.pass_priority(10)
+        self.assertEqual((game.stack[-1].ability_effect,game.stack[-1].choice_owner,game.priority_user,len(game.stack[-1].discard_queue)),("leng_discard",20,20,2))
+        restored=Game.from_raw(game.to_raw()); restored.choose_discard_destination(20,True); restored.choose_discard_destination(20,False)
+        self.assertIn(restored.player(20).library[-1],(first,second)); self.assertEqual(len(restored.player(20).graveyard),1); self.assertIn(spell,restored.player(10).graveyard); self.assertFalse(restored.stack)
+
+    def test_wheel_and_scepter_use_shared_destination_choice(self):
+        game=ready(); [setattr(game.player(user),zone,[]) for user in game.order for zone in ("hand","battlefield","graveyard","library")]; self.leng(game,10)
+        own=self.add(game,10,"bear","hand"); opposing=self.add(game,20,"giant","hand")
+        for user in game.order:
+            for _ in range(8): self.add(game,user,"forest" if user==10 else "mountain","library")
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:183"; game._resolve(Spell(10,spell,"lea:183")); self.assertIn(opposing,game.player(20).graveyard); self.assertFalse(game.player(10).hand)
+        game.choose_discard_destination(10,True); self.assertEqual(len(game.player(10).hand),7); self.assertNotIn(own,game.player(10).graveyard)
+        target=ready(); target.player(20).hand=[]; target.player(20).battlefield=[]; self.leng(target,20); chosen=self.add(target,20,"bear","hand"); ability=target.next_uid; target.next_uid+=1; target.cards[ability]="lea:242"; target.stack=[Spell(10,ability,"lea:242","20",ability_effect="discard_choice",decision_pending=True,choice_owner=20)]
+        target.choose_private_hand(20,1); target.choose_discard_destination(20,True); self.assertEqual(target.player(20).library[-1],chosen); self.assertNotIn(ability,target.cards)
+
+    def test_cleanup_enforces_seven_unless_library_is_controlled(self):
+        game=ready(); game.player(10).hand=[]; game.player(10).battlefield=[]; cards=[self.add(game,10,"bear","hand") for _ in range(9)]; game.phase="ending"; game._advance(); self.assertEqual(game.phase,"cleanup_discard")
+        game.choose_cleanup_discard(10,[1]); self.assertEqual(game.phase,"cleanup_discard"); game.choose_cleanup_discard(10,[1]); self.assertNotEqual(game.phase,"cleanup_discard"); self.assertTrue(set(cards[:2])<=set(game.player(10).graveyard))
+        exempt=ready(); exempt.player(10).hand=[]; exempt.player(10).battlefield=[]; [self.add(exempt,10,"bear","hand") for _ in range(9)]; self.leng(exempt,10); exempt.phase="ending"; exempt._advance(); self.assertNotEqual(exempt.phase,"cleanup_discard"); self.assertEqual(len(exempt.player(10).hand),9)
 
 if __name__=="__main__": unittest.main()

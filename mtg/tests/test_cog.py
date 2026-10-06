@@ -783,5 +783,15 @@ class ChaosOrbRenderingTests(unittest.TestCase):
         orb=Permanent(99,"lea:235",owner=10,sick=False,tapped=True); target=Permanent(100,"lea:269",owner=20,sick=False); game.cards.update({99:"lea:235",100:"lea:269",101:"lea:235"}); game.player(10).battlefield=[orb]; game.player(20).battlefield=[target]; game.stack=[spell_type(10,101,"lea:235",f"20:{target.uid}",ability_effect="chaos_orb_destroy",source_uid=orb.uid)]; game.priority_user=20
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Digital adaptation",rendered); self.assertIn("Chaos Orb ability",rendered)
 
+class LibraryOfLengRenderingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_private_destination_and_cleanup_controls_do_not_expose_cards_publicly(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); game.player(20).hand=[]; discarded=game.next_uid; game.next_uid+=1; game.cards[discarded]="giant"; spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:115"; game.stack=[spell_type(10,spell,"lea:115","20",ability_effect="leng_discard",decision_pending=True,choice_owner=20,discard_queue=[{"user":20,"uid":discarded}],discard_resume="discard_random_spell")]; game.priority_user=20; cog.games={1:game}
+        view=GameView(cog,1); self.assertFalse(next(item for item in view.children if item.custom_id.endswith(":private_hand")).disabled); rendered=str(cog.game_embed(game).to_dict()); self.assertIn("privately choosing a discard destination",rendered); self.assertNotIn("Hill Giant",rendered)
+        interaction=SimpleNamespace(user=SimpleNamespace(id=20),followup=SimpleNamespace(send=AsyncMock())); await cog.send_private_hand_decision(interaction,1,0); kwargs=interaction.followup.send.await_args.kwargs; self.assertTrue(kwargs["ephemeral"]); self.assertIn("Hill Giant",interaction.followup.send.await_args.args[0]); options=next(item for item in kwargs["view"].children if hasattr(item,"options")).options; self.assertEqual({option.value for option in options},{"library","graveyard"})
+        game.stack=[]; game.phase="cleanup_discard"; game.active_index=1; game.player(20).hand=[]
+        for _ in range(8): uid=game.next_uid; game.next_uid+=1; game.cards[uid]="bear"; game.player(20).hand.append(uid)
+        cleanup=GameView(cog,1); self.assertFalse(next(item for item in cleanup.children if item.custom_id.endswith(":private_hand")).disabled); self.assertTrue(next(item for item in cleanup.children if item.custom_id.endswith(":pass")).disabled); self.assertIn("privately discard 1",str(cog.game_embed(game).to_dict()))
+
 if __name__ == "__main__":
     unittest.main()
