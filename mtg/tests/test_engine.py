@@ -3938,4 +3938,23 @@ class AlphaCopyPermanentTests(unittest.TestCase):
         game.choose_copy(20,10,1); self.assertEqual(game.find_permanent(second)[1].copy_key,"giant"); self.assertEqual(game.current_stats(game.find_permanent(second)[1]),game.current_stats(copied))
         optional=ready(); self.add(optional,20,"giant"); uid=self.pending(optional,10,"lea:51"); optional.choose_copy(10); self.assertIn(uid,optional.player(10).graveyard)
 
+    def test_vesuvan_entry_keeps_blue_and_copying_it_retains_upkeep_ability(self):
+        game=ready(); self.add(game,20,"giant"); uid=self.pending(game,10,"lea:87"); game.choose_copy(10,20,1); vesuvan=game.find_permanent(uid)[1]
+        self.assertEqual(game.current_stats(vesuvan),(3,3)); self.assertEqual(game.current_colors(vesuvan),("U",)); self.assertTrue(game.card(uid).upkeep_copy_creature)
+        clone_uid=self.pending(game,20,"lea:51"); game.choose_copy(20,10,1); clone=game.find_permanent(clone_uid)[1]
+        self.assertEqual(game.current_colors(clone),("U",)); self.assertTrue(game.card(clone_uid).upkeep_copy_creature); self.assertTrue(clone.copy_upkeep_creature)
+
+    def test_vesuvan_upkeep_target_precedes_responses_persists_and_can_fizzle(self):
+        game=ready(); source=self.add(game,10,"lea:87",copy_key="giant",copy_colors=["U"],copy_upkeep_creature=True); target=self.add(game,20,"bear"); game.active_index=0; game._begin_upkeep(); trigger=game.stack[-1]
+        self.assertTrue(trigger.decision_pending); self.assertEqual(game.priority_user,10); restored=Game.from_raw(game.to_raw()); restored.choose_vesuvan_copy(10,20,1)
+        self.assertFalse(restored.stack[-1].decision_pending); self.assertEqual(restored.priority_user,10); restored.pass_priority(10); restored.pass_priority(20); self.assertTrue(restored.stack[-1].decision_pending); restored.choose_vesuvan_copy(10,accept=True)
+        transformed=restored.find_permanent(source.uid)[1]; self.assertEqual(restored.card(source.uid).name,"Bear Cub"); self.assertEqual(restored.current_colors(transformed),("U",)); self.assertTrue(restored.card(source.uid).upkeep_copy_creature)
+        fizzled=Game.from_raw(game.to_raw()); fizzled.choose_vesuvan_copy(10,20,1); fizzled._destroy(fizzled.player(20),fizzled.find_permanent(target.uid)[1]); fizzled.pass_priority(10); fizzled.pass_priority(20); self.assertEqual(fizzled.card(source.uid).name,"Hill Giant")
+
+    def test_vesuvan_target_respects_protection_and_copy_can_be_declined_on_resolution(self):
+        game=ready(); source=self.add(game,10,"lea:87",copy_key="giant",copy_colors=["U"],copy_upkeep_creature=True); protected=self.add(game,20,"bear"); ward=self.add(game,20,"lea:8"); ward.attached_to=protected.uid; game.active_index=0; game._begin_upkeep()
+        self.assertNotIn(protected.uid,[permanent.uid for _,_,permanent in game.vesuvan_choices()]); game.choose_vesuvan_copy(10,10,1); game.pass_priority(10); game.pass_priority(20)
+        self.assertEqual(game.stack[-1].choice_value,2); game.choose_vesuvan_copy(10,accept=False); self.assertFalse(game.stack); self.assertEqual(game.card(source.uid).name,"Hill Giant")
+        no_target=ready(); blocked=self.add(no_target,10,"lea:87",copy_key="giant",copy_colors=["U"],copy_upkeep_creature=True); blue_ward=self.add(no_target,10,"lea:8"); blue_ward.attached_to=blocked.uid; no_target.active_index=0; no_target._begin_upkeep(); self.assertFalse(no_target.stack)
+
 if __name__=="__main__": unittest.main()

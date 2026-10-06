@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 72 creatures playable through 0.101.0; 5 remain |
+| Creatures with abilities | 77 | 73 creatures playable through 0.102.0; 4 remain |
 | Instants and sorceries | 70 | 59 spells playable through 0.95.0; 11 remain |
 | Enchantments | 68 | 63 enchantments playable through 0.101.0; 5 remain |
 | Artifacts | 42 | 39 artifacts playable through 0.99.0; 3 remain |
@@ -224,3 +224,5 @@ The 0.99.0 turn-replacement promotion adds Time Vault. It enters tapped, skips o
 The 0.100.0 variable-payment promotion adds Power Leak. It enchants an enchantment and creates a source-independent trigger during that enchantment controller's upkeep. After responses, that player uses a persisted Discord select or command to pay any nonnegative amount through the atomic mana solver; the amount prevents that much of Power Leak's two damage. Mana-source tap triggers, reload recovery, public rendering, and solo AI use the same decision path.
 
 The 0.101.0 copy-permanent promotion adds Clone and Copy Artifact. After both players respond, their controller makes a persisted optional choice from the current battlefield without targeting. A shared effective-card layer copies printed characteristics and copy effects while keeping the physical card's identity for later zones; Copy Artifact remains an enchantment in addition to the copied artifact types. Copied entry characteristics, copied activations, copy-of-copy flattening, reload recovery, Discord controls and rendering, and solo AI all use the same layer.
+
+The 0.102.0 recurring-copy promotion adds Vesuvan Doppelganger. Its entry choice shares the nontargeting copy layer while preserving blue and retaining its upkeep ability. Each upkeep now requires a legal target before the response window, then offers the optional become-or-keep decision at resolution; protection, target loss, source loss, copied added types, copy-of-copy propagation, reload recovery, Discord controls and rendering, and solo AI use the same persisted stages.

@@ -45,6 +45,8 @@ class Permanent:
     land_type_effects: List[Dict[str, object]] = field(default_factory=list)
     copy_key: str = ""
     copy_added_types: List[str] = field(default_factory=list)
+    copy_colors: List[str] = field(default_factory=list)
+    copy_upkeep_creature: bool = False
 
 @dataclass
 class Player:
@@ -169,6 +171,8 @@ class Game:
             for added in permanent.copy_added_types:
                 if added not in words: words.append(added)
             card=replace(card,type_line=" ".join(words)+(f" — {subtypes[0]}" if subtypes else ""))
+        if copy_key and permanent.copy_colors: card=replace(card,colors=tuple(permanent.copy_colors))
+        if copy_key and permanent.copy_upkeep_creature: card=replace(card,upkeep_copy_creature=True)
         return card
     def is_token(self,uid): return self.cards.get(uid,"").startswith("token:")
     def _make_permanent(self,uid,key,**kwargs):
@@ -410,7 +414,8 @@ class Game:
             controller=self.player(controller_id)
             for source in controller.battlefield:
                 card=self.card(source.uid); effect=""; trigger_owner=controller.user_id; trigger_target=str(active); choice_owner=None
-                if step=="upkeep" and card.upkeep_untap_cost and active==controller.user_id: effect="upkeep_untap"
+                if step=="upkeep" and card.upkeep_copy_creature and active==controller.user_id: effect="vesuvan_copy"; trigger_target=""; choice_owner=active
+                elif step=="upkeep" and card.upkeep_untap_cost and active==controller.user_id: effect="upkeep_untap"
                 elif step=="upkeep" and card.upkeep_cost and active==controller.user_id: effect="upkeep_cost"
                 elif step=="upkeep" and card.upkeep_sacrifice_other and active==controller.user_id: effect="upkeep_sacrifice"
                 elif step=="upkeep" and card.upkeep_each_damage: effect="upkeep_damage"
@@ -437,8 +442,10 @@ class Game:
                 elif step=="draw" and card.draw_step_extra and not source.tapped: effect="draw_step_draw"
                 elif step=="draw" and card.draw_tapped_damage and active==controller.user_id and source.tapped: effect="draw_tapped_damage"
                 if not effect: continue
-                uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
-                triggers.append(Spell(trigger_owner,uid,card.key,trigger_target,ability_effect=effect,source_uid=source.uid,color_override=source.color_override,choice_owner=choice_owner,choice_value=self.player(active).turn_start_untapped_lands if effect=="upkeep_untapped_land_damage" else 0))
+                uid=self.next_uid; self.next_uid+=1; trigger_key="lea:87" if effect=="vesuvan_copy" else card.key; self.cards[uid]=trigger_key
+                trigger=Spell(trigger_owner,uid,trigger_key,trigger_target,ability_effect=effect,source_uid=source.uid,color_override=source.color_override,choice_owner=choice_owner,choice_value=self.player(active).turn_start_untapped_lands if effect=="upkeep_untapped_land_damage" else 0,decision_pending=effect=="vesuvan_copy")
+                if effect=="vesuvan_copy" and not self.vesuvan_choices(trigger): self.cards.pop(uid,None); continue
+                triggers.append(trigger)
             if step=="upkeep" and active==controller_id:
                 for source_uid in controller.graveyard:
                     if not self._graveyard_upkeep_return_eligible(controller_id,source_uid): continue
@@ -495,7 +502,7 @@ class Game:
     def _begin_upkeep(self):
         self.phase_passes=0; triggers=self._turn_step_triggers("upkeep")
         if triggers:
-            self.stack.extend(triggers); self.phase="upkeep"; self.priority_user=self.active_user
+            self.stack.extend(triggers); self.phase="upkeep"; top=self.stack[-1]; self.priority_user=top.choice_owner if top.decision_pending and top.choice_owner is not None else self.active_user
         else: self._begin_draw_step()
 
     def _untap_limits(self):
@@ -1248,6 +1255,14 @@ class Game:
                     self.stack.pop(); self.cards.pop(s.uid,None)
                     if self.stack: self.stack[-1].passes=0
                     self.priority_user=self.active_user; return
+                if s.ability_effect=="vesuvan_copy" and s.choice_value==1:
+                    target=self._stable_target_permanent(s.target); _,source=self.find_permanent(s.source_uid)
+                    if source is None or target is None or not self.is_creature(target) or self._protected_from(target,CARDS["lea:87"],self.ability_source_colors(s)):
+                        self.stack.pop(); self._resolve(s)
+                        if self.stack: self.stack[-1].passes=0
+                        if not self.finished: self.priority_user=self.active_user
+                        return
+                    s.decision_pending=True; s.choice_value=2; self.priority_user=s.choice_owner; return
                 if not s.ability_effect and self.card(s.uid).enters_copy_types and self.copy_choices(s):
                     s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
                 if s.ability_effect=="upkeep_sacrifice" and not self.trigger_sacrifice_choices(s):
@@ -1279,6 +1294,34 @@ class Game:
                     self._resolve_end_step_sacrifices(); self.priority_user=self.active_user
                 else:
                     self._empty_mana(); self._advance()
+
+    def vesuvan_choices(self,trigger=None):
+        trigger=trigger or (self.stack[-1] if self.stack else None)
+        if trigger is None or trigger.ability_effect!="vesuvan_copy": return []
+        _,source=self.find_permanent(trigger.source_uid)
+        if source is None: return []
+        colors=self.current_colors(source)
+        return [(controller.user_id,position,permanent) for controller in self.players.values() for position,permanent in enumerate(controller.battlefield,1) if self.is_creature(permanent) and not self._protected_from(permanent,CARDS["lea:87"],colors)]
+
+    def choose_vesuvan_copy(self,user,controller_id=None,position=None,accept=None):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].ability_effect!="vesuvan_copy" or self.stack[-1].choice_owner!=user:
+            raise GameError("You do not have a Vesuvan Doppelganger copy choice to make.")
+        trigger=self.stack[-1]
+        if trigger.choice_value==0:
+            try: key=(int(controller_id),int(position))
+            except (TypeError,ValueError) as error: raise GameError("Choose a listed creature target.") from error
+            choices={(owner,index):permanent for owner,index,permanent in self.vesuvan_choices(trigger)}; target=choices.get(key)
+            if target is None: raise GameError("Choose a listed creature target.")
+            trigger.target=f"{key[0]}:{target.uid}"; trigger.decision_pending=False; trigger.choice_value=1; trigger.passes=0; self.priority_user=self.active_user; self.phase_passes=0
+            self.log.append(f"{user} chose {self.card(target.uid).name} for Vesuvan Doppelganger; players may respond."); return
+        if trigger.choice_value!=2 or accept is None: raise GameError("Choose whether Vesuvan Doppelganger becomes the targeted copy.")
+        self.stack.pop(); trigger.decision_pending=False
+        if accept: self._resolve(trigger)
+        else: self.cards.pop(trigger.uid,None); self.log.append(f"{user} kept Vesuvan Doppelganger's current form.")
+        if self.stack and self.stack[-1].decision_pending: self.priority_user=self.stack[-1].choice_owner
+        elif not self.finished: self.priority_user=self.active_user
+        self.phase_passes=0
 
     def copy_choices(self,spell=None):
         spell=spell or (self.stack[-1] if self.stack else None)
@@ -1890,7 +1933,13 @@ class Game:
         controller,target=target_permanent()
         target_card=self.card(target.uid) if target is not None else None
         if target is not None and effect not in ("self","regenerate","corpse_regenerate","end_step_corpse_counters","empty_battlefield_sacrifice","earthbind_enter","end_step_sacrifice","end_step_destroy","forced_end_step_destroy","berserk_end_step_destroy","end_combat_destroy","end_combat_remove_power_counter","no_land_sacrifice","dealt_damage_counter","damaged_creature_death_counter","add_power_counters","redirect_one_to_owner","cap_unblocked_damage","hydra_prevent","hydra_counter") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
-        if effect=="hydra_prevent":
+        if effect=="vesuvan_copy":
+            _,source=self.find_permanent(s.source_uid)
+            if source is None: fizzle("its source was gone"); return
+            if target is None or not self.is_creature(target): fizzle("its target was gone or no longer a creature"); return
+            kept_colors=list(source.copy_colors or CARDS[self.cards[source.uid]].colors)
+            source.copy_key=target.copy_key or self.cards[target.uid]; source.copy_added_types=list(target.copy_added_types); source.copy_colors=kept_colors; source.copy_upkeep_creature=True
+        elif effect=="hydra_prevent":
             if target is None or target.uid!=s.source_uid or not self.card(target.uid).hydra_damage_replacement: fizzle("its source was gone"); return
             target.damage_prevention+=1
         elif effect=="hydra_counter":
@@ -2101,10 +2150,11 @@ class Game:
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=c.key
                 self.stack.append(Spell(s.owner,uid,c.key,f"{user}:{target.uid}",ability_effect="earthbind_enter",source_uid=aura.uid,color_override=aura.color_override))
         elif c.enters_copy_types:
-            target=self._stable_target_permanent(s.target); copy_key=""; added_types=[]
-            if target is not None and any(self.has_current_type(target,kind) for kind in c.enters_copy_types): copy_key=target.copy_key or self.cards[target.uid]; added_types=list(target.copy_added_types)
+            target=self._stable_target_permanent(s.target); copy_key=""; added_types=[]; copy_colors=[]; copy_upkeep=False
+            if target is not None and any(self.has_current_type(target,kind) for kind in c.enters_copy_types):
+                copy_key=target.copy_key or self.cards[target.uid]; added_types=list(target.copy_added_types); copy_colors=list(c.colors if c.copy_keep_colors else self.card(target.uid).colors); copy_upkeep=c.upkeep_copy_creature or self.card(target.uid).upkeep_copy_creature
             if copy_key and c.copy_add_type and c.copy_add_type not in added_types: added_types.append(c.copy_add_type)
-            permanent=self._make_permanent(s.uid,c.key,owner=s.owner,copy_key=copy_key,copy_added_types=added_types,color_override=s.color_override)
+            permanent=self._make_permanent(s.uid,c.key,owner=s.owner,copy_key=copy_key,copy_added_types=added_types,copy_colors=copy_colors,copy_upkeep_creature=copy_upkeep,color_override=s.color_override)
             effective=(CARDS.get(copy_key) or TOKENS.get(copy_key)) if copy_key else c; permanent.tapped=effective.enters_tapped
             p.battlefield.append(permanent)
         elif c.kind in ("Creature","Artifact","Enchantment"):
@@ -2413,7 +2463,8 @@ class Game:
         if self.sanctuary_draw_pending:
             raise GameError("The active player must choose whether to skip their draw for Island Sanctuary first.")
         if self.stack and self.stack[-1].decision_pending:
-            if self.stack[-1].ability_effect: message="The pending trigger controller must pay or decline first."
+            if self.stack[-1].ability_effect=="vesuvan_copy": message="The pending Vesuvan target must be chosen first." if self.stack[-1].choice_value==0 else "The pending Vesuvan copy decision must be completed first."
+            elif self.stack[-1].ability_effect: message="The pending trigger controller must pay or decline first."
             elif self.card(self.stack[-1].uid).enters_copy_types: message="The pending copy choice must be completed first."
             else: message="The pending private library search must be completed first."
             raise GameError(message)
@@ -2429,6 +2480,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d.setdefault("bodyguard_choice",0); d.setdefault("island_sanctuary_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"damage_prevention":x.get("damage_prevention",0),"hydra_counters_first":x.get("hydra_counters_first",False),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"redirect_source_damage_to_player":{int(uid):int(user) for uid,user in x.get("redirect_source_damage_to_player",{}).items()},"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])],"copy_key":x.get("copy_key",""),"copy_added_types":list(x.get("copy_added_types",[]))})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d.setdefault("bodyguard_choice",0); d.setdefault("island_sanctuary_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"damage_prevention":x.get("damage_prevention",0),"hydra_counters_first":x.get("hydra_counters_first",False),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"redirect_source_damage_to_player":{int(uid):int(user) for uid,user in x.get("redirect_source_damage_to_player",{}).items()},"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])],"copy_key":x.get("copy_key",""),"copy_added_types":list(x.get("copy_added_types",[])),"copy_colors":list(x.get("copy_colors",[])),"copy_upkeep_creature":bool(x.get("copy_upkeep_creature",False))})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.tomb_cleanup_sources=[{"owner":int(x["owner"]),"source_uid":int(x["source_uid"]),"source_timestamp":int(x["source_timestamp"])} for x in r.get("tomb_cleanup_sources",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.turn_start_pending_user=int(r["turn_start_pending_user"]) if r.get("turn_start_pending_user") is not None else None; g.turn_start_pending_extra=bool(r.get("turn_start_pending_extra",False)); g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.sanctuary_draw_pending=bool(r.get("sanctuary_draw_pending",False)); g.sanctuary_pending_draws=int(r.get("sanctuary_pending_draws",int(g.sanctuary_draw_pending))); g.sanctuary_resume_draw_step=bool(r.get("sanctuary_resume_draw_step",False)); g.sanctuary_resume_mass_draw=bool(r.get("sanctuary_resume_mass_draw",False)); g.sanctuary_mass_draw_failed=[int(user) for user in r.get("sanctuary_mass_draw_failed",[])]; g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.forced_attackers=[int(x) for x in r.get("forced_attackers",[])]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

@@ -81,6 +81,23 @@ class CopySelect(discord.ui.Select):
             owner,position=(int(part) for part in value.split(":")); action=lambda g:g.choose_copy(i.user.id,owner,position)
         await self.cog.act(i,self.game_id,action,"copy_choice")
 
+class VesuvanSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id; trigger=game.stack[-1]
+        if trigger.choice_value==0:
+            options=[discord.SelectOption(label=f"{owner}:{position}. {game.card(permanent.uid).name}"[:100],description=game.card(permanent.uid).type_line[:100],value=f"target:{owner}:{position}") for owner,position,permanent in game.vesuvan_choices(trigger)[:25]]
+            placeholder="Choose Vesuvan Doppelganger's target"
+        else:
+            options=[discord.SelectOption(label="Become the copy",value="accept",description="Apply the copy effect"),discord.SelectOption(label="Keep current form",value="decline",description="Decline the optional copy effect")]
+            placeholder="Resolve Vesuvan Doppelganger's choice"
+        super().__init__(placeholder=placeholder,min_values=1,max_values=1,options=options,custom_id=f"mtg:{game_id}:vesuvan")
+    async def callback(self,i):
+        value=self.values[0]
+        if value.startswith("target:"):
+            _,owner,position=value.split(":"); action=lambda g:g.choose_vesuvan_copy(i.user.id,int(owner),int(position))
+        else: action=lambda g:g.choose_vesuvan_copy(i.user.id,accept=value=="accept")
+        await self.cog.act(i,self.game_id,action,"vesuvan_copy_choice")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -92,7 +109,7 @@ class GameView(discord.ui.View):
             if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or game.turn_start_pending_user is not None or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
-                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak"))
+                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak","vesuvan_copy"))
                 item.disabled=not pending or mandatory
                 if pending and action=="pay": item.label=game.trigger_accept_label(game.stack[-1])
                 if pending and action=="decline_trigger" and not game.stack[-1].ability_effect: item.label="Don't pay"
@@ -112,6 +129,8 @@ class GameView(discord.ui.View):
             self.add_item(PowerLeakSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).enters_copy_types:
             self.add_item(CopySelect(self.cog,self.game_id,game))
+        if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="vesuvan_copy":
+            self.add_item(VesuvanSelect(self.cog,self.game_id,game))
         if game and game.phase=="untap" and game.untap_choices(): self.add_item(UntapSelect(self.cog,self.game_id,game))
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)

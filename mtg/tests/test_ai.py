@@ -939,5 +939,11 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); clone=game.find_permanent(uid)[1]
         self.assertEqual(game.card(uid).name,"Hill Giant"); self.assertIsNotNone(clone); self.assertTrue(any(event["action"]=="ai_copy_choice" for event in game.history))
 
+    def test_ai_selects_and_resolves_vesuvan_upkeep_copy(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(AI).hand=[]
+        source=self.add(game,AI,"lea:87"); self.add(game,HUMAN,"giant"); game.active_index=0; game._begin_upkeep()
+        advance_solo(game); self.assertFalse(game.stack[-1].decision_pending); self.assertTrue(any(event["action"]=="ai_vesuvan_target" for event in game.history))
+        game.pass_priority(HUMAN); advance_solo(game); self.assertTrue(any(event["action"]=="ai_vesuvan_copy" for event in game.history)); self.assertEqual(game.card(source.uid).name,"Hill Giant"); self.assertEqual(game.current_colors(source),("U",))
+
 if __name__ == "__main__":
     unittest.main()
