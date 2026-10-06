@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import GUILD, PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, migrate_ball_items, migrated_pokedex_stats, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
+from pokemon.pokemon import GUILD, PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
@@ -91,7 +91,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertEqual(encounter_level([]),1)
         self.assertEqual(encounter_level([4,20,10]),20)
         self.assertEqual(encounter_level([4,20,10],4),24)
-        self.assertEqual(encounter_level([-4,200],4),30)
+        self.assertEqual(encounter_level([-4,200],4),100)
 
     def test_spawn_gender_obeys_species_ratio(self):
         female_rng=SimpleNamespace(randrange=lambda maximum:0)
@@ -103,8 +103,8 @@ class CogPolicyTests(unittest.TestCase):
     def test_wild_level_scales_near_player(self):
         self.assertEqual(scaled_wild_level(1,-2),1)
         self.assertEqual(scaled_wild_level(20,4),24)
-        self.assertEqual(scaled_wild_level(50,2),30)
-        self.assertEqual(scaled_wild_level(100,2),30)
+        self.assertEqual(scaled_wild_level(50,2),52)
+        self.assertEqual(scaled_wild_level(100,2),100)
 
     def test_spawn_pool_excludes_starters_specials_and_filters_generation(self):
         pool = available_species([1])
@@ -112,6 +112,15 @@ class CogPolicyTests(unittest.TestCase):
         self.assertFalse({1,4,7,144,145,146,150,151} & {item.id for item in pool})
         self.assertTrue({144,145,146,150,151} <= {item.id for item in available_species([1],True)})
         self.assertEqual(available_species([]), [])
+
+    def test_level_evolved_species_unlock_at_plausible_levels(self):
+        low_ids={item.id for item in available_species([1],level=3)}
+        level_40_ids={item.id for item in available_species([1],level=40)}
+        self.assertIn(77,low_ids)
+        self.assertNotIn(78,low_ids)
+        self.assertIn(78,level_40_ids)
+        self.assertEqual(minimum_spawn_level(78),40)
+        self.assertEqual(minimum_spawn_level(149),55)
 
     def test_friendly_rarity_is_noticeable_without_being_extreme(self):
         common=SPECIES[19];rare=SPECIES[147];very_rare=SPECIES[113]
