@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import aiohttp
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from .data import MOVES, SPECIES, sprite
 from .models import OwnedPokemon,pokemon_max_hp
@@ -401,6 +401,8 @@ class BattleRenderer:
         canvas=Image.new("RGB",(800,450),RETRO[4]);draw=ImageDraw.Draw(canvas)
         self._encounter_backdrop(draw,backdrop)
         pokemon=self._open(data,(250,220),trim=True,upscale=True)
+        if expired:
+            alpha=pokemon.getchannel("A");pokemon=ImageOps.grayscale(pokemon).convert("RGBA");pokemon.putalpha(alpha)
         canvas.paste(pokemon,(440-pokemon.width//2,300-pokemon.height),pokemon)
         maximum=((2*SPECIES[species_id].hp)*level)//100+level+10
         self._status_box(draw,(30,28),SPECIES[species_id].name,level,maximum,maximum,"",gender)
