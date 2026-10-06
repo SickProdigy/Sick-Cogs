@@ -107,6 +107,7 @@ class Card:
     combat_destroy_nonwall: bool = False
     enchantment_cast_draw: bool = False
     dealt_damage_plus_counter: bool = False
+    damaged_creature_death_counter: bool = False
     attack_requires_defender_land_type: str = ""
     sacrifice_without_land_type: str = ""
     attacks_each_combat: bool = False
@@ -182,6 +183,7 @@ class Card:
         if self.combat_destroy_nonwall: abilities.append("Whenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat")
         if self.enchantment_cast_draw: abilities.append("Whenever you cast an enchantment spell, you may draw a card")
         if self.dealt_damage_plus_counter: abilities.append("Whenever dealt damage, put a +1/+1 counter on this creature")
+        if self.damaged_creature_death_counter: abilities.append("Whenever a creature dealt damage by this creature this turn dies, put a +1/+1 counter on this creature")
         if self.attack_requires_defender_land_type: abilities.append(f"Can't attack unless defending player controls a {self.attack_requires_defender_land_type.title()}")
         if self.sacrifice_without_land_type: abilities.append(f"When you control no {self.sacrifice_without_land_type.title()}s, sacrifice this creature")
         if self.attacks_each_combat: abilities.append("Attacks each combat if able")
@@ -341,6 +343,7 @@ ALPHA_ACTIVATED_CREATURES = {
 }
 
 ALPHA_DAMAGE_COUNTER_CREATURES = {
+    "lea:127": {"damaged_creature_death_counter":True},
     "lea:195": {"dealt_damage_plus_counter":True},
 }
 
@@ -578,6 +581,7 @@ for reference in PLAYABLE_ALPHA:
         combat_destroy_nonwall=ALPHA_COMBAT_TRIGGERS.get(reference.key,{}).get("combat_destroy_nonwall",False),
         enchantment_cast_draw=ALPHA_OPTIONAL_TRIGGERS.get(reference.key,{}).get("enchantment_cast_draw",False),
         dealt_damage_plus_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("dealt_damage_plus_counter",False),
+        damaged_creature_death_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("damaged_creature_death_counter",False),
         attack_requires_defender_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("attack_requires_defender_land_type",""),
         sacrifice_without_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("sacrifice_without_land_type",""),
         attacks_each_combat=ALPHA_COMBAT_REQUIREMENTS.get(reference.key,{}).get("attacks_each_combat",False),

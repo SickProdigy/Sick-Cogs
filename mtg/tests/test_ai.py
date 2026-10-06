@@ -182,7 +182,6 @@ class SoloAITests(unittest.TestCase):
         card=__import__("mtg.cards",fromlist=["CARDS"]).CARDS["lea:177"]
         self.assertEqual(_target(game,AI,card),f"{HUMAN}:1")
 
-
     def test_ai_targets_opponent_mox_for_shatter(self):
         game=solo(); advance_solo(game)
         artifact_uid=game.next_uid; game.next_uid+=1; game.cards[artifact_uid]="lea:261"
@@ -218,7 +217,6 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(game.player(AI).mana_pool,{"G":2})
         self.assertEqual(game.stack[-1].uid,growth); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
 
-
     def test_ai_removal_targets_obey_terror_restrictions(self):
         game=solo(); advance_solo(game)
         artifact=self.add(game,HUMAN,"lea:267"); black=self.add(game,HUMAN,"lea:125"); legal=self.add(game,HUMAN,"bear")
@@ -227,7 +225,6 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(_target(game,AI,cards["lea:40"]),f"{HUMAN}:1")
         game.player(HUMAN).battlefield.remove(legal)
         self.assertIsNone(_target(game,AI,cards["lea:130"]))
-
 
     def test_ai_avoids_targets_with_matching_color_protection(self):
         game=solo(); advance_solo(game)
@@ -260,7 +257,6 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(_target(game,AI,cards["lea:122"]),"G:1")
         self.assertEqual(_target(game,AI,cards["lea:34"]),"G:1")
         self.assertIn(_target(game,AI,cards["lea:214"]),{"G:1","G:2"})
-
 
     def test_ai_values_live_characteristic_power_for_targets(self):
         game=solo(); advance_solo(game)
@@ -659,6 +655,12 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].ability_effect,"animate_self")
         game.pass_priority(HUMAN); advance_solo(game)
         self.assertTrue(statue.animated_until_end_combat); self.assertFalse(game.stack)
+
+    def test_ai_casts_sengir_vampire_through_generic_creature_path(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        spell=self.add(game,AI,"lea:127","hand"); [self.add(game,AI,"swamp") for _ in range(5)]
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game); self.assertEqual(game.stack[-1].uid,spell)
 
     def test_ai_pays_soul_net_death_trigger_when_mana_is_available(self):
         game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]

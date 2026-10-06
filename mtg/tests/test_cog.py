@@ -406,6 +406,14 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game._damage_permanent(fungusaur,1); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Fungusaur",rendered); self.assertIn("+1/+1 counters: 2",rendered); self.assertIn("Fungusaur ability",rendered)
 
+    async def test_public_embed_shows_sengir_counter_and_death_trigger(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        source=game.next_uid; game.next_uid+=1; game.cards[source]="lea:127"; sengir=permanent_type(source,"lea:127",sick=False,plus_one_counters=1); game.player(10).battlefield=[sengir]
+        victim=game.next_uid; game.next_uid+=1; game.cards[victim]="bear"; bear=permanent_type(victim,"bear",sick=False,damage_source_uids=[source]); game.player(20).battlefield=[bear]
+        game._destroy(game.player(20),bear,allow_regeneration=False); rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Sengir Vampire",rendered); self.assertIn("+1/+1 counters: 1",rendered); self.assertIn("Sengir Vampire ability",rendered)
+
     async def test_enchantress_draw_choice_renders_draw_button(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell

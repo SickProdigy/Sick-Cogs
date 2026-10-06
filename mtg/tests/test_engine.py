@@ -51,12 +51,12 @@ class TurnTests(unittest.TestCase):
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("lands_played_this_turn")
-            for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters")
+            for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage)
         self.assertTrue(all(player.damage_prevention==0 and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
-        self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 for player in restored.players.values() for permanent in player.battlefield))
+        self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 and permanent.damage_source_uids==[] for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
     def test_time_walk_queue_persists_and_gives_a_full_extra_turn(self):
@@ -1901,6 +1901,63 @@ class AlphaFungusaurTests(unittest.TestCase):
         game=ready(); active=self.add(game,10,"lea:195"); nonactive=self.add(game,20,"lea:195"); batch=game.next_uid
         game._damage_permanent(nonactive,1,trigger_batch=batch); game._damage_permanent(active,1,trigger_batch=batch)
         self.assertEqual([(item.owner,item.source_uid) for item in game.stack],[(10,active.uid),(20,nonactive.uid)])
+
+
+class AlphaSengirVampireTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_combat_damage_marks_creature_and_death_adds_persisted_counter(self):
+        game=ready(); sengir=self.add(game,10,"lea:127"); victim=self.add(game,20,"giant")
+        game.phase="after_blockers"; game.attackers=[sengir.uid]; game.blocks={sengir.uid:victim.uid}; game.blocked_attackers=[sengir.uid]
+        game._combat_damage(False)
+        self.assertIn(victim.uid,game.player(20).graveyard); self.assertEqual(game.stack[-1].ability_effect,"damaged_creature_death_counter")
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored); source=restored.find_permanent(sengir.uid)[1]
+        self.assertEqual(source.plus_one_counters,1); self.assertEqual(restored.current_stats(source),(5,5))
+
+    def test_damage_history_is_unique_persisted_and_expires_at_cleanup(self):
+        game=ready(); sengir=self.add(game,10,"lea:127"); victim=self.add(game,20,"giant")
+        game._damage_permanent(victim,1,game.card(sengir.uid),game.current_colors(sengir),source_uid=sengir.uid)
+        game._damage_permanent(victim,1,game.card(sengir.uid),game.current_colors(sengir),source_uid=sengir.uid)
+        self.assertEqual(victim.damage_source_uids,[sengir.uid])
+        restored=Game.from_raw(game.to_raw()); victim=restored.find_permanent(victim.uid)[1]
+        self.assertEqual(victim.damage_source_uids,[sengir.uid]); restored._cleanup(); self.assertEqual(victim.damage_source_uids,[])
+        restored._destroy(restored.player(20),victim,allow_regeneration=False)
+        self.assertFalse(any(item.ability_effect=="damaged_creature_death_counter" for item in restored.stack))
+
+    def test_prevention_regeneration_and_exile_do_not_create_trigger(self):
+        prevented=ready(); sengir=self.add(prevented,10,"lea:127"); victim=self.add(prevented,20,"bear"); victim.damage_prevention=1
+        self.assertEqual(prevented._damage_permanent(victim,1,prevented.card(sengir.uid),source_uid=sengir.uid),0); prevented._destroy(prevented.player(20),victim,allow_regeneration=False)
+        self.assertFalse(prevented.stack)
+        regenerated=ready(); sengir=self.add(regenerated,10,"lea:127"); victim=self.add(regenerated,20,"bear"); victim.regeneration_shields=1
+        regenerated._damage_permanent(victim,1,regenerated.card(sengir.uid),source_uid=sengir.uid)
+        self.assertFalse(regenerated._destroy(regenerated.player(20),victim)); self.assertFalse(regenerated.stack)
+        exiled=ready(); sengir=self.add(exiled,10,"lea:127"); victim=self.add(exiled,20,"bear"); victim.exile_on_death=True
+        exiled._damage_permanent(victim,1,exiled.card(sengir.uid),source_uid=sengir.uid); exiled._destroy(exiled.player(20),victim,allow_regeneration=False)
+        self.assertFalse(exiled.stack)
+
+    def test_simultaneous_deaths_snapshot_sources_and_use_apnap_order(self):
+        game=ready(); active=self.add(game,10,"lea:127"); nonactive=self.add(game,20,"lea:127")
+        active_victim=self.add(game,20,"bear"); nonactive_victim=self.add(game,10,"bear")
+        game._damage_permanent(active_victim,1,game.card(active.uid),source_uid=active.uid)
+        game._damage_permanent(nonactive_victim,1,game.card(nonactive.uid),source_uid=nonactive.uid)
+        batch=game.next_uid; sources=game._death_trigger_sources()
+        game._destroy(game.player(20),active_victim,allow_regeneration=False,trigger_batch=batch,death_sources=sources)
+        game._destroy(game.player(10),nonactive_victim,allow_regeneration=False,trigger_batch=batch,death_sources=sources)
+        triggers=[item for item in game.stack if item.ability_effect=="damaged_creature_death_counter"]
+        self.assertEqual([(item.owner,item.source_uid) for item in triggers],[(10,active.uid),(20,nonactive.uid)])
+        self.assertEqual(Game.from_raw(game.to_raw()).to_raw(),game.to_raw())
+
+    def test_source_dying_simultaneously_still_triggers_then_fizzles(self):
+        game=ready(); sengir=self.add(game,10,"lea:127"); victim=self.add(game,20,"bear")
+        game._damage_permanent(victim,1,game.card(sengir.uid),source_uid=sengir.uid); sengir.damage=4; victim.damage=2
+        game._sba(); self.assertIn(sengir.uid,game.player(10).graveyard); self.assertIn(victim.uid,game.player(20).graveyard)
+        self.assertEqual(sum(item.ability_effect=="damaged_creature_death_counter" for item in game.stack),1)
+        self.resolve_top(game); self.assertIn("source was gone",game.log[-1])
 
 
 class AlphaCombatRequirementTests(unittest.TestCase):
