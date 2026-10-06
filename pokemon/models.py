@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .catching import BALLS,attempt_catch
+from .catalog_versions import CATALOG_VERSIONS
 from .data import EVOLUTIONS, MOVES, NATURES, SPECIES, experience_to_next, moves_for_level
 from .rulesets import resolve_ruleset
 
@@ -35,6 +36,7 @@ class OwnedPokemon:
     status: str = ""
     status_turns: int = 0
     pending_moves: list = field(default_factory=list)
+    catalog_version: str = "bundled-gen1-rby-v1"
 
     def __post_init__(self):
         if not self.moves:
@@ -55,6 +57,7 @@ class OwnedPokemon:
         seed: Optional[int] = None,
         shiny: bool = False,
         guild_id: Optional[int] = None,
+        catalog_version: str = "bundled-gen1-rby-v1",
     ):
         rng = random.Random(seed)
         species=SPECIES[species_id]
@@ -82,6 +85,7 @@ class OwnedPokemon:
             gender,
             "wild" if guild_id is not None else "starter",
             datetime.now(timezone.utc).isoformat(),
+            catalog_version=catalog_version,
         )
 
     def raw(self):
@@ -103,6 +107,8 @@ class OwnedPokemon:
         data.setdefault("status","")
         data.setdefault("status_turns",0)
         data.setdefault("pending_moves",[])
+        data.setdefault("catalog_version","bundled-gen1-rby-v1")
+        CATALOG_VERSIONS.get(data["catalog_version"])
         return cls(**data)
 
     def gain_experience(self, amount: int):
@@ -172,6 +178,7 @@ class Battle:
     ruleset: str = "standard"
     mechanics_generation: int = 9
     content_generation: int = 1
+    catalog_version: str = "bundled-gen1-rby-v1"
     participants: list = field(default_factory=list)
     experience_awards: dict = field(default_factory=dict)
     progression_events: list = field(default_factory=list)
@@ -617,7 +624,7 @@ class Battle:
         shiny = random.Random(self.seed + 4049).randrange(4096) == 0
         pokemon=OwnedPokemon.create(
             identity,self.wild_species_id,self.wild_level,seed=self.seed+991,
-            shiny=shiny,guild_id=self.guild_id,
+            shiny=shiny,guild_id=self.guild_id,catalog_version=self.catalog_version,
         )
         if self.wild_gender!="unknown":pokemon.gender=self.wild_gender
         return pokemon
@@ -669,6 +676,8 @@ class Battle:
         data.setdefault("ruleset","standard")
         data.setdefault("mechanics_generation",resolve_ruleset(data["ruleset"]).mechanics_generation)
         data.setdefault("content_generation",1)
+        data.setdefault("catalog_version",CATALOG_VERSIONS.for_generation(data["content_generation"],bundled=data["content_generation"]==1).key)
+        CATALOG_VERSIONS.get(data["catalog_version"])
         data.setdefault("participants",[data["player"].instance_id])
         data.setdefault("experience_awards",{})
         data.setdefault("progression_events",[])

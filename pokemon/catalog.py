@@ -6,11 +6,13 @@ from pathlib import Path
 
 import aiohttp
 
+from .catalog_versions import CATALOG_VERSIONS, CatalogVersionError
 from .data import MOVES, SPECIES, Species
 
 API_ROOT = "https://pokeapi.co/api/v2"
-USER_AGENT = "Sick-Cogs-Pokemon/0.30.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Pokemon/0.31.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 MAX_SPECIES = 1025
+VERSION_GROUPS={1:{"red-blue","yellow"},2:{"gold-silver","crystal"},3:{"ruby-sapphire","emerald","firered-leafgreen"},4:{"diamond-pearl","platinum","heartgold-soulsilver"},5:{"black-white","black-2-white-2"},6:{"x-y","omega-ruby-alpha-sapphire"},7:{"sun-moon","ultra-sun-ultra-moon"},8:{"sword-shield","brilliant-diamond-and-shining-pearl"},9:{"scarlet-violet"}}
 
 
 class CatalogError(RuntimeError):
@@ -29,8 +31,10 @@ class PokemonCatalog:
                 continue
             try:
                 raw = json.loads(path.read_text(encoding="utf-8"))
+                version=raw.get("catalog_version")
+                if version:CATALOG_VERSIONS.get(version)
                 parsed = [self.parse_cached(item) for item in raw.get("species", [])]
-            except (OSError, ValueError, TypeError, KeyError) as exc:
+            except (OSError, ValueError, TypeError, KeyError, CatalogVersionError) as exc:
                 raise CatalogError("The Pokémon catalog cache is invalid.") from exc
             for item in parsed:
                 previous=SPECIES.get(item.id)
@@ -66,7 +70,7 @@ class PokemonCatalog:
                         self._get(session, f"/pokemon/{name}"),
                         self._get(session, f"/pokemon-species/{name}"),
                     )
-                    return self.parse_api(pokemon, species)
+                    return self.parse_api(pokemon, species, generation)
 
             records = await asyncio.gather(*(fetch(name) for name in names))
         existing = {}
@@ -83,7 +87,7 @@ class PokemonCatalog:
         for record in records:
             existing[record.id] = self.to_cached(record)
             SPECIES[record.id] = record
-        payload = {"schema": 2, "species": [existing[key] for key in sorted(existing)]}
+        payload = {"schema": 3, "catalog_version": CATALOG_VERSIONS.for_generation(generation).key, "species": [existing[key] for key in sorted(existing)]}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
@@ -100,7 +104,7 @@ class PokemonCatalog:
             raise CatalogError("PokéAPI request failed.") from exc
 
     @staticmethod
-    def parse_api(pokemon: dict, species: dict) -> Species:
+    def parse_api(pokemon: dict, species: dict, generation: int = 1) -> Species:
         species_id = int(pokemon["id"])
         if not 1 <= species_id <= MAX_SPECIES:
             raise CatalogError("PokéAPI returned an unsupported species ID.")
@@ -120,7 +124,7 @@ class PokemonCatalog:
             for detail in item.get("version_group_details", []):
                 if (
                     detail.get("move_learn_method", {}).get("name") == "level-up"
-                    and detail.get("version_group", {}).get("name") in {"red-blue", "yellow"}
+                    and detail.get("version_group", {}).get("name") in VERSION_GROUPS.get(int(generation),set())
                 ):
                     level = int(detail.get("level_learned_at", 0))
                     learned[key] = min(level, learned.get(key, level))

@@ -9,6 +9,7 @@ from discord.ext import tasks
 from redbot.core import Config,commands
 from redbot.core.data_manager import cog_data_path
 from .catalog import CatalogError,PokemonCatalog
+from .catalog_versions import CATALOG_VERSIONS
 from .data import MOVES,SPECIES,experience_to_next,generation_for,moves_for_level,sprite
 from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
@@ -98,7 +99,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.30.0";__author__="SickProdigy"
+    __version__="0.31.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -277,7 +278,7 @@ class Pokemon(commands.Cog):
             party=[OwnedPokemon.from_raw(collection[identity]) for identity in user["party"] if identity in collection]
             if not any((item.current_hp if item.current_hp is not None else pokemon_max_hp(item))>0 for item in party):
                 await i.response.send_message("Your party has fainted. Visit a Pokémon Center or use a Revive.",ephemeral=True);return
-            wild=SPECIES[raw["species_id"]];battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31),wild_gender=raw.get("gender","unknown"));battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
+            wild=SPECIES[raw["species_id"]];content_generation=generation_for(int(raw["species_id"]));catalog_version=CATALOG_VERSIONS.for_generation(content_generation,bundled=content_generation==1).key;battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31),wild_gender=raw.get("gender","unknown"),content_generation=content_generation,catalog_version=catalog_version);battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
             battle_seconds=await self.config.guild_from_id(int(raw["guild_id"])).battle_timeout()
             raw["state"]="battle";raw["expires_at"]=(datetime.now(timezone.utc)+timedelta(seconds=battle_seconds)).isoformat();raw["battle"]=battle.raw();encounters[str(eid)]=raw;await self.config.encounters.set(encounters);self.battles[eid]=battle
             embed,files=await self.rendered_battle(battle)
