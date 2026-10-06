@@ -111,6 +111,8 @@ class Card:
     aura_choose_land_type: bool = False
     global_land_from_type: str = ""
     global_land_to_type: str = ""
+    upkeep_turn_start_untapped_damage: bool = False
+    end_step_sacrifice_without_creatures: bool = False
     upkeep_opponent_hand_damage: bool = False
     draw_step_extra: int = 0
     untap_power_limit: int = 0
@@ -245,6 +247,8 @@ class Card:
         if self.aura_set_land_type: abilities.append(f"Enchanted land is a {self.aura_set_land_type.title()}")
         if self.aura_choose_land_type: abilities.append("Choose a basic land type; enchanted land is that type")
         if self.global_land_from_type: abilities.append(f"All {self.global_land_from_type.title()}s are {self.global_land_to_type.title()}s")
+        if self.upkeep_turn_start_untapped_damage: abilities.append("At each player’s upkeep, deals damage equal to lands they controlled untapped at the beginning of the turn")
+        if self.end_step_sacrifice_without_creatures: abilities.append("At each end step, sacrifice this enchantment if no creatures are on the battlefield")
         if self.upkeep_opponent_hand_damage: abilities.append("At your opponent's upkeep, deals damage equal to cards in their hand minus 4")
         if self.draw_step_extra: abilities.append(f"At each draw step while untapped, that player draws {self.draw_step_extra} additional card"+("s" if self.draw_step_extra!=1 else ""))
         if self.untap_power_limit: abilities.append(f"Creatures with power {self.untap_power_limit} or greater don't untap")
@@ -343,6 +347,8 @@ ALPHA_ENCHANTMENTS = {
     "lea:15": {"global_land_from_type":"mountain", "global_land_to_type":"plains", "upkeep_cost":"{W}{W}", "upkeep_unpaid_effect":"sacrifice"},
     "lea:68": {"aura_target_types":("Land",), "aura_choose_land_type":True},
     "lea:107": {"aura_target_types":("Land",), "aura_hostile":True, "aura_set_land_type":"swamp"},
+    "lea:120": {"activation_cost":"{B}", "activation_effect":"damage_all", "activation_amount":1, "activation_text":"Deals 1 damage to each creature and each player", "end_step_sacrifice_without_creatures":True},
+    "lea:167": {"upkeep_turn_start_untapped_damage":True},
 }
 
 ALPHA_ARTIFACTS = {
@@ -623,7 +629,7 @@ for reference in PLAYABLE_ALPHA:
         activation_effect=ALPHA_DEATH_COUNTER_CREATURES.get(reference.key,{}).get("activation_effect",ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_effect",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_effect",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_effect","")))),
         activation_tap=ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_tap",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_tap",False)),
         activation_text=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_text",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_text",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_text",""))),
-        activation_amount=ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_amount",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_amount",0)),
+        activation_amount=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_amount",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_amount",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_amount",0))),
         activation_self_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_self_damage",0),
         enters_power_counters=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("enters_power_counters",0),
         end_combat_remove_power_counter=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("end_combat_remove_power_counter",False),
@@ -668,6 +674,8 @@ for reference in PLAYABLE_ALPHA:
         aura_choose_land_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_choose_land_type",False),
         global_land_from_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("global_land_from_type",""),
         global_land_to_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("global_land_to_type",""),
+        upkeep_turn_start_untapped_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("upkeep_turn_start_untapped_damage",False),
+        end_step_sacrifice_without_creatures=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("end_step_sacrifice_without_creatures",False),
         upkeep_opponent_hand_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_opponent_hand_damage",False),
         draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
         untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),

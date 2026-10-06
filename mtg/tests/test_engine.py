@@ -3194,6 +3194,34 @@ class AlphaCircleOfProtectionTests(unittest.TestCase):
         self.assertEqual(restored.player(10).source_damage_prevention,[]); self.assertEqual(restored.player(10).damage_prevention,0)
 
 
+class AlphaDamageEnchantmentTests(unittest.TestCase):
+    def add(self,game,user,key,tapped=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False,tapped=tapped); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_pestilence_damage_is_simultaneous_independent_and_conditionally_sacrificed(self):
+        game=ready(); pestilence=self.add(game,10,"lea:120"); self.add(game,10,"swamp"); own=self.add(game,10,"goblin"); enemy=self.add(game,20,"goblin"); protected=self.add(game,20,"lea:43")
+        game.activate_ability(10,1); self.assertEqual(game.stack[-1].ability_effect,"damage_all")
+        game._destroy(game.player(10),pestilence,allow_regeneration=False); self.resolve_top(game)
+        self.assertEqual((game.player(10).life,game.player(20).life),(19,19)); self.assertIn(own.uid,game.player(10).graveyard); self.assertIn(enemy.uid,game.player(20).graveyard)
+        self.assertIsNotNone(game.find_permanent(protected.uid)[1]); self.assertEqual(protected.damage,0)
+
+        ending=ready(); pestilence=self.add(ending,10,"lea:120"); ending._begin_end_step(); self.assertEqual(ending.stack[-1].ability_effect,"empty_battlefield_sacrifice")
+        creature=self.add(ending,20,"bear"); self.resolve_top(ending); self.assertIsNotNone(ending.find_permanent(pestilence.uid)[1])
+        ending._destroy(ending.player(20),creature,allow_regeneration=False); ending._begin_end_step(); self.resolve_top(ending)
+        self.assertIn(pestilence.uid,ending.player(10).graveyard)
+
+    def test_power_surge_snapshots_untapped_lands_before_untap_and_survives_changes(self):
+        game=ready(); surge=self.add(game,20,"lea:167"); first=self.add(game,10,"plains"); second=self.add(game,10,"island"); third=self.add(game,10,"forest",tapped=True)
+        game.active_index=0; game._start_turn(); trigger=game.stack[-1]
+        self.assertEqual((trigger.ability_effect,trigger.owner,trigger.target,trigger.choice_value),("upkeep_untapped_land_damage",20,"10",2)); self.assertFalse(third.tapped)
+        restored=Game.from_raw(game.to_raw()); restored._destroy(restored.player(20),restored.find_permanent(surge.uid)[1],allow_regeneration=False); restored.find_permanent(first.uid)[1].tapped=True; restored.find_permanent(second.uid)[1].tapped=True
+        self.resolve_top(restored); self.assertEqual(restored.player(10).life,18)
+
+
 class AlphaContinuousAnimationTests(unittest.TestCase):
     def add(self,game,user,key,sick=False,attached_to=None):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

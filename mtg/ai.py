@@ -197,6 +197,15 @@ def _play_one(game, user, difficulty):
             score = 5
         elif card.global_power or card.global_toughness:
             score=_global_enchantment_score(game,user,card)
+        elif card.upkeep_turn_start_untapped_damage:
+            own=sum(game.card(x.uid).land and not x.tapped for x in player.battlefield)
+            enemy=sum(game.card(x.uid).land and not x.tapped for x in game.player(game.opponent(user)).battlefield)
+            if enemy<=own or player.life<=own: continue
+            score=4+enemy-own
+        elif card.activation_effect=="damage_all":
+            enemy=sum(game.is_creature(x) for x in game.player(game.opponent(user)).battlefield)
+            if not enemy: continue
+            score=5+enemy
         elif card.global_land_from_type:
             own=sum(game.has_current_land_type(permanent,card.global_land_from_type) for permanent in player.battlefield)
             enemy=sum(game.has_current_land_type(permanent,card.global_land_from_type) for permanent in game.player(game.opponent(user)).battlefield)
@@ -440,6 +449,11 @@ def _activation_target(game,user,card,source_uid=None):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
         return None
     if card.activation_effect in ("draw_self","create_token"): return str(user)
+    if card.activation_effect=="damage_all":
+        if game.player(user).life<=card.activation_amount: return None
+        own=sum(game.is_creature(x) and game.current_stats(x)[1]-x.damage<=card.activation_amount for x in game.player(user).battlefield)
+        enemy=sum(game.is_creature(x) and game.current_stats(x)[1]-x.damage<=card.activation_amount for x in game.player(game.opponent(user)).battlefield)
+        return str(user) if enemy>own else None
     if card.activation_effect=="prevent_player_damage": return str(user) if not game.player(user).damage_prevention and _player_damage_threatened(game,user) else None
     if card.activation_effect=="prevent_any_damage":
         if not game.player(user).damage_prevention and _player_damage_threatened(game,user): return str(user)
