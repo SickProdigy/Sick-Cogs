@@ -3980,4 +3980,25 @@ class AlphaNaturalSelectionTests(unittest.TestCase):
         empty=ready(); empty.player(20).library=[]; uid=empty.next_uid; empty.next_uid+=1; empty.cards[uid]="lea:212"; empty.stack=[Spell(10,uid,"lea:212","20")]; empty.phase="precombat_main"; empty.priority_user=10; empty.pass_priority(10); empty.pass_priority(20)
         self.assertFalse(empty.stack); self.assertIn(uid,empty.player(10).graveyard)
 
+class AlphaAnimateDeadTests(unittest.TestCase):
+    def grave_creature(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(user).graveyard.append(uid); return uid
+    def resolve_aura(self,game,target_user,target_uid):
+        aura=game.next_uid; game.next_uid+=1; game.cards[aura]="lea:92"; spell=Spell(10,aura,"lea:92",f"G:{target_user}:{target_uid}"); game._resolve(spell); return aura
+
+    def test_cross_graveyard_reanimation_stats_control_and_reload(self):
+        game=ready(); creature=self.grave_creature(game,20,"giant"); self.assertEqual(game._target_for_cast(CARDS["lea:92"],10,"20:G:1"),f"G:20:{creature}")
+        aura=self.resolve_aura(game,20,creature); restored=Game.from_raw(game.to_raw()); controller,reanimated=restored.find_permanent(creature); _,enchantment=restored.find_permanent(aura)
+        self.assertEqual((controller.user_id,reanimated.owner,reanimated.base_controller),(10,20,10)); self.assertEqual(restored.current_stats(reanimated),(2,3)); self.assertEqual(enchantment.attached_to,creature)
+
+    def test_aura_departure_creates_persisted_sacrifice_that_tracks_control(self):
+        game=ready(); creature=self.grave_creature(game,20,"giant"); aura=self.resolve_aura(game,20,creature); aura_permanent=game.find_permanent(aura)[1]; reanimated=game.find_permanent(creature)[1]; reanimated.regeneration_shields=1
+        game._destroy(game.player(10),aura_permanent); restored=Game.from_raw(game.to_raw()); trigger=restored.stack.pop(); self.assertEqual(trigger.ability_effect,"animate_dead_sacrifice")
+        moved=restored.find_permanent(creature)[1]; restored.player(10).battlefield.remove(moved); restored.player(20).battlefield.append(moved); restored._resolve_ability(trigger)
+        self.assertNotIn(creature,[item.uid for player in restored.players.values() for item in player.battlefield]); self.assertIn(creature,restored.player(20).graveyard)
+
+    def test_target_loss_and_protection_cleanup_follow_linked_trigger(self):
+        gone=ready(); creature=self.grave_creature(gone,20,"bear"); aura=self.resolve_aura(gone,20,creature); target=gone.find_permanent(creature)[1]; gone._destroy(gone.player(10),target); gone._sba(); self.assertIn(aura,gone.player(10).graveyard); trigger=gone.stack.pop(); gone._resolve_ability(trigger); self.assertIn("linked creature was gone",gone.log[-1])
+        protected=ready(); knight=self.grave_creature(protected,20,"lea:43"); aura=self.resolve_aura(protected,20,knight); self.assertIn(aura,protected.player(10).graveyard); self.assertIsNotNone(protected.find_permanent(knight)[1]); trigger=protected.stack.pop(); protected._resolve_ability(trigger); self.assertIn(knight,protected.player(20).graveyard)
+
 if __name__=="__main__": unittest.main()

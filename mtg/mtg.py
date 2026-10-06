@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.103.0"
+    __version__="0.104.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -531,7 +531,7 @@ class MTG(commands.Cog):
         names={user:str(self.bot.get_user(user).display_name if self.bot.get_user(user) else user).replace("\n"," ")[:32] for user in game.order}
         lines=[f"{position}. {game.card(uid).name}" for position,uid in enumerate(player.graveyard,1)]
         if not lines: await ctx.send(f"{names[target]} has no cards in their graveyard.",allowed_mentions=discord.AllowedMentions.none()); return
-        pages=[]; current=f"**{names[target]} graveyard** — bottom → top; target your own cards with G:POSITION\n"
+        pages=[]; current=f"**{names[target]} graveyard** — bottom → top; target your own cards with G:POSITION or another player with USER_ID:G:POSITION\n"
         for line in lines:
             if len(current)+len(line)+1>1900: pages.append(current); current=""
             current+=line+"\n"

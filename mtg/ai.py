@@ -8,6 +8,13 @@ TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_dama
 
 
 def _target(game, user, card):
+    if card.aura_reanimate:
+        choices=[]
+        for target_user in (user,game.opponent(user)):
+            for position,uid in enumerate(game.player(target_user).graveyard,1):
+                if game.card(uid).creature: choices.append((sum(game.projected_stats(user,game.card(uid)))+game.card(uid).cost,target_user,position))
+        if not choices: return None
+        _,target_user,position=max(choices); return f"G:{position}" if target_user==user else f"{target_user}:G:{position}"
     if card.effect=="guardian_angel":
         if not game.player(user).damage_prevention and _player_damage_threatened(game,user): return str(user)
         choices=[(game.card(permanent.uid).cost+sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent) and not permanent.damage_prevention and _permanent_damage_threatened(game,user,permanent)]

@@ -7,9 +7,9 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 73 creatures playable through 0.103.0; 4 remain |
+| Creatures with abilities | 77 | 73 creatures playable through 0.104.0; 4 remain |
 | Instants and sorceries | 70 | 60 spells playable through 0.103.0; 10 remain |
-| Enchantments | 68 | 63 enchantments playable through 0.101.0; 5 remain |
+| Enchantments | 68 | 64 enchantments playable through 0.104.0; 4 remain |
 | Artifacts | 42 | 39 artifacts playable through 0.99.0; 3 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
@@ -229,3 +229,6 @@ The 0.102.0 recurring-copy promotion adds Vesuvan Doppelganger. Its entry choice
 
 
 The 0.103.0 private-library ordering promotion adds Natural Selection. Its target is fixed while players respond, then its controller privately sees the top three cards and chooses an exact top-to-bottom permutation or has that player shuffle. The requester-bound ephemeral selector and text command expose no card names publicly; persistence, stale or foreign rejection, atomic validation, empty libraries, and solo AI use the same resolution-time choice. Catalog verification remains aggregate across all 295 printings rather than duplicating a test for every card row.
+
+
+The 0.104.0 graveyard-Aura promotion adds Animate Dead. It targets a creature card in either graveyard, returns it under the Aura controller's control while preserving ownership, applies the live -1/-0 modifier, and creates a persisted respondable sacrifice trigger when the Aura reaches a graveyard. A backward-compatible base-controller field keeps that control correct through reloads and later control-changing Auras. Target loss, protection-driven Aura cleanup, linked-creature departure, regeneration-bypassing sacrifice, cross-player graveyard syntax, public attachment rendering, and solo AI use shared engine paths.

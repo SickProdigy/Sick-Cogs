@@ -945,6 +945,12 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertFalse(game.stack[-1].decision_pending); self.assertTrue(any(event["action"]=="ai_vesuvan_target" for event in game.history))
         game.pass_priority(HUMAN); advance_solo(game); self.assertTrue(any(event["action"]=="ai_vesuvan_copy" for event in game.history)); self.assertEqual(game.card(source.uid).name,"Hill Giant"); self.assertEqual(game.current_colors(source),("U",))
 
+    def test_ai_targets_best_creature_in_either_graveyard_for_animate_dead(self):
+        game=solo(); game.player(AI).graveyard=[]; game.player(HUMAN).graveyard=[]
+        cheap=game.next_uid; game.next_uid+=1; game.cards[cheap]="bear"; game.player(AI).graveyard.append(cheap)
+        large=game.next_uid; game.next_uid+=1; game.cards[large]="giant"; game.player(HUMAN).graveyard.append(large)
+        self.assertEqual(_target(game,AI,CARDS["lea:92"]),f"{HUMAN}:G:1")
+
     def test_ai_orders_natural_selection_through_shared_private_choice(self):
         spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(AI).hand=[]; game.player(AI).library=[]
         for key in ("giant","mountain","bear"):

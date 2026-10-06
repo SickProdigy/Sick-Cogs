@@ -52,6 +52,7 @@ class Card:
     aura_blocked_except_wall: bool = False
     aura_hostile: bool = False
     aura_control: bool = False
+    aura_reanimate: bool = False
     aura_animate_mana_value: bool = False
     animate_land_type: str = ""
     animate_land_color: str = ""
@@ -206,6 +207,7 @@ class Card:
         if self.aura_forest_scaling: aura.append("Enchanted creature gets +X/+Y for Forests you control")
         if self.aura_animate_mana_value: aura.append("Enchanted noncreature artifact is a creature with power and toughness equal to its mana value")
         if self.aura_control: aura.append("You control enchanted permanent")
+        if self.aura_reanimate: aura.append("Reanimates enchanted creature card; enchanted creature gets -1/-0; sacrifice it when this Aura leaves")
         if self.aura_keyword: aura.append(f"Enchanted creature has {self.aura_keyword.replace('_',' ').title()}")
         if self.aura_attack_haste: aura.append("Enchanted creature can attack as though it had haste")
         if self.aura_protection: aura.append(f"Enchanted creature has Protection From {self.aura_protection}")
@@ -378,6 +380,7 @@ ALPHA_ENCHANTMENTS = {
     "lea:133": {"aura_target_types":("Artifact",), "aura_upkeep_damage":1, "aura_hostile":True},
     "lea:226": {"aura_target_types":("Creature",), "aura_upkeep_damage":1, "aura_hostile":True},
     "lea:48": {"aura_target_types":("Artifact",), "aura_animate_mana_value":True},
+    "lea:92": {"aura_target_types":("Creature",), "aura_power":-1, "aura_reanimate":True},
     "lea:52": {"aura_target_types":("Creature",), "aura_hostile":True, "aura_control":True},
     "lea:81": {"aura_target_types":("Artifact",), "aura_hostile":True, "aura_control":True},
     "lea:209": {"animate_land_type":"forest"},
@@ -689,6 +692,7 @@ for reference in PLAYABLE_ALPHA:
         aura_blocked_except_wall=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_blocked_except_wall",False),
         aura_hostile=ALPHA_ENCHANTMENTS.get(reference.key, ALPHA_TAP_ENCHANTMENTS.get(reference.key, {})).get("aura_hostile",False),
         aura_control=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_control",False),
+        aura_reanimate=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_reanimate",False),
         aura_animate_mana_value=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_animate_mana_value",False),
         animate_land_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("animate_land_type",ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_land_type","")),
         animate_land_color=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("animate_land_color",ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_land_color","")),
