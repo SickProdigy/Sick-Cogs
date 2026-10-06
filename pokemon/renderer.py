@@ -322,8 +322,11 @@ class BattleRenderer:
     def _status_box(draw,origin,name,level,hp,maximum,status,gender="unknown"):
         x, y = origin
         draw.rounded_rectangle((x, y, x + 320, y + 88), 12, fill=RETRO[7], outline=RETRO[0], width=4)
-        symbol={"female":"♀","male":"♂","genderless":"—"}.get(gender,"?")
-        draw.text((x+14,y+10),f"{name}  {symbol}  Lv.{level}",fill=RETRO[0],font=ImageFont.load_default(size=18))
+        font=ImageFont.load_default(size=18);label_x=x+14;label_y=y+10
+        draw.text((label_x,label_y),name,fill=RETRO[0],font=font)
+        mark_x=label_x+int(draw.textlength(name,font=font))+7
+        BattleRenderer._gender_mark(draw,(mark_x,y+13),gender,RETRO[0])
+        draw.text((mark_x+20,label_y),f"Lv.{level}",fill=RETRO[0],font=font)
         draw.rectangle((x + 70, y + 45, x + 295, y + 62), outline=RETRO[0], width=2)
         width = int(221 * max(0, hp) / max(1, maximum))
         draw.rectangle((x + 72, y + 47, x + 72 + width, y + 60), fill=RETRO[2])
