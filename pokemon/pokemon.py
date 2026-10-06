@@ -84,7 +84,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.14.1";__author__="SickProdigy"
+    __version__="0.15.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -399,13 +399,25 @@ class Pokemon(commands.Cog):
             await section.set(conf)
             return pokemon
 
+    async def rendered_starter(self,pokemon,encounter_id=None):
+        species=SPECIES[pokemon.species_id];symbol={"female":"♀","male":"♂","genderless":"—"}.get(pokemon.gender,"?")
+        description="Professor Oak entrusted this Pokémon to you. Your journey begins now."
+        if encounter_id is not None:description+=" Press **Encounter** again when you are ready to battle."
+        embed=discord.Embed(title=f"You received {species.name}!",description=description,color=discord.Color.green())
+        embed.add_field(name="Partner",value=f"{species.name} · {symbol} · Lv. {pokemon.level}",inline=False)
+        try:
+            image=await self.renderer.starter(pokemon);embed.set_image(url="attachment://starter.png")
+            return embed,[discord.File(image,filename="starter.png")]
+        except RenderError:
+            log.exception("Starter reveal rendering failed");embed.set_image(url=sprite(pokemon.species_id,shiny=pokemon.shiny));return embed,[]
+
     async def choose_starter(self,interaction,sid,encounter_id=None):
         pokemon=await self.grant_starter(interaction.user,sid)
         if pokemon is None:
             await interaction.response.edit_message(content="You already chose a starter.",embed=None,view=None)
             return
-        suffix=" Press **Encounter** again to begin the battle." if encounter_id is not None else ""
-        await interaction.response.edit_message(content=f"{SPECIES[sid].name} joined your global party!{suffix}",embed=None,view=None)
+        embed,files=await self.rendered_starter(pokemon,encounter_id)
+        await interaction.response.edit_message(content=None,embed=embed,attachments=files,view=None)
 
     @pokemon.command(name="starter")
     async def starter(self,ctx,choice:str=None):
@@ -418,7 +430,8 @@ class Pokemon(commands.Cog):
             await ctx.send("Choose Bulbasaur, Charmander, or Squirtle.",embed=self.starter_embed(ctx.author),view=StarterView(self,ctx.author.id))
             return
         pokemon=await self.grant_starter(ctx.author,sid)
-        await ctx.send("You already chose a starter." if pokemon is None else f"{SPECIES[sid].name} joined your global party!")
+        if pokemon is None:await ctx.send("You already chose a starter.");return
+        embed,files=await self.rendered_starter(pokemon);await ctx.send(embed=embed,files=files)
     @pokemon.command(name="collection",aliases=["box"])
     async def collection(self,ctx,page:int=1):
         conf=await self.config.user(ctx.author).all()
