@@ -39,6 +39,9 @@ class StoredSection:
     async def set(self,value):
         self.value=value
 
+    async def clear(self):
+        self.value={}
+
 
 class StoredEncounters:
     def __init__(self):
@@ -153,6 +156,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemonset encountertime",admin_names)
         self.assertIn("pokemonset rarity",admin_names)
         self.assertIn("pokemonset catalogsync",admin_names)
+        self.assertIn("pokemonset resetplayer",admin_names)
         self.assertIn("Server administration",Pokemon.pokemon.help)
         self.assertEqual(Pokemon.pokemon_set.get_command("channel").help,"Enable wild encounters in a channel.")
 
@@ -266,6 +270,21 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog.rendered_starter.assert_awaited_once_with(unittest.mock.ANY,9)
         self.assertIsNone(await cog.grant_starter(interaction.user,7))
         self.assertEqual(len(section.value["collection"]),1)
+
+    async def test_owner_reset_requires_confirmation_and_releases_battle(self):
+        section=StoredSection({"collection":[{"instance_id":"starter"}],"starter_chosen":True})
+        encounters=StoredEncounters();encounters.value={"9":{"guild_id":1,"channel_id":55,"message_id":99,"battle":{"user_id":42,"encounter_id":9}}}
+        active=StoredValue(9);message=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=message))
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={9:SimpleNamespace()};cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel)
+        cog.config=SimpleNamespace(user_from_id=lambda user_id:section,encounters=encounters,guild_from_id=lambda guild_id:SimpleNamespace(active_encounter=active))
+        user=SimpleNamespace(id=42,mention="<@42>");ctx=SimpleNamespace(author=SimpleNamespace(id=1),clean_prefix="!",send=AsyncMock())
+        await Pokemon.reset_player.callback(cog,ctx,user,"no")
+        self.assertTrue(section.value["starter_chosen"]);self.assertIn("9",encounters.value)
+        await Pokemon.reset_player.callback(cog,ctx,user,"confirm")
+        self.assertEqual(section.value,{});self.assertEqual(encounters.value,{})
+        self.assertIsNone(active.value);self.assertNotIn(9,cog.battles)
+        message.edit.assert_awaited_once_with(content="This battle ended because the trainer profile was reset.",view=None)
+        self.assertIn("choose a new starter",ctx.send.await_args.args[0])
 
     async def test_potion_and_revive_consume_inventory_atomically(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()

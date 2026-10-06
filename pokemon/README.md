@@ -37,7 +37,7 @@ Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `gym
 
 Wild encounters remain open for 15 minutes by default. The bot owner controls that lifetime, the friendly/standard/challenging rarity curve, available generations, minimum activity and cooldown floors, and whether legendary or mythical species may enter ordinary spawns. Special species are event-only by default. Server administrators choose spawn channels and may slow pacing or select a subset of bot-enabled generations, but cannot make encounters faster than the bot-wide floors. Manual server spawns obey the effective cooldown; the bot owner retains a testing bypass.
 
-Owner controls are `[p]pokemonset globalstatus`, `[p]pokemonset encountertime <minutes>`, `[p]pokemonset globallimits <activity> <seconds>`, `[p]pokemonset globalgenerations <1-9...>`, `[p]pokemonset rarity friendly|standard|challenging`, and `[p]pokemonset specials true|false`. Server battle duration remains adjustable through `[p]pokemonset battleexpiry <minutes>`; wild lifetime is not server-configurable.
+Owner controls are `[p]pokemonset globalstatus`, `[p]pokemonset encountertime <minutes>`, `[p]pokemonset globallimits <activity> <seconds>`, `[p]pokemonset globalgenerations <1-9...>`, `[p]pokemonset rarity friendly|standard|challenging`, and `[p]pokemonset specials true|false`. Server battle duration remains adjustable through `[p]pokemonset battleexpiry <minutes>`; wild lifetime is not server-configurable. Bot owners can reset a development-test profile with `[p]pokemonset resetplayer @user confirm`; this clears that user's complete Pokémon progress only.
 
 ## Healing and persistent health
 
