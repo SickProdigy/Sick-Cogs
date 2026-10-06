@@ -85,7 +85,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.19.4";__author__="SickProdigy"
+    __version__="0.19.5";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -385,7 +385,6 @@ class Pokemon(commands.Cog):
         embed.set_image(url=sprite(sid))
         trainer=getattr(user,"display_name",getattr(user,"name",str(user)))
         footer=f"Trainer: {trainer}"
-        if setup_hint:footer+=f" · Server setup: {setup_hint}"
         embed.set_footer(text=footer)
         return embed
 

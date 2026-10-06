@@ -244,7 +244,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent["embed"].title,"Choose Bulbasaur?")
         self.assertNotIn("Type",[field.name for field in sent["embed"].fields])
         self.assertTrue(sent["embed"].image.url.endswith("/1.png"))
-        self.assertIn("Server setup: !pokemonset",sent["embed"].footer.text)
+        self.assertEqual(sent["embed"].footer.text,"Trainer: Trainer")
         self.assertIsInstance(sent["view"],StarterView)
         self.assertEqual([item.label for item in sent["view"].children],["◀","Choose Bulbasaur","▶"])
         self.assertEqual(sent["view"].cycle(1),4)
