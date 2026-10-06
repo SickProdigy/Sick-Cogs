@@ -51,12 +51,12 @@ class TurnTests(unittest.TestCase):
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("lands_played_this_turn")
-            for permanent in player["battlefield"]: permanent.pop("damage_prevention")
+            for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage)
         self.assertTrue(all(player.damage_prevention==0 and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
-        self.assertTrue(all(permanent.damage_prevention==0 for player in restored.players.values() for permanent in player.battlefield))
+        self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
     def test_time_walk_queue_persists_and_gives_a_full_extra_turn(self):
@@ -1875,6 +1875,33 @@ class SpellTests(unittest.TestCase):
         self.assertEqual(len(g.stack),1); self.assertEqual(g.stack[0].passes,0)
         g.pass_priority(10); self.assertEqual(len(g.stack),1)
         g.pass_priority(20); self.assertFalse(g.stack); self.assertEqual(opponent.life,16)
+
+class AlphaFungusaurTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_damage_creates_persisted_counter_trigger_and_counter_changes_stats(self):
+        game=ready(); fungusaur=self.add(game,10,"lea:195")
+        self.assertEqual(game._damage_permanent(fungusaur,1),1); self.assertEqual(game.stack[-1].ability_effect,"dealt_damage_counter")
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored); target=restored.find_permanent(fungusaur.uid)[1]
+        self.assertEqual(target.plus_one_counters,1); self.assertEqual(restored.current_stats(target),(3,3))
+        restored._cleanup(); self.assertEqual(target.plus_one_counters,1); self.assertEqual(restored.current_stats(target),(3,3))
+
+    def test_prevented_damage_does_not_trigger_and_lethal_damage_trigger_fizzles(self):
+        prevented=ready(); fungusaur=self.add(prevented,10,"lea:195"); fungusaur.damage_prevention=1
+        self.assertEqual(prevented._damage_permanent(fungusaur,1),0); self.assertFalse(prevented.stack)
+        lethal=ready(); fungusaur=self.add(lethal,10,"lea:195"); lethal._damage_permanent(fungusaur,2); lethal._sba()
+        self.assertIn(fungusaur.uid,lethal.player(10).graveyard); self.resolve_top(lethal); self.assertIn("source was gone",lethal.log[-1])
+
+    def test_simultaneous_damage_triggers_use_apnap_order(self):
+        game=ready(); active=self.add(game,10,"lea:195"); nonactive=self.add(game,20,"lea:195"); batch=game.next_uid
+        game._damage_permanent(nonactive,1,trigger_batch=batch); game._damage_permanent(active,1,trigger_batch=batch)
+        self.assertEqual([(item.owner,item.source_uid) for item in game.stack],[(10,active.uid),(20,nonactive.uid)])
+
 
 class AlphaCombatRequirementTests(unittest.TestCase):
     def add(self,game,user,key,tapped=False,sick=False):

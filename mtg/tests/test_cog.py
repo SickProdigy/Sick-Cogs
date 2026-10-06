@@ -399,6 +399,13 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Enters tapped",rendered); self.assertIn("Destroy all artifacts, creatures, and enchantments",rendered); self.assertIn("Nevinyrral's Disk ability",rendered)
 
+    async def test_public_embed_shows_fungusaur_counter_and_trigger(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:195"; fungusaur=permanent_type(uid,"lea:195",sick=False,plus_one_counters=2); game.player(10).battlefield=[fungusaur]
+        game._damage_permanent(fungusaur,1); rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Fungusaur",rendered); self.assertIn("+1/+1 counters: 2",rendered); self.assertIn("Fungusaur ability",rendered)
+
     async def test_enchantress_draw_choice_renders_draw_button(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell

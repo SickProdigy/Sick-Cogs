@@ -585,6 +585,12 @@ class SoloAITests(unittest.TestCase):
         self.assertTrue(forest.tapped); self.assertEqual(game.stack[-1].uid,birds)
         self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
 
+    def test_ai_casts_fungusaur_through_normal_creature_path(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
+        spell=self.add(game,AI,"lea:195","hand"); [self.add(game,AI,"forest") for _ in range(4)]
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game); self.assertEqual(game.stack[-1].uid,spell); self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
+
     def test_ai_accepts_enchantress_draw_trigger_without_mana(self):
         game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
         self.add(game,AI,"lea:222"); spell=self.add(game,AI,"lea:192","hand"); self.add(game,AI,"forest")

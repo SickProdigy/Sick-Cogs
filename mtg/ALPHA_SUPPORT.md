@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 58 creatures playable through 0.63.0; 19 remain |
+| Creatures with abilities | 77 | 59 creatures playable through 0.64.0; 18 remain |
 | Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
 | Enchantments | 68 | 37 enchantments playable through 0.60.0; 31 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
@@ -148,3 +148,5 @@ The 0.61.0 Island-dependent-creature promotion adds Pirate Ship and Sea Serpent.
 The 0.62.0 combat-requirement promotion adds Juggernaut. A generic mandatory-attacker check rejects declarations that omit any creature required to attack and currently able to do so, while correctly allowing tapped, summoning-sick, or otherwise unable creatures to remain out of combat. A generic subtype blocking restriction prevents every Wall—including artifact Walls—from blocking Juggernaut without affecting other blockers. Discord surfaces both abilities and actionable declaration errors, and easy and normal solo AI always include mandatory attackers while retaining their existing optional-attack policies.
 
 The 0.63.0 optional-cast-draw promotion adds Verduran Enchantress. Each Enchantress controlled by a spell's caster creates its own persisted trigger when that player casts an enchantment, including Auras, but opposing casts and the Enchantress spell itself do not trigger it. After both players respond, the controller receives a no-cost Draw a card or Decline decision; accepting uses the shared draw and empty-library loss path, and the trigger remains independent after its source leaves. Discord dynamically labels the acceptance button and stack choice instead of presenting a false mana payment, the text command accepts `draw`, and solo AI accepts the beneficial choice through the same path.
+
+The 0.64.0 damage-counter promotion adds Fungusaur and the first persistent +1/+1 counter model. Any positive damage actually dealt after protection and prevention creates one independent, respondable trigger per event; fully prevented damage creates none. Simultaneous combat or mass-damage triggers use APNAP ordering. State-based actions occur before those triggers resolve, so lethal damage removes Fungusaur and its later trigger safely fizzles, while a surviving source receives one persistent counter that changes shared stats and survives cleanup and reload. Legacy saves default to zero counters, Discord renders the count and pending ability, and solo AI casts and evaluates Fungusaur through the normal derived-stat paths.
