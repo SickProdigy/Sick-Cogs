@@ -716,5 +716,13 @@ class RockHydraRenderingTests(unittest.TestCase):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:None); game=Game(1,[10,20],1); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:171"; game.player(10).battlefield=[Permanent(uid,"lea:171",owner=10,sick=False,plus_one_counters=3,damage_prevention=1,hydra_counters_first=True)]
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("+1/+1 counters: 3",rendered); self.assertIn("Damage prevention remaining: 1",rendered); self.assertIn("Hydra replacement order: counters first",rendered)
 
+class CyclopeanTombRenderingTests(unittest.TestCase):
+    def test_public_state_shows_mire_counter_and_mandatory_cleanup(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:None); game=Game(1,[10,20],1)
+        land=Permanent(game.next_uid,"island",owner=20,sick=False,land_type_effects=[{"kind":"mire","source_uid":77,"source_timestamp":8,"effect_timestamp":9,"land_type":"swamp"}]); game.cards[land.uid]="island"; game.next_uid+=1; game.player(20).battlefield=[land]
+        trigger=game.next_uid; game.next_uid+=1; game.cards[trigger]="lea:240"; game.stack=[spell_type(10,trigger,"lea:240","10",ability_effect="tomb_cleanup",source_uid=77,choice_owner=10,choice_value=8,decision_pending=True)]; game.priority_user=10; cog.games={1:game}
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Mire counters: 1",rendered); self.assertIn("chooser must Choose a mire-counter land",rendered)
+        view=GameView(cog,1); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pay")).disabled); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":decline_trigger")).disabled)
+
 if __name__ == "__main__":
     unittest.main()

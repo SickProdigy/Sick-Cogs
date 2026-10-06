@@ -384,6 +384,7 @@ ALPHA_ENCHANTMENTS = {
 
 ALPHA_ARTIFACTS = {
     "lea:230": {"land_enter_damage":2},
+    "lea:240": {"activation_cost":"{2}", "activation_tap":True, "activation_effect":"add_mire_counter", "activation_upkeep_only":True, "activation_text":"Put a mire counter on target non-Swamp land; it is a Swamp while it has one"},
     "lea:241": {"land_grave_damage":2},
     "lea:231": {"produces":("C",), "mana_amount":3, "skip_untap":True, "activation_cost":"{3}", "activation_effect":"untap_self", "activation_text":"Untap this artifact"},
     "lea:234": {"produces":("W","U","B","R","G"), "mana_activation_cost":"{2}"},
@@ -689,7 +690,7 @@ for reference in PLAYABLE_ALPHA:
         activation_self_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_self_damage",0),
         enters_power_counters=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("enters_power_counters",0),
         end_combat_remove_power_counter=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("end_combat_remove_power_counter",False),
-        activation_upkeep_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_upkeep_only",False),
+        activation_upkeep_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_upkeep_only",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_upkeep_only",False)),
         activation_controller_turn_only=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_controller_turn_only",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_controller_turn_only",False)),
         activation_owner_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_owner_only",False),
         redirects_unblocked_combat_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("redirects_unblocked_combat_damage",False),

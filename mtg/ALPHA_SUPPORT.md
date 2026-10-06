@@ -10,7 +10,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Creatures with abilities | 77 | 71 creatures playable through 0.96.0; 6 remain |
 | Instants and sorceries | 70 | 59 spells playable through 0.95.0; 11 remain |
 | Enchantments | 68 | 60 enchantments playable through 0.90.0; 8 remain |
-| Artifacts | 42 | Thirty-seven artifacts playable through 0.93.0; 5 remain |
+| Artifacts | 42 | 38 artifacts playable through 0.97.0; 4 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
 | Dexterity adaptation | 1 | Chaos Orb requires a deterministic digital design before promotion |
@@ -214,3 +214,5 @@ The 0.94.0 unblocked-redirection promotion adds Veteran Bodyguard. During combat
 The 0.95.0 forced-attack promotion adds Nettling Imp and Siren’s Call. Both are restricted to an opponent’s turn before attackers, snapshot only non-Wall creatures the active player controlled continuously since the turn began, require those creatures to attack if able, and schedule persisted next-end-step destruction for each one that did not attack. The destruction permits regeneration, survives source removal and control changes, and cannot attach to a returned object with the same card identity. Public rendering and solo AI consume the shared forced-attacker state.
 
 The 0.96.0 Hydra promotion adds Rock Hydra. Its chosen casting X becomes persisted +1/+1 counters on entry; zero-X Hydras die through ordinary state actions. Each counter replaces one point of incoming damage, and a persisted Discord choice orders those counters before or after supported shields and redirection effects. Its {R} prevention and upkeep-only {R}{R}{R} growth abilities are paid atomically, use persisted respondable stack objects, remain source-bound, and share public rendering and threat-aware solo AI.
+
+The 0.97.0 artifact promotion adds Cyclopean Tomb. Its upkeep-only paid activation places a source-identified mire counter on a non-Swamp land, making that land a Swamp through the timestamped land-type layer even after the Tomb leaves. A battlefield-to-graveyard move records its controller and exact Tomb instance for the rest of the game; each later upkeep creates a mandatory, reload-safe choice that removes that instance's mire counters from one eligible land. Cross-player Discord selection, public counter rendering, and solo AI use the same persisted rules.

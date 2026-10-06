@@ -912,5 +912,14 @@ class SoloAITests(unittest.TestCase):
         siren=solo(); siren.player(AI).hand=[]; spell=self.add(siren,AI,"lea:77","hand"); self.add(siren,AI,"island"); self.add(siren,HUMAN,"giant"); siren.active_index=0; siren.phase="precombat_main"; siren.priority_user=AI
         self.assertEqual(_play_one(siren,AI,"normal"),"cast"); self.assertEqual(siren.stack[-1].uid,spell)
 
+    def test_ai_targets_non_swamp_land_and_completes_tomb_cleanup(self):
+        target_game=solo(); tomb=self.add(target_game,AI,"lea:240"); self.add(target_game,HUMAN,"island")
+        self.assertEqual(_activation_target(target_game,AI,CARDS["lea:240"],tomb.uid),f"{HUMAN}:1")
+        choice_game=solo(order=(AI,HUMAN)); choice_game.player(AI).kept=choice_game.player(HUMAN).kept=True; choice_game.player(AI).hand=[]
+        land=self.add(choice_game,HUMAN,"island"); land.land_type_effects=[{"kind":"mire","source_uid":777,"source_timestamp":9,"effect_timestamp":10,"land_type":"swamp"}]
+        uid=choice_game.next_uid; choice_game.next_uid+=1; choice_game.cards[uid]="lea:240"
+        choice_game.stack=[__import__("mtg.engine",fromlist=["Spell"]).Spell(AI,uid,"lea:240",str(AI),ability_effect="tomb_cleanup",source_uid=777,choice_owner=AI,choice_value=9,decision_pending=True)]; choice_game.priority_user=AI; choice_game.phase="upkeep"
+        advance_solo(choice_game); self.assertFalse(land.land_type_effects); self.assertTrue(any(event["action"]=="ai_tomb_cleanup" for event in choice_game.history))
+
 if __name__ == "__main__":
     unittest.main()

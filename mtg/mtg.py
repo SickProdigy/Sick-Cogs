@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.96.0"
+    __version__="0.97.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -145,6 +145,8 @@ class MTG(commands.Cog):
                 if x.power_counters: ability_parts.append(f"+1/+0 counters: {x.power_counters}")
                 if x.corpse_counters: ability_parts.append(f"Corpse counters: {x.corpse_counters}")
                 if x.vitality_counters: ability_parts.append(f"Vitality counters: {x.vitality_counters}")
+                mire_counters=sum(effect.get("kind")=="mire" for effect in x.land_type_effects)
+                if mire_counters: ability_parts.append(f"Mire counters: {mire_counters}")
                 if x.attached_to:
                     _,target=g.find_permanent(x.attached_to)
                     ability_parts.append("Attached to "+(g.card(target.uid).name if target else "missing permanent"))
@@ -205,7 +207,7 @@ class MTG(commands.Cog):
                     elif not item.ability_effect and g.card(item.uid).effect=="power_sink": label+=f" (targeted spell's controller may {g.trigger_accept_label(item)} or decline)"
                     elif item.ability_effect=="discard_choice": label+=" (target player is choosing a card privately)"
                     elif item.ability_effect=="look_hand": label+=" (controller is viewing the targeted hand privately)"
-                    else: label+=(f" (chooser must {g.trigger_accept_label(item)})" if item.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") else f" (controller may {g.trigger_accept_label(item)} or Decline)")
+                    else: label+=(f" (chooser must {g.trigger_accept_label(item)})" if item.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup") else f" (controller may {g.trigger_accept_label(item)} or Decline)")
                 stack_lines.append(f"S:{position}. {label}")
             e.add_field(name="Stack · spells targetable with S:POSITION",value="\n".join(stack_lines),inline=False)
         if g.end_combat_destroys:

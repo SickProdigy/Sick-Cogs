@@ -574,11 +574,12 @@ def _activation_target(game,user,card,source_uid=None):
     if card.activation_effect=="damage_any":
         if card.activation_self_damage and game.player(user).life<=card.activation_self_damage: return None
         return str(opponent)
-    if card.activation_effect=="set_land_forest":
+    if card.activation_effect in ("set_land_forest","add_mire_counter"):
+        wanted="forest" if card.activation_effect=="set_land_forest" else "swamp"
         for target_user in (opponent,user):
             choices=[]
             for position,permanent in enumerate(game.player(target_user).battlefield,1):
-                if game.card(permanent.uid).land and not game.has_current_land_type(permanent,"forest") and _can_target(game,card,permanent):
+                if game.card(permanent.uid).land and not game.has_current_land_type(permanent,wanted) and _can_target(game,card,permanent):
                     choices.append((len(game.current_mana_choices(permanent)),position))
             if choices: return f"{target_user}:{max(choices)[1]}"
         return None
@@ -796,6 +797,10 @@ def advance_solo(game: Game):
                 position,_=max(choices,key=lambda item:(item[1].cost+item[1].power+item[1].toughness+2*len(item[1].keywords),-item[0]))
                 game.choose_library(user,position); game.record(user,"ai_search_library"); changed=True; continue
             source=game.find_permanent(trigger.source_uid)[1]
+            if trigger.ability_effect=="tomb_cleanup":
+                choices=game.tomb_cleanup_choices(trigger.source_uid,trigger.choice_value)
+                controller,position,_=max(choices,key=lambda item:(item[0]==user,len(game.current_mana_choices(item[2])),-item[1]))
+                game.choose_tomb_cleanup(user,controller,position); game.record(user,"ai_tomb_cleanup"); changed=True; continue
             if trigger.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"):
                 choices=game.trigger_sacrifice_choices(trigger)
                 if trigger.ability_effect=="upkeep_sacrifice": position,_=min(choices,key=lambda item:(game.card(item[1].uid).cost+sum(game.current_stats(item[1])),item[0]))

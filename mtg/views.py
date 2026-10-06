@@ -62,7 +62,7 @@ class GameView(discord.ui.View):
             if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
-                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"))
+                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup"))
                 item.disabled=not pending or mandatory
                 if pending and action=="pay": item.label=game.trigger_accept_label(game.stack[-1])
                 if pending and action=="decline_trigger" and not game.stack[-1].ability_effect: item.label="Don't pay"

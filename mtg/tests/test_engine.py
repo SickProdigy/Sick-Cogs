@@ -3807,4 +3807,29 @@ class AlphaRockHydraTests(unittest.TestCase):
         wrong=ready(); self.add(wrong,10,plus_one_counters=1); [self.add(wrong,10,"mountain") for _ in range(3)]; wrong.phase="precombat_main"; wrong.priority_user=10
         with self.assertRaisesRegex(GameError,"only during your upkeep"): wrong.activate_hydra(10,1,"counter")
 
+class AlphaCyclopeanTombTests(unittest.TestCase):
+    def add(self,game,user,key,**kwargs):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,sick=False,**kwargs); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_mire_activation_is_upkeep_only_paid_source_identified_and_persistent(self):
+        game=ready(); tomb=self.add(game,10,"lea:240"); self.add(game,10,"plains"); self.add(game,10,"plains"); land=self.add(game,20,"island"); game.phase="upkeep"; game.priority_user=10
+        game.activate_ability(10,1,"20:1"); ability=game.stack.pop(); game._resolve_ability(ability)
+        self.assertEqual(game.current_land_types(land),{"swamp"}); self.assertEqual(game.current_mana_choices(land),("B",)); self.assertEqual(len(land.land_type_effects),1)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.current_land_types(restored.find_permanent(land.uid)[1]),{"swamp"})
+        wrong=ready(); self.add(wrong,10,"lea:240"); self.add(wrong,10,"plains"); self.add(wrong,10,"plains"); self.add(wrong,20,"swamp"); wrong.phase="precombat_main"; wrong.priority_user=10
+        with self.assertRaisesRegex(GameError,"only during your upkeep"): wrong.activate_ability(10,1,"20:1")
+
+    def test_graveyard_obligation_survives_reload_and_removes_matching_mire_counters(self):
+        game=ready(); tomb=self.add(game,10,"lea:240",layer_timestamp=50); first=self.add(game,20,"island",land_type_effects=[{"kind":"mire","source_uid":tomb.uid,"source_timestamp":50,"effect_timestamp":51,"land_type":"swamp"}]); second=self.add(game,20,"forest",land_type_effects=[{"kind":"mire","source_uid":tomb.uid,"source_timestamp":50,"effect_timestamp":52,"land_type":"swamp"}])
+        game._destroy(game.player(10),tomb); restored=Game.from_raw(game.to_raw()); self.assertEqual(len(restored.tomb_cleanup_sources),1)
+        restored.stack=restored._turn_step_triggers("upkeep"); restored.phase="upkeep"; restored.priority_user=10; restored.pass_priority(10); restored.pass_priority(20)
+        self.assertTrue(restored.stack[-1].decision_pending); restored.choose_tomb_cleanup(10,20,1)
+        self.assertEqual(restored.current_land_types(restored.find_permanent(first.uid)[1]),{"island"}); self.assertEqual(restored.current_land_types(restored.find_permanent(second.uid)[1]),{"swamp"})
+
+    def test_non_graveyard_departure_has_no_cleanup_but_activation_still_resolves(self):
+        game=ready(); tomb=self.add(game,10,"lea:240"); self.add(game,10,"plains"); self.add(game,10,"plains"); land=self.add(game,20,"island"); game.phase="upkeep"; game.priority_user=10
+        game.activate_ability(10,1,"20:1"); ability=game.stack.pop(); game.player(10).battlefield.remove(tomb); game.player(10).hand.append(tomb.uid); game._resolve_ability(ability)
+        self.assertEqual(game.current_land_types(land),{"swamp"}); self.assertFalse(game.tomb_cleanup_sources)
+
 if __name__=="__main__": unittest.main()

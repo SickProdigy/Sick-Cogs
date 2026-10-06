@@ -111,6 +111,7 @@ class Game:
         self.end_step_sacrifices=[]
         self.end_step_destroys=[]
         self.end_combat_destroys=[]
+        self.tomb_cleanup_sources=[]
         self.extra_turns=[]
         self.untap_pending=[]
         self.skip_draw_step=False
@@ -175,9 +176,11 @@ class Game:
             rule=self.card(aura.uid); chosen=aura.chosen_land_type if rule.aura_choose_land_type else rule.aura_set_land_type
             if chosen: setters.append((aura.layer_timestamp or aura.uid,"",chosen))
         for effect in permanent.land_type_effects:
-            _,source=self.find_permanent(int(effect.get("source_uid",0)))
-            if source is not None and source.layer_timestamp==int(effect.get("source_timestamp",0)):
-                setters.append((int(effect.get("effect_timestamp",0)),"",str(effect.get("land_type",""))))
+            if effect.get("kind")=="mire": setters.append((int(effect.get("effect_timestamp",0)),"",str(effect.get("land_type","swamp"))))
+            else:
+                _,source=self.find_permanent(int(effect.get("source_uid",0)))
+                if source is not None and source.layer_timestamp==int(effect.get("source_timestamp",0)):
+                    setters.append((int(effect.get("effect_timestamp",0)),"",str(effect.get("land_type",""))))
         for _,required,replacement in sorted(setters):
             if not required or required in types: types={replacement}
         return types
@@ -399,6 +402,13 @@ class Game:
                     if not self._graveyard_upkeep_return_eligible(controller_id,source_uid): continue
                     uid=self.next_uid; self.next_uid+=1; key=self.card(source_uid).key; self.cards[uid]=key
                     triggers.append(Spell(controller_id,uid,key,str(controller_id),ability_effect="graveyard_return",source_uid=source_uid))
+        if step=="upkeep":
+            for cleanup in self.tomb_cleanup_sources:
+                if int(cleanup["owner"])!=active: continue
+                source_uid=int(cleanup["source_uid"]); source_timestamp=int(cleanup["source_timestamp"])
+                if not self.tomb_cleanup_choices(source_uid,source_timestamp): continue
+                uid=self.next_uid; self.next_uid+=1; self.cards[uid]="lea:240"
+                triggers.append(Spell(active,uid,"lea:240",str(active),ability_effect="tomb_cleanup",source_uid=source_uid,choice_owner=active,choice_value=source_timestamp))
         triggers.sort(key=lambda trigger:trigger.owner!=active)
         return triggers
 
@@ -713,7 +723,8 @@ class Game:
         if card.activation_effect=="unblockable" and (not self.is_creature(permanent) or self.current_stats(permanent)[0]>2): raise GameError("Target must be a creature with power 2 or less.")
         if card.activation_effect=="grant_flying_delayed_destroy" and (target_user!=user or not self.is_creature(permanent) or self.current_stats(permanent)[1]>=self.current_stats(source)[0]): raise GameError("Target must be a creature you control with toughness less than this creature’s power.")
         if card.activation_effect=="force_attack" and (target_user!=self.active_user or not self.is_creature(permanent) or self._has_subtype(target_card,"Wall") or permanent.sick): raise GameError("Target must be a non-Wall creature the active player controlled since the turn began.")
-        if card.activation_effect in ("untap_land","destroy_land","set_land_forest") and not target_card.land: raise GameError("Target must be a land.")
+        if card.activation_effect in ("untap_land","destroy_land","set_land_forest","add_mire_counter") and not target_card.land: raise GameError("Target must be a land.")
+        if card.activation_effect=="add_mire_counter" and self.has_current_land_type(permanent,"swamp"): raise GameError("Target must be a non-Swamp land.")
         if card.activation_effect=="tap_permanent" and not any(self.has_current_type(permanent,kind) for kind in ("Artifact","Creature","Land")): raise GameError("Target must be an artifact, creature, or land.")
         return f"{target_user}:{permanent.uid}"
 
@@ -777,7 +788,7 @@ class Game:
         if card.sacrifice_after_activations and permanent.activations_this_turn>=card.sacrifice_after_activations:
             permanent.sacrifice_at_end_step=True
         ability_uid=self.next_uid; self.next_uid+=1; self.cards[ability_uid]=card.key
-        stored_choice=permanent.layer_timestamp if activation_effect=="set_land_forest" else choice_value
+        stored_choice=permanent.layer_timestamp if activation_effect in ("set_land_forest","add_mire_counter") else choice_value
         choice_owner=int(stable_target) if activation_effect=="discard_choice" else (user if activation_effect=="look_hand" else None)
         self.stack.append(Spell(user,ability_uid,card.key,stable_target,x_value=x_value,ability_effect=activation_effect or "self",source_uid=permanent.uid,color_override=permanent.color_override,source_power=self.current_stats(permanent)[0],choice_value=stored_choice,choice_owner=choice_owner)); self.stack.extend(pending_triggers)
         self._sba(); self._life()
@@ -1144,6 +1155,10 @@ class Game:
                     self.stack.pop(); self.cards.pop(s.uid,None); self.log.append(f"{self.card(s.source_uid).name} did not return because its graveyard condition was no longer true.")
                     if self.stack: self.stack[-1].passes=0
                     self.priority_user=self.active_user; return
+                if s.ability_effect=="tomb_cleanup" and not self.tomb_cleanup_choices(s.source_uid,s.choice_value):
+                    self.stack.pop(); self.cards.pop(s.uid,None)
+                    if self.stack: self.stack[-1].passes=0
+                    self.priority_user=self.active_user; return
                 if s.ability_effect=="upkeep_sacrifice" and not self.trigger_sacrifice_choices(s):
                     self.stack.pop(); self._resolve(s)
                     if self.stack: self.stack[-1].passes=0
@@ -1151,7 +1166,7 @@ class Game:
                     return
                 if s.ability_effect in ("discard_choice","look_hand") and (s.ability_effect=="look_hand" or self.player(int(s.target)).hand):
                     s.decision_pending=True; self.priority_user=s.choice_owner; return
-                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","aura_upkeep_untap","aura_upkeep_life","upkeep_vitality","upkeep_cost","graveyard_return","upkeep_sacrifice"):
+                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","aura_upkeep_untap","aura_upkeep_life","upkeep_vitality","upkeep_cost","graveyard_return","upkeep_sacrifice","tomb_cleanup"):
                     s.decision_pending=True; self.priority_user=s.choice_owner if s.choice_owner is not None else s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="search_library" and self.player(s.owner).library:
                     s.decision_pending=True; self.priority_user=s.owner; return
@@ -1267,6 +1282,28 @@ class Game:
         self.phase_passes=0
         if not self.finished: self.priority_user=self.active_user
 
+    def tomb_cleanup_choices(self,source_uid,source_timestamp):
+        choices=[]
+        for controller in self.players.values():
+            for position,permanent in enumerate(controller.battlefield,1):
+                matching=[effect for effect in permanent.land_type_effects if effect.get("kind")=="mire" and int(effect.get("source_uid",0))==int(source_uid) and int(effect.get("source_timestamp",0))==int(source_timestamp)]
+                if matching: choices.append((controller.user_id,position,permanent))
+        return choices
+
+    def choose_tomb_cleanup(self,user,controller_id,position):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].ability_effect!="tomb_cleanup" or self.stack[-1].choice_owner!=user:
+            raise GameError("You do not have a Cyclopean Tomb cleanup choice to make.")
+        trigger=self.stack[-1]; choices={(owner,index):permanent for owner,index,permanent in self.tomb_cleanup_choices(trigger.source_uid,trigger.choice_value)}
+        permanent=choices.get((controller_id,position))
+        if permanent is None: raise GameError("Choose a land carrying a mire counter from that Cyclopean Tomb.")
+        before=len(permanent.land_type_effects)
+        permanent.land_type_effects=[effect for effect in permanent.land_type_effects if not (effect.get("kind")=="mire" and int(effect.get("source_uid",0))==trigger.source_uid and int(effect.get("source_timestamp",0))==trigger.choice_value)]
+        removed=before-len(permanent.land_type_effects); self.stack.pop(); self.cards.pop(trigger.uid,None)
+        self.log.append(f"{user} removed {removed} mire counter{'s' if removed!=1 else ''} from {self.card(permanent.uid).name}.")
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0; self.priority_user=self.active_user; self._sba(); self._life()
+
     def trigger_sacrifice_choices(self,trigger):
         if trigger.ability_effect=="upkeep_sacrifice":
             return [(position,permanent) for position,permanent in enumerate(self.player(trigger.owner).battlefield,1) if permanent.uid!=trigger.source_uid and self.is_creature(permanent)]
@@ -1291,6 +1328,7 @@ class Game:
         if trigger.ability_effect=="upkeep_vitality": return "Remove a vitality counter and gain 1 life"
         if trigger.ability_effect=="upkeep_sacrifice": return "Choose a creature"
         if trigger.ability_effect=="opponent_land_sacrifice": return "Choose a land"
+        if trigger.ability_effect=="tomb_cleanup": return "Choose a mire-counter land"
         return f"Pay {self.trigger_cost(trigger)}"
 
     def choose_trigger(self,user,pay,sacrifice_position=None):
@@ -1647,6 +1685,9 @@ class Game:
         dies=not permanent.exile_on_death
         token=self.is_token(permanent.uid); owner=self.permanent_owner(permanent,controller)
         if not token: (owner.graveyard if dies else owner.exile).append(permanent.uid)
+        if dies and self.card(permanent.uid).key=="lea:240":
+            marker={"owner":controller.user_id,"source_uid":permanent.uid,"source_timestamp":permanent.layer_timestamp}
+            if marker not in self.tomb_cleanup_sources: self.tomb_cleanup_sources.append(marker)
         if dies and self.card(permanent.uid).death_owner_half_life:
             owner.life-=max(0,(owner.life+1)//2)
         if dies and self.is_creature(permanent):
@@ -1876,6 +1917,9 @@ class Game:
         elif effect=="untap_land":
             if target_card is None or not target_card.land: fizzle("its target was gone or illegal"); return
             target.tapped=False
+        elif effect=="add_mire_counter":
+            if target_card is None or not target_card.land or self.has_current_land_type(target,"swamp"): fizzle("its target was gone or became a Swamp"); return
+            target.land_type_effects.append({"kind":"mire","source_uid":s.source_uid,"source_timestamp":s.choice_value,"effect_timestamp":self.next_layer_timestamp,"land_type":"swamp"}); self.next_layer_timestamp+=1
         elif effect=="set_land_forest":
             _,source=self.find_permanent(s.source_uid)
             if target_card is None or not target_card.land: fizzle("its target was gone or illegal"); return
@@ -2215,12 +2259,12 @@ class Game:
         if user!=self.active_user or self.priority_user!=user: raise GameError("It is not your action window.")
 
     def to_raw(self):
-        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"next_layer_timestamp":self.next_layer_timestamp,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"end_step_destroys":[asdict(x) for x in self.end_step_destroys],"end_combat_destroys":[asdict(x) for x in self.end_combat_destroys],"extra_turns":self.extra_turns,"untap_pending":self.untap_pending,"skip_draw_step":self.skip_draw_step,"prevent_combat_damage":self.prevent_combat_damage,"creatures_died_this_turn":self.creatures_died_this_turn,"attackers":self.attackers,"attacked_this_turn":self.attacked_this_turn,"forced_attackers":self.forced_attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"combat_participants":self.combat_participants,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
+        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"next_layer_timestamp":self.next_layer_timestamp,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"end_step_destroys":[asdict(x) for x in self.end_step_destroys],"end_combat_destroys":[asdict(x) for x in self.end_combat_destroys],"tomb_cleanup_sources":self.tomb_cleanup_sources,"extra_turns":self.extra_turns,"untap_pending":self.untap_pending,"skip_draw_step":self.skip_draw_step,"prevent_combat_damage":self.prevent_combat_damage,"creatures_died_this_turn":self.creatures_died_this_turn,"attackers":self.attackers,"attacked_this_turn":self.attacked_this_turn,"forced_attackers":self.forced_attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"combat_participants":self.combat_participants,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
     @classmethod
     def from_raw(cls,r):
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
             d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d.setdefault("bodyguard_choice",0); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"damage_prevention":x.get("damage_prevention",0),"hydra_counters_first":x.get("hydra_counters_first",False),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"redirect_source_damage_to_player":{int(uid):int(user) for uid,user in x.get("redirect_source_damage_to_player",{}).items()},"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
-        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.forced_attackers=[int(x) for x in r.get("forced_attackers",[])]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
+        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.tomb_cleanup_sources=[{"owner":int(x["owner"]),"source_uid":int(x["source_uid"]),"source_timestamp":int(x["source_timestamp"])} for x in r.get("tomb_cleanup_sources",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.forced_attackers=[int(x) for x in r.get("forced_attackers",[])]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g
