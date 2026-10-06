@@ -8,8 +8,8 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 67 creatures playable through 0.84.0; 10 remain |
-| Instants and sorceries | 70 | 55 spells playable through 0.88.0; 15 remain |
-| Enchantments | 68 | 59 enchantments playable through 0.86.0; 9 remain |
+| Instants and sorceries | 70 | 56 spells playable through 0.90.0; 14 remain |
+| Enchantments | 68 | 60 enchantments playable through 0.90.0; 8 remain |
 | Artifacts | 42 | Thirty-five artifacts playable through 0.89.0; 7 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
@@ -200,3 +200,5 @@ The 0.87.0 hidden-library promotion adds Demonic Tutor. The spell does not choos
 The 0.88.0 mana-control promotion adds Drain Power and Power Sink. Both wait until resolution before exposing persisted choices, after opponents have had the normal response window. Drain Power asks the targeted player to choose the mana ability of each usable land in stable battlefield order, carries those choices across reloads, runs the shared land-tap trigger path, and transfers both newly produced and already floating mana by its actual symbols. Power Sink asks the targeted spell’s controller to pay the chosen X or decline; payment is atomic through the shared mana solver, while declining counters the stable target, taps only that player’s lands with mana abilities, and empties their pool. Public Discord controls disclose no private zones, reject stale or foreign input, and solo AI completes both decision flows.
 
 The 0.89.0 private-hand promotion adds Disrupting Scepter and Glasses of Urza. Their targeted abilities use stable player targets and the normal response window, then persist a requester-bound resolution decision independent of the source artifact. Scepter is restricted to its controller’s turn and lets the targeted player choose a card through a paginated ephemeral hand browser before that card becomes public in the graveyard; empty hands resolve safely. Glasses lets only its controller inspect the targeted current hand and requires private completion without changing any cards. Public state and logs never expose looked-at cards, stale or foreign interactions are rejected atomically, reloads retain the decision, and solo AI uses the same flows.
+
+The 0.90.0 damage-history promotion adds Simulacrum and Living Artifact. Actual post-prevention player damage accumulates for the turn and survives reloads before resetting at cleanup. Simulacrum targets a creature its caster controls, gains life equal to that history, then deals the same amount to the stable target, with a full fizzle if that target becomes illegal. Living Artifact creates one persisted, respondable trigger per damage event that snapshots the amount and adds vitality counters only while the Aura remains; each upkeep offers its controller an optional one-counter exchange for one life. Trigger batches retain event order and use APNAP ordering within simultaneous batches, while public rendering and solo AI use the same rules.

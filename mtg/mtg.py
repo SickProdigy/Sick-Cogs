@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.89.0"
+    __version__="0.90.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -139,6 +139,7 @@ class MTG(commands.Cog):
                 if x.plus_one_counters: ability_parts.append(f"+1/+1 counters: {x.plus_one_counters}")
                 if x.power_counters: ability_parts.append(f"+1/+0 counters: {x.power_counters}")
                 if x.corpse_counters: ability_parts.append(f"Corpse counters: {x.corpse_counters}")
+                if x.vitality_counters: ability_parts.append(f"Vitality counters: {x.vitality_counters}")
                 if x.attached_to:
                     _,target=g.find_permanent(x.attached_to)
                     ability_parts.append("Attached to "+(g.card(target.uid).name if target else "missing permanent"))
@@ -149,6 +150,7 @@ class MTG(commands.Cog):
             value+=f"\nGraveyard: {len(p.graveyard)} · Exile: {len(p.exile)}"
             if pool: value+=f"\nMana pool: {pool}"
             if p.damage_prevention: value+=f"\nDamage prevention remaining: {p.damage_prevention}"
+            if p.damage_taken_this_turn: value+=f"\nDamage taken this turn: {p.damage_taken_this_turn}"
             if p.channel_active: value+="\nChannel: pay life for {C} until end of turn"
             if p.source_damage_prevention:
                 sources=[g.card(uid).name if uid in g.cards else f"source {uid}" for uid in p.source_damage_prevention]

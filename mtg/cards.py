@@ -147,6 +147,7 @@ class Card:
     damaged_creature_death_counter: bool = False
     end_step_corpse_counters: bool = False
     graveyard_upkeep_return: bool = False
+    aura_damage_vitality: bool = False
     attack_requires_defender_land_type: str = ""
     sacrifice_without_land_type: str = ""
     attacks_each_combat: bool = False
@@ -197,6 +198,7 @@ class Card:
         if self.aura_protection: aura.append(f"Enchanted creature has Protection From {self.aura_protection}")
         if self.aura_attack_override: aura.append("Enchanted Wall can attack")
         if self.aura_blocked_except_wall: aura.append("Enchanted creature can be blocked only by Walls")
+        if self.aura_damage_vitality: aura.append("Damage dealt to you adds vitality counters; at your upkeep, you may remove one to gain 1 life")
         abilities.extend(aura)
         if self.protection_colors: abilities.append("Protection From "+"/".join(self.protection_colors))
         if self.lord_subtype:
@@ -368,6 +370,7 @@ ALPHA_ENCHANTMENTS = {
     "lea:167": {"upkeep_turn_start_untapped_damage":True},
     "lea:55": {"aura_target_types":("Creature",), "aura_hostile":True, "aura_death_toughness_damage":True},
     "lea:145": {"aura_target_types":("Creature",), "aura_hostile":True, "aura_enter_flying_damage":2},
+    "lea:208": {"aura_target_types":("Artifact",), "aura_damage_vitality":True},
     "lea:110": {"tax_white_spells":3, "tax_white_enchantment_abilities":3},
 }
 
@@ -542,6 +545,7 @@ ALPHA_SPELLS = {
     "lea:86": {"effect":"return_creature_hand"},
     "lea:122": {"effect":"return_grave_creature_hand"},
     "lea:124": {"effect":"sacrifice_mana", "additional_sacrifice_creature":True, "sacrifice_mana_color":"B"},
+    "lea:128": {"effect":"simulacrum"},
     "lea:214": {"effect":"return_grave_card_hand"},
 }
 
@@ -741,6 +745,7 @@ for reference in PLAYABLE_ALPHA:
         damaged_creature_death_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("damaged_creature_death_counter",False),
         end_step_corpse_counters=ALPHA_DEATH_COUNTER_CREATURES.get(reference.key,{}).get("end_step_corpse_counters",False),
         graveyard_upkeep_return=ALPHA_GRAVEYARD_CREATURES.get(reference.key,{}).get("graveyard_upkeep_return",False),
+        aura_damage_vitality=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_damage_vitality",False),
         attack_requires_defender_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("attack_requires_defender_land_type",""),
         sacrifice_without_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("sacrifice_without_land_type",""),
         attacks_each_combat=ALPHA_COMBAT_REQUIREMENTS.get(reference.key,{}).get("attacks_each_combat",False),

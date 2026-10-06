@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"sacrifice_mana","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
@@ -46,6 +46,11 @@ def _target(game, user, card):
     if card.effect=="sacrifice_mana":
         choices=[(game.card(permanent.uid).cost+sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent)]
         return f"sacrifice:{min(choices)[1]}" if choices else None
+    if card.effect=="simulacrum":
+        amount=game.player(user).damage_taken_this_turn
+        choices=[(game.current_stats(permanent)[1]-permanent.damage,position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent)]
+        safe=[item for item in choices if item[0]>amount]
+        return f"{user}:{max(safe)[1]}" if amount and safe else None
     if card.effect in ("mana_short","drain_power"):
         opponent=game.player(game.opponent(user))
         return str(opponent.user_id) if opponent.mana_pool or any(game.card(permanent.uid).land and not permanent.tapped for permanent in opponent.battlefield) else None
@@ -200,6 +205,8 @@ def _play_one(game, user, difficulty):
             continue
         if card.effect=="prevent_combat_damage" and not _fog_useful(game,user):
             continue
+        if card.effect=="simulacrum" and not player.damage_taken_this_turn:
+            continue
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
             continue
         target = forced_target if card.effect=="counter_mana_value_x" else _target(game, user, card)
@@ -210,6 +217,8 @@ def _play_one(game, user, difficulty):
             score = sum(game.projected_stats(user,card))
         elif card.kind == "Artifact" and card.produces:
             score = 5
+        elif card.effect=="simulacrum":
+            score=5+2*player.damage_taken_this_turn
         elif card.global_power or card.global_toughness:
             score=_global_enchantment_score(game,user,card)
         elif card.tax_white_spells:

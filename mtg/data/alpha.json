@@ -2953,7 +2953,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "spell",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:129",
@@ -4794,7 +4794,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "enchantment",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:209",
