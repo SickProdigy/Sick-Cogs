@@ -304,7 +304,7 @@ class Battle:
             return f"{SPECIES[self.player.species_id].name} is paralyzed."
         rng = self.rng()
         if rng.randrange(100) >= move.accuracy:
-            return f"{move.name} missed."
+            return f"{SPECIES[self.player.species_id].name} used {move.name}, but it missed."
         critical = rng.randrange(24) == 0
         attack_stat = "special_attack" if move.category == "special" else "attack"
         damage = self._damage(
@@ -318,14 +318,14 @@ class Battle:
         self.wild_hp = max(0, self.wild_hp - damage)
         if move.status and not self.wild_status and rng.randrange(100) < move.status_chance:
             self.wild_status = move.status
-        return f"{move.name} dealt {damage} damage" + (" (critical)." if critical else ".")
+        return f"{SPECIES[self.player.species_id].name} used {move.name} and dealt {damage} damage" + (" (critical)." if critical else ".")
 
     def _wild_attack(self, move):
         if self.wild_status == "paralysis" and self.rng().randrange(100) < 25:
             return f"Wild {SPECIES[self.wild_species_id].name} is paralyzed."
         rng = self.rng()
         if rng.randrange(100) >= move.accuracy:
-            return f"Wild {move.name} missed."
+            return f"{SPECIES[self.wild_species_id].name} used {move.name}, but it missed."
         critical = rng.randrange(24) == 0
         wild=SPECIES[self.wild_species_id]
         attack = (wild.special_attack or wild.attack) if move.category == "special" else wild.attack
@@ -340,7 +340,7 @@ class Battle:
         self.player_hp = max(0, self.player_hp - damage)
         if move.status and not self.player_status and rng.randrange(100) < move.status_chance:
             self.player_status = move.status
-        return f"Wild {move.name} dealt {damage} damage" + (" (critical)." if critical else ".")
+        return f"{wild.name} used {move.name} and dealt {damage} damage" + (" (critical)." if critical else ".")
 
     def _end_turn_status(self):
         if self.player_status in {"poison", "burn"} and self.player_hp > 0:
@@ -417,10 +417,13 @@ class Battle:
         )
         if self.rng().randrange(100) < chance:
             self.state = "caught"
-            self.result = f"Caught {SPECIES[self.wild_species_id].name}! Catching does not award battle XP."
+            self.result = f"You threw a Poké Ball. Caught {SPECIES[self.wild_species_id].name}! Catching does not award battle XP."
             self._record("ball:caught")
             return True
         self._wild_response()
+        ball_line=f"You threw a Poké Ball, but {SPECIES[self.wild_species_id].name} broke free!"
+        self.last_action=f"{ball_line} {self.last_action}"
+        if self.result:self.result=f"{self.last_action} {self.result}"
         self._record("ball:failed")
         return False
 
