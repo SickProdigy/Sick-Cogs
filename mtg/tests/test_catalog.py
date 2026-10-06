@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),232)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),232)
+        self.assertEqual(len(CARDS),234)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),234)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),172)
-        self.assertEqual(len(REFERENCE_ALPHA),123)
+        self.assertEqual(len(PLAYABLE_ALPHA),174)
+        self.assertEqual(len(REFERENCE_ALPHA),121)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -128,6 +128,8 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("opponent's upkeep",CARDS["lea:233"].ability_text)
         self.assertIn("each player's upkeep",CARDS["lea:238"].ability_text)
         self.assertIn("draw step while untapped",CARDS["lea:247"].ability_text)
+        self.assertEqual(CARDS["lea:260"].ability_text,"Creatures with power 3 or greater don't untap")
+        self.assertEqual(CARDS["lea:271"].ability_text,"You may spend white mana as though it were red mana")
         self.assertEqual(CARDS["lea:232"].ability_text,"Sacrifice → 3 × W/U/B/R/G")
         self.assertEqual(CARDS["lea:269"].ability_text,"Produces 2 × C")
         self.assertEqual(CARDS["lea:264"].ability_text,"Produces R")
@@ -171,7 +173,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("232 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("234 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

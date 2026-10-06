@@ -180,6 +180,15 @@ def _play_one(game, user, difficulty):
             score=4+player.life-game.player(game.opponent(user)).life
         elif card.draw_step_extra:
             score=5+card.draw_step_extra
+        elif card.untap_power_limit:
+            own=sum(game.card(permanent.uid).creature and game.current_stats(permanent)[0]>=card.untap_power_limit for permanent in player.battlefield)
+            enemy=sum(game.card(permanent.uid).creature and game.current_stats(permanent)[0]>=card.untap_power_limit for permanent in game.player(game.opponent(user)).battlefield)
+            if own>enemy: continue
+            score=5+2*(enemy-own)
+        elif card.white_as_red:
+            white=sum((permanent.uid!=uid and "W" in game.card(permanent.uid).produces and not permanent.tapped) for permanent in player.battlefield)+player.mana_pool.get("W",0)
+            red_cards=sum("{R}" in game.card(hand_uid).mana_cost for hand_uid in player.hand if hand_uid!=uid)
+            score=4+min(white,red_cards)
         elif card.opponent_forest_tap_life:
             score=5+sum(game.card(permanent.uid).has_land_type("forest") and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
         elif card.land_tap_damage:

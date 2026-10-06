@@ -467,6 +467,20 @@ class SoloAITests(unittest.TestCase):
                 game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
                 advance_solo(game); self.assertEqual(game.stack[-1].uid,spell)
 
+    def test_ai_values_static_artifacts_without_harming_its_untap(self):
+        helpful=solo(order=(AI,HUMAN)); helpful.player(HUMAN).kept=True; helpful.player(AI).kept=True; helpful.player(AI).hand=[]
+        self.add(helpful,HUMAN,"giant"); spell=self.add(helpful,AI,"lea:260","hand"); self.add(helpful,AI,"forest")
+        helpful.active_index=0; helpful.phase="precombat_main"; helpful.priority_user=AI; helpful.player(AI).land_played=True
+        advance_solo(helpful); self.assertEqual(helpful.stack[-1].uid,spell)
+        harmful=solo(order=(AI,HUMAN)); harmful.player(HUMAN).kept=True; harmful.player(AI).kept=True; harmful.player(AI).hand=[]
+        self.add(harmful,AI,"giant"); stone=self.add(harmful,AI,"lea:260","hand"); self.add(harmful,AI,"forest")
+        harmful.active_index=0; harmful.phase="precombat_main"; harmful.priority_user=AI; harmful.player(AI).land_played=True
+        advance_solo(harmful); self.assertIn(stone,harmful.player(AI).hand); self.assertFalse(harmful.stack)
+        conversion=solo(order=(AI,HUMAN)); conversion.player(HUMAN).kept=True; conversion.player(AI).kept=True; conversion.player(AI).hand=[]
+        glasses=self.add(conversion,AI,"lea:271","hand"); [self.add(conversion,AI,"plains") for _ in range(3)]; self.add(conversion,AI,"shock","hand")
+        conversion.active_index=0; conversion.phase="precombat_main"; conversion.priority_user=AI; conversion.player(AI).land_played=True
+        advance_solo(conversion); self.assertEqual(conversion.stack[-1].uid,glasses)
+
     def test_ai_casts_turn_step_artifacts_but_avoids_lethal_copper_tablet(self):
         for key in ("lea:233","lea:247"):
             with self.subTest(key=key):

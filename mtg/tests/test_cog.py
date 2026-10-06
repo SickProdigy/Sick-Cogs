@@ -291,6 +291,14 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.activate_ability(10,1,"20"); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Deals 1 damage to any target",rendered); self.assertIn("Rod of Ruin ability",rendered)
 
+    async def test_public_embed_shows_static_artifact_rules(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        for key in ("lea:260","lea:271"):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(10).battlefield.append(permanent_type(uid,key,sick=False))
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("power 3 or greater don't untap",rendered); self.assertIn("white mana as though it were red",rendered)
+
     async def test_public_embed_shows_turn_step_artifact_trigger(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

@@ -88,6 +88,8 @@ class Card:
     upkeep_each_damage: int = 0
     upkeep_opponent_hand_damage: bool = False
     draw_step_extra: int = 0
+    untap_power_limit: int = 0
+    white_as_red: bool = False
     type_line: str = ""
     set_code: str = ""
 
@@ -153,6 +155,8 @@ class Card:
         if self.upkeep_each_damage: abilities.append(f"At each player's upkeep, deals {self.upkeep_each_damage} damage to that player")
         if self.upkeep_opponent_hand_damage: abilities.append("At your opponent's upkeep, deals damage equal to cards in their hand minus 4")
         if self.draw_step_extra: abilities.append(f"At each draw step while untapped, that player draws {self.draw_step_extra} additional card"+("s" if self.draw_step_extra!=1 else ""))
+        if self.untap_power_limit: abilities.append(f"Creatures with power {self.untap_power_limit} or greater don't untap")
+        if self.white_as_red: abilities.append("You may spend white mana as though it were red mana")
         if self.skip_untap: abilities.append("Doesn't untap during your untap step")
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
@@ -238,6 +242,8 @@ ALPHA_ARTIFACTS = {
     "lea:233": {"upkeep_opponent_hand_damage":True},
     "lea:238": {"upkeep_each_damage":1},
     "lea:247": {"draw_step_extra":1},
+    "lea:260": {"untap_power_limit":3},
+    "lea:271": {"white_as_red":True},
     "lea:261": {"produces":("G",)},
     "lea:262": {"produces":("B",)},
     "lea:263": {"produces":("W",)},
@@ -451,6 +457,8 @@ for reference in PLAYABLE_ALPHA:
         upkeep_each_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_each_damage",0),
         upkeep_opponent_hand_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_opponent_hand_damage",False),
         draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
+        untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),
+        white_as_red=ALPHA_ARTIFACTS.get(reference.key,{}).get("white_as_red",False),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 

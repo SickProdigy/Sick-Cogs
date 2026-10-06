@@ -243,10 +243,13 @@ class Game:
 
     def _start_turn(self,first=False):
         self.turn+=1; p=self.players[self.active_user]; p.land_played=False
+        self._cleanup()
+        limits=[self.card(source.uid).untap_power_limit for player in self.players.values() for source in player.battlefield if self.card(source.uid).untap_power_limit]
         for x in p.battlefield:
-            if not self.card(x.uid).skip_untap: x.tapped=False
+            restricted=self.card(x.uid).creature and any(self.current_stats(x)[0]>=limit for limit in limits)
+            if not self.card(x.uid).skip_untap and not restricted: x.tapped=False
             x.sick=False
-        self._cleanup(); self.skip_draw_step=bool(first and self.turn==1)
+        self.skip_draw_step=bool(first and self.turn==1)
         self.phase_passes=0; triggers=self._turn_step_triggers("upkeep")
         if triggers:
             self.stack.extend(triggers); self.phase="upkeep"; self.priority_user=self.active_user
@@ -315,6 +318,7 @@ class Game:
 
     def _mana_payment(self,player,card,x_value=0,mana_cost=None,excluded_uids=()):
         generic,colored=self._mana_requirements(card,x_value,mana_cost)
+        white_as_red=any(self.card(source.uid).white_as_red for source in player.battlefield)
         order=("W","U","B","R","G"); initial=tuple(colored.count(symbol) for symbol in order)+(generic,)
         items=[]
         for symbol,count in player.mana_pool.items():
@@ -329,7 +333,10 @@ class Game:
         def reduce_requirements(requirements,output):
             remaining=list(requirements); spare=0
             for index,symbol in enumerate(order):
-                amount=output.get(symbol,0); used=min(remaining[index],amount); remaining[index]-=used; spare+=amount-used
+                amount=output.get(symbol,0); used=min(remaining[index],amount); remaining[index]-=used; amount-=used
+                if symbol=="W" and white_as_red:
+                    red_used=min(remaining[3],amount); remaining[3]-=red_used; amount-=red_used
+                spare+=amount
             spare+=output.get("C",0); remaining[5]=max(0,remaining[5]-spare)
             return tuple(remaining)
         def score(plan):
@@ -352,9 +359,11 @@ class Game:
             if kind!="permanent": continue
             sources.append(permanent); choices[permanent.uid]=symbol
             for produced,count in output.items(): remaining[produced]=remaining.get(produced,0)+count
-        for symbol in colored:
-            remaining[symbol]-=1
-            if not remaining[symbol]: remaining.pop(symbol)
+        for symbol in order:
+            for _ in range(colored.count(symbol)):
+                paid_symbol=symbol if remaining.get(symbol,0) else ("W" if symbol=="R" and white_as_red and remaining.get("W",0) else symbol)
+                remaining[paid_symbol]-=1
+                if not remaining[paid_symbol]: remaining.pop(paid_symbol)
         for _ in range(generic):
             symbol=next((choice for choice in ("C","W","U","B","R","G") if remaining.get(choice,0)),None)
             if symbol is None: return None

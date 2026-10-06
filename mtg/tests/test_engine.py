@@ -1763,6 +1763,44 @@ class AlphaLandEventArtifactTests(unittest.TestCase):
         self.assertFalse(any(mass.card(x.uid).land for p in mass.players.values() for x in p.battlefield)); self.assertEqual(Game.from_raw(mass.to_raw()).to_raw(),mass.to_raw())
 
 
+class AlphaStaticArtifactTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_meekstone_uses_live_power_for_each_players_untap(self):
+        game=ready(); stone=self.add(game,10,"lea:260"); giant=self.add(game,20,"giant"); bear=self.add(game,20,"bear"); giant.tapped=bear.tapped=True
+        game.active_index=1; restored=Game.from_raw(game.to_raw()); restored._start_turn()
+        saved_giant,saved_bear=restored.player(20).battlefield; self.assertTrue(saved_giant.tapped); self.assertFalse(saved_bear.tapped)
+        controller,saved_stone=restored.find_permanent(stone.uid); controller.battlefield.remove(saved_stone); controller.graveyard.append(stone.uid)
+        saved_giant.tapped=True; restored._start_turn(); self.assertFalse(saved_giant.tapped)
+
+    def test_meekstone_checks_derived_power_after_temporary_cleanup(self):
+        game=ready(); self.add(game,10,"lea:260"); knight=self.add(game,20,"lea:43"); knight.tapped=True; knight.power_bonus=1
+        game.active_index=1; game._start_turn(); self.assertFalse(knight.tapped); self.assertEqual(knight.power_bonus,0)
+        game2=ready(); self.add(game2,10,"lea:260"); self.add(game2,10,"lea:16"); knight=self.add(game2,20,"lea:43"); knight.tapped=True
+        game2.active_index=1; game2._start_turn(); self.assertEqual(game2.current_stats(knight),(3,3)); self.assertTrue(knight.tapped)
+
+    def test_sunglasses_spends_white_as_red_from_pool_and_automatic_sources(self):
+        pooled=ready(); glasses=self.add(pooled,10,"lea:271"); plains=self.add(pooled,10,"plains"); shock=self.add(pooled,10,"shock","hand")
+        pooled.activate_mana(10,2); self.assertEqual(pooled.player(10).mana_pool,{"W":1}); pooled.play(10,1,"20")
+        self.assertEqual(pooled.stack[-1].uid,shock); self.assertEqual(pooled.player(10).mana_pool,{})
+        automatic=ready(); self.add(automatic,10,"lea:271"); land=self.add(automatic,10,"plains"); spell=self.add(automatic,10,"shock","hand")
+        automatic.play(10,1,"20"); self.assertTrue(land.tapped); self.assertEqual(automatic.stack[-1].uid,spell)
+        controller,source=automatic.find_permanent(automatic.player(10).battlefield[0].uid); controller.battlefield.remove(source); controller.graveyard.append(source.uid)
+        land.tapped=False; second=self.add(automatic,10,"shock","hand"); automatic.priority_user=10
+        with self.assertRaisesRegex(GameError,"cannot pay"): automatic.play(10,1,"20")
+        self.assertIn(second,automatic.player(10).hand)
+
+    def test_sunglasses_handles_mixed_cost_order_and_does_not_convert_to_green(self):
+        game=ready(); self.add(game,10,"lea:271"); self.add(game,10,"plains"); self.add(game,10,"plains")
+        mixed=Card("mixed","Mixed","Instant","s","o",mana_cost="{R}{W}"); green=Card("green","Green","Instant","s2","o2",mana_cost="{G}")
+        payment=game._mana_payment(game.player(10),mixed); self.assertIsNotNone(payment); self.assertEqual(len(payment[0]),2)
+        restored=Game.from_raw(game.to_raw()); self.assertIsNotNone(restored._mana_payment(restored.player(10),mixed))
+        self.assertFalse(game.can_pay(10,green))
+
+
 class AlphaTurnStepArtifactTests(unittest.TestCase):
     def add(self,game,user,key):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
