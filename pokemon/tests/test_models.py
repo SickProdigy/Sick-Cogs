@@ -33,6 +33,16 @@ class DataTests(unittest.TestCase):
         self.assertEqual(SPECIES[129].moves,("splash",))
         self.assertEqual(SPECIES[132].moves,("transform",))
 
+    def test_every_bundled_move_has_an_explicit_support_audit(self):
+        import json
+        from pokemon.data import MOVES
+        audit=json.loads((Path(__file__).parents[1]/"move_audit.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(audit["moves"]),set(MOVES))
+        self.assertEqual(sum(audit["summary"].values()),147)
+        self.assertEqual({item["classification"] for item in audit["moves"].values()},{"accurate","standardized","deferred"})
+        self.assertEqual(audit["moves"]["transform"]["classification"],"deferred")
+        self.assertEqual(audit["moves"]["headbutt"]["classification"],"accurate")
+
 class BattleTests(unittest.TestCase):
     def test_classic_battle_narration_and_immunity(self):
         moves=__import__("pokemon.data",fromlist=["MOVES"]).MOVES
@@ -88,6 +98,20 @@ class BattleTests(unittest.TestCase):
         before=(current.player_hp,current.wild_hp);current._end_turn_status()
         self.assertEqual(before[0]-current.player_hp,max(1,current.max_hp(player)//16))
         self.assertEqual(before[1]-current.wild_hp,max(1,current.wild_max_hp//8))
+
+    def test_flinch_is_order_sensitive_and_haze_clears_stat_stages(self):
+        moves=__import__("pokemon.data",fromlist=["MOVES"]).MOVES
+        current=battle();rng=type("Fixed",(),{"randrange":lambda self,n:0})()
+        current.wild_acted=False
+        self.assertEqual(current._set_status("flinch",False,rng),"flinch")
+        allowed,message=current._can_act(False,rng)
+        self.assertFalse(allowed);self.assertIn("flinched",message)
+        current.wild_acted=True
+        self.assertEqual(current._set_status("flinch",False,rng),"")
+        current.player_stages={"attack":2};current.wild_stages={"defense":-2}
+        line=current._status_action(moves["haze"],True,rng)
+        self.assertEqual((current.player_stages,current.wild_stages),({},{}) )
+        self.assertIn("all stat changes were eliminated",line)
 
     def test_sleep_and_confusion_are_bounded_and_restart_safe(self):
         player=OwnedPokemon.create("status",7,10,seed=3)
