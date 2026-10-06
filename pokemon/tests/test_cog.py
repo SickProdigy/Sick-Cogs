@@ -537,7 +537,8 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await view.interaction_check(allowed))
         self.assertFalse(await view.interaction_check(denied))
         denied.response.send_message.assert_awaited_once()
-        self.assertEqual(len(view.children),8)
+        self.assertEqual(len(view.children),7)
+        self.assertNotIn("Display style",[getattr(item,"placeholder",None) for item in view.children])
 
     async def test_clear_encounter_disables_original_message(self):
         active=StoredValue(7)

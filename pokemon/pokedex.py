@@ -109,14 +109,6 @@ class EntrySelect(discord.ui.Select):
         if self.values[0]=="none":return
         view=self.pokedex_view;view.session.selected_id=int(self.values[0]);view.rebuild();await view.refresh(interaction)
 
-class StyleSelect(discord.ui.Select):
-    def __init__(self,view):
-        self.pokedex_view=view
-        super().__init__(placeholder="Display style",options=[discord.SelectOption(label=x.label,value=k,default=k==view.session.style) for k,x in POKEDEX_STYLES.items()],row=2)
-    async def callback(self,interaction):
-        view=self.pokedex_view;view.session.style=self.values[0]
-        await view.cog.set_pokedex_style(interaction.user,self.values[0]);view.rebuild();await view.refresh(interaction)
-
 class GenerationSelect(discord.ui.Select):
     def __init__(self,view):
         self.pokedex_view=view;generations=sorted({generation_for(x.id) for x in SPECIES.values()})
@@ -151,7 +143,7 @@ class PokedexView(discord.ui.View):
         self.details.disabled=not values;self.details.label="List" if self.session.selected_id else "Details"
         self.filter.label=f"Filter: {self.session.filter_name.title()}"
         for item in (self.previous,self.details,self.next,self.search,self.filter):self.add_item(item)
-        self.add_item(StyleSelect(self));self.add_item(GenerationSelect(self));self.add_item(EntrySelect(self))
+        self.add_item(GenerationSelect(self));self.add_item(EntrySelect(self))
     async def refresh(self,interaction):await interaction.response.edit_message(embed=render_pokedex(self.session),view=self)
     @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary,row=0)
     async def previous(self,interaction,button):
