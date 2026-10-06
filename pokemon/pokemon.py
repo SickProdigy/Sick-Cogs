@@ -84,7 +84,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.16.6";__author__="SickProdigy"
+    __version__="0.17.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -228,8 +228,8 @@ class Pokemon(commands.Cog):
             if not raw or raw.get("state")!="open":await i.response.send_message("This encounter was already claimed.",ephemeral=True);return
             user=await self.config.user(i.user).all()
             if not user["party"]:
-                embed=self.starter_embed(i.user)
-                await i.response.send_message(embed=embed,view=StarterView(self,i.user.id,eid),ephemeral=True)
+                embed,files=await self.rendered_starter_choice(i.user)
+                await i.response.send_message(embed=embed,files=files,view=StarterView(self,i.user.id,eid),ephemeral=True)
                 return
             owned_raw=next((p for p in user["collection"] if p["instance_id"]==user["party"][0]),None)
             if not owned_raw:
@@ -371,9 +371,9 @@ class Pokemon(commands.Cog):
         """
         conf=await self.config.user(ctx.author).all()
         if not conf["starter_chosen"] and not conf["collection"]:
-            setup_hint=f"{ctx.clean_prefix}pokemonset";embed=self.starter_embed(ctx.author,setup_hint=setup_hint)
+            setup_hint=f"{ctx.clean_prefix}pokemonset";embed,files=await self.rendered_starter_choice(ctx.author,setup_hint=setup_hint)
             embed.add_field(name="How to begin",value="Choose a partner, find a wild encounter, battle it, then use a Poké Ball to catch it.",inline=False)
-            await ctx.send(embed=embed,view=StarterView(self,ctx.author.id,setup_hint=setup_hint))
+            await ctx.send(embed=embed,files=files,view=StarterView(self,ctx.author.id,setup_hint=setup_hint))
             return
         await ctx.send_help()
     @staticmethod
@@ -388,6 +388,16 @@ class Pokemon(commands.Cog):
         if setup_hint:footer+=f" · Server setup: {setup_hint}"
         embed.set_footer(text=footer)
         return embed
+
+    async def rendered_starter_choice(self,user,selected=0,setup_hint=None):
+        starter_ids=(1,4,7);sid=starter_ids[int(selected)%len(starter_ids)]
+        embed=self.starter_embed(user,selected,setup_hint)
+        try:
+            image=await self.renderer.starter_choice(sid);embed.set_image(url="attachment://starter-choice.png")
+            return embed,[discord.File(image,filename="starter-choice.png")]
+        except RenderError:
+            log.exception("Starter selection rendering failed")
+            return embed,[]
 
     async def grant_starter(self,user,sid):
         async with self.lock(("user",user.id)):
@@ -425,11 +435,13 @@ class Pokemon(commands.Cog):
         """Choose or view your first partner Pokémon."""
         choices={"bulbasaur":1,"charmander":4,"squirtle":7}
         if choice is None:
-            await ctx.send(embed=self.starter_embed(ctx.author),view=StarterView(self,ctx.author.id))
+            embed,files=await self.rendered_starter_choice(ctx.author)
+            await ctx.send(embed=embed,files=files,view=StarterView(self,ctx.author.id))
             return
         sid=choices.get(choice.casefold())
         if not sid:
-            await ctx.send("Choose Bulbasaur, Charmander, or Squirtle.",embed=self.starter_embed(ctx.author),view=StarterView(self,ctx.author.id))
+            embed,files=await self.rendered_starter_choice(ctx.author)
+            await ctx.send("Choose Bulbasaur, Charmander, or Squirtle.",embed=embed,files=files,view=StarterView(self,ctx.author.id))
             return
         pokemon=await self.grant_starter(ctx.author,sid)
         if pokemon is None:await ctx.send("You already chose a starter.");return

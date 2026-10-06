@@ -235,6 +235,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_bare_pokemon_onboards_new_trainers_then_uses_help(self):
         section=StoredSection({"collection":[],"starter_chosen":False})
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section)
+        cog.rendered_starter_choice=AsyncMock(side_effect=lambda user,selected=0,setup_hint=None:(Pokemon.starter_embed(user,selected,setup_hint),[]))
         ctx=SimpleNamespace(author=SimpleNamespace(id=42,display_name="Trainer"),clean_prefix="!",send=AsyncMock(),send_help=AsyncMock())
         await Pokemon.pokemon.callback(cog,ctx)
         sent=ctx.send.await_args.kwargs
@@ -242,8 +243,9 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(sent["embed"].image.url.endswith("/1.png"))
         self.assertIn("Server setup: !pokemonset",sent["embed"].footer.text)
         self.assertIsInstance(sent["view"],StarterView)
-        self.assertEqual([item.label for item in sent["view"].children],["◀","Choose","▶"])
+        self.assertEqual([item.label for item in sent["view"].children],["◀","Choose Bulbasaur","▶"])
         self.assertEqual(sent["view"].cycle(1),4)
+        self.assertEqual(sent["view"].choose.label,"Choose Charmander")
         charmander=cog.starter_embed(ctx.author,sent["view"].selected,"!pokemonset")
         self.assertEqual(charmander.title,"Choose Charmander?")
         self.assertTrue(charmander.image.url.endswith("/4.png"))
@@ -258,13 +260,14 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={}
         cog.config=SimpleNamespace(user=lambda user:section,encounters=encounters)
         cog.rendered_starter=AsyncMock(return_value=(discord.Embed(title="@Trainer received Charmander!"),[]))
+        cog.rendered_starter_choice=AsyncMock(return_value=(Pokemon.starter_embed(SimpleNamespace(display_name="Trainer")),[]))
         response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock())
         interaction=SimpleNamespace(user=SimpleNamespace(id=42,display_name="Trainer"),response=response)
         await cog.claim(interaction,9)
         sent=response.send_message.await_args.kwargs
         self.assertTrue(sent["ephemeral"])
         self.assertIsInstance(sent["view"],StarterView)
-        self.assertEqual([item.label for item in sent["view"].children],["◀","Choose","▶"])
+        self.assertEqual([item.label for item in sent["view"].children],["◀","Choose Bulbasaur","▶"])
         self.assertEqual(sent["view"].cycle(-1),7)
         await cog.choose_starter(interaction,4,9)
         self.assertTrue(section.value["starter_chosen"])
