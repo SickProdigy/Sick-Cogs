@@ -338,6 +338,10 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(rendered.size,(56,42))
         self.assertEqual(rendered.getchannel("A").getbbox(),(0,0,56,42))
 
+    def test_pokedex_registration_details_show_types_and_abilities(self):
+        self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[39]),("Type: Normal / Fairy","Abilities: Cute Charm, Competitive"))
+        self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[25]),("Type: Electric","Abilities: Static"))
+
     def test_renderer_builds_expected_pngs(self):
         source=io.BytesIO()
         Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
