@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.111.0"
+    __version__="0.112.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -238,6 +238,7 @@ class MTG(commands.Cog):
                 if item.decision_pending:
                     if not item.ability_effect and g.card(item.uid).effect=="search_library": label+=" (controller is searching their library)"
                     elif not item.ability_effect and g.card(item.uid).effect=="natural_selection": label+=" (controller is privately arranging the targeted library)"
+                    elif not item.ability_effect and g.card(item.uid).effect in ("text_change_land","text_change_color"): label+=" (controller must choose the word replacement)"
                     elif not item.ability_effect and g.card(item.uid).effect=="false_orders": label+=" (controller must choose its new blocking assignment or decline)"
                     elif not item.ability_effect and g.card(item.uid).enters_copy_types: label+=" (controller is choosing a permanent to copy)"
                     elif not item.ability_effect and g.card(item.uid).effect=="drain_power": label+=" (target player is choosing land mana)"
@@ -675,6 +676,11 @@ class MTG(commands.Cog):
         if normalized not in ("pay","draw","decline","sacrifice"): await ctx.send("Choose `pay`, `draw`, `decline`, or `sacrifice POSITION`."); return
         if normalized=="sacrifice" and position is None: await ctx.send("Provide the battlefield position to sacrifice."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_trigger(ctx.author.id,normalized!="decline",position if normalized=="sacrifice" else None),f"trigger_{normalized}")
+    @mtg.command(name="wording")
+    async def wording(self,ctx,source:str,target:str):
+        """Resolve Magical Hack or Sleight of Mind with FROM TO."""
+        await self.mutate_ctx(ctx,lambda g:g.choose_word_change(ctx.author.id,source,target),"word_change_choice")
+
     @mtg.command(name="orders")
     async def orders(self,ctx,choice:str):
         """Resolve False Orders with an attacker position or `decline`."""

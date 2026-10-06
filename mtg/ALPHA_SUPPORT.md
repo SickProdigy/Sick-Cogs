@@ -8,7 +8,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | All playable through 0.108.0 |
-| Instants and sorceries | 70 | 65 spells playable through 0.111.0; 5 remain |
+| Instants and sorceries | 70 | 67 spells playable through 0.112.0; 3 remain |
 | Enchantments | 68 | 66 enchantments playable through 0.110.0; 2 remain |
 | Artifacts | 42 | 40 artifacts playable through 0.108.0; 2 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -247,3 +247,6 @@ The 0.111.0 Balance promotion adds a persisted three-stage resolution that equal
 The 0.106.0 multiple-blocker promotion adds Lure and extends combat to many-to-many blocking. Every creature that can legally block a Lured attacker must satisfy the maximum possible number of blocking requirements, including competing Lures and multi-block capacity. Attackers blocked by multiple creatures use persisted ordered damage assignment with lethal-before-next validation across first-strike and normal steps; trample assigns any legal remainder to the defending player. Repeated Discord block pairs, the `mtg attackdamage` command, public rendering, battlefield removal, reload recovery, legacy defaults, and solo AI share the same model.
 
 The 0.105.0 multi-block combat promotion adds Two-Headed Giant of Foriys and Blaze of Glory. A blocker may now engage its printed or temporary number of attackers, while a persisted ordered assignment divides its power exactly once and enforces lethal damage before moving to the next attacker in the appropriate first-strike or normal damage step. Blaze grants an eligible defending creature unlimited blocks for the combat and requires it to block every attacker it legally can. Block declaration remains atomic; target loss, protection and evasion legality, reload recovery, public rendering, the `mtg blockdamage` command, cleanup, and solo AI share the same combat model.
+
+
+The 0.112.0 text-word promotion adds Magical Hack and Sleight of Mind. Either spell targets a permanent or another spell on the stack, then pauses at resolution for one of twenty basic-land-type or color-word replacements through a Discord selector or `[p]mtg wording FROM TO`. Changes persist on the affected battlefield object or stack object, compose in timestamp order, alter displayed Oracle text, and feed shared land types, landwalk, characteristic stats, typed destruction, animation, mana and tap effects, protection, color restrictions, Fear, Gloom, and related rules. Target legality is rechecked at resolution; solo AI uses the same target and choice paths.

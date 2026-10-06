@@ -4188,4 +4188,34 @@ class AlphaBalanceTests(unittest.TestCase):
         game.choose_balance(10,[1]); self.assertEqual(game.stack[-1].ability_effect,"land_event_damage"); self.assertIn(uid,game.player(10).graveyard)
         game.pass_priority(10); game.pass_priority(20); self.assertEqual(game.player(10).life,18)
 
+class AlphaWordChangeTests(unittest.TestCase):
+    def add(self,game,user,key,attached_to=None):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,sick=False,attached_to=attached_to); game.player(user).battlefield.append(permanent); return permanent
+
+    def pending(self,game,owner,key,target):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        spell=Spell(owner,uid,key,target,decision_pending=True,choice_owner=owner); game.stack.append(spell); game.priority_user=owner; return spell
+
+    def test_magical_hack_permanent_composes_and_persists(self):
+        game=ready(); game.player(10).battlefield=[]; nightmare=self.add(game,10,"lea:118"); self.add(game,10,"swamp"); self.add(game,10,"island"); self.add(game,10,"forest"); self.assertEqual(game.current_stats(nightmare),(1,1))
+        self.pending(game,10,"lea:63",f"10:{nightmare.uid}"); game.choose_word_change(10,"swamp","island"); self.assertEqual(game.current_stats(nightmare),(1,1)); self.assertIn("Islands",game.card(nightmare.uid).text)
+        self.pending(game,10,"lea:63",f"10:{nightmare.uid}"); game.choose_word_change(10,"island","forest"); restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.find_permanent(nightmare.uid)[1].land_word_changes,{"swamp":"forest","island":"forest"}); self.assertEqual(restored.current_stats(restored.find_permanent(nightmare.uid)[1]),(1,1))
+        self.pending(restored,10,"lea:63",f"10:{nightmare.uid}"); restored.choose_word_change(10,"swamp","mountain"); self.assertEqual(restored.find_permanent(nightmare.uid)[1].land_word_changes,{"swamp":"forest","island":"forest"})
+
+    def test_magical_hack_changes_a_spell_on_the_stack(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; plains=self.add(game,20,"plains"); island=self.add(game,20,"island")
+        flash_uid=game.next_uid; game.next_uid+=1; game.cards[flash_uid]="lea:151"; flash=Spell(10,flash_uid,"lea:151"); game.stack=[flash]
+        self.pending(game,10,"lea:63",f"S:{flash_uid}"); game.choose_word_change(10,"plains","island"); self.assertEqual(game.card(flash_uid).land_type,"island")
+        game.stack.pop(); game._resolve(flash); self.assertIsNotNone(game.find_permanent(plains.uid)[1]); self.assertIn(island.uid,game.player(20).graveyard)
+
+    def test_sleight_changes_fear_and_terror_rules(self):
+        combat=ready(); combat.player(10).battlefield=[]; combat.player(20).battlefield=[]; attacker=self.add(combat,10,"bear"); fear=self.add(combat,10,"lea:108",attacker.uid); black=self.add(combat,20,"lea:125"); red=self.add(combat,20,"lea:155"); combat.active_index=0; combat.attackers=[attacker.uid]
+        self.pending(combat,10,"lea:78",f"10:{fear.uid}"); combat.choose_word_change(10,"B","R")
+        self.assertFalse(combat.can_block(attacker.uid,black.uid)[0]); self.assertTrue(combat.can_block(attacker.uid,red.uid)[0])
+        terror=ready(); terror.player(20).battlefield=[]; target=self.add(terror,20,"lea:215"); terror_uid=terror.next_uid; terror.next_uid+=1; terror.cards[terror_uid]="lea:130"; pending=Spell(10,terror_uid,"lea:130",f"20:{target.uid}"); terror.stack=[pending]
+        self.pending(terror,10,"lea:78",f"S:{terror_uid}"); terror.choose_word_change(10,"B","G"); terror.stack.pop(); terror._resolve(pending)
+        self.assertIsNotNone(terror.find_permanent(target.uid)[1]); self.assertIn(terror_uid,terror.player(10).graveyard)
+
 if __name__=="__main__": unittest.main()

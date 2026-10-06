@@ -130,6 +130,15 @@ class KudzuSelect(discord.ui.Select):
             owner,position=(int(part) for part in value.split(":")); action=lambda g:g.choose_kudzu(i.user.id,owner,position)
         await self.cog.act(i,self.game_id,action,"kudzu_choice")
 
+class WordChangeSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id; spell=game.stack[-1]; land=game.card(spell.uid).effect=="text_change_land"; labels={"W":"White","U":"Blue","B":"Black","R":"Red","G":"Green"}
+        options=[discord.SelectOption(label=f"{source.title() if land else labels[source]} to {target.title() if land else labels[target]}",value=f"{source}:{target}") for source,target in game.word_change_choices()]
+        super().__init__(placeholder="Choose the word replacement",min_values=1,max_values=1,options=options,custom_id=f"mtg:{game_id}:word_change")
+    async def callback(self,i):
+        source,target=self.values[0].split(":",1)
+        await self.cog.act(i,self.game_id,lambda g:g.choose_word_change(i.user.id,source,target),"word_change_choice")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -165,6 +174,8 @@ class GameView(discord.ui.View):
             self.add_item(CopySelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="vesuvan_copy":
             self.add_item(VesuvanSelect(self.cog,self.game_id,game))
+        if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect in ("text_change_land","text_change_color"):
+            self.add_item(WordChangeSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="false_orders":
             self.add_item(FalseOrdersSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="kudzu_move":

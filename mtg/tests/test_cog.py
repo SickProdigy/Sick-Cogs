@@ -770,5 +770,12 @@ class MultiTargetSpellRenderingTests(unittest.TestCase):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=f"Player {user_id}")); game=Game(1,[10,20],1); creature=Permanent(99,"bear",owner=20,sick=False); game.cards[99]="bear"; game.player(20).battlefield=[creature]; spell=100; game.cards[spell]="lea:149"; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; game.stack=[spell_type(10,spell,"lea:149",f"20,20:{creature.uid}",x_value=5)]
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Fireball (X=5)",rendered); self.assertIn("Player 20, Bear Cub",rendered)
 
+class WordChangeRenderingTests(unittest.TestCase):
+    def test_public_choice_has_twenty_options_and_disables_pass(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:None); game=Game(1,[10,20],1)
+        target=Permanent(99,"lea:118",owner=20,sick=False); game.cards[99]="lea:118"; game.player(20).battlefield=[target]; uid=100; game.cards[uid]="lea:63"; game.stack=[spell_type(10,uid,"lea:63",f"20:{target.uid}",decision_pending=True,choice_owner=10)]; game.priority_user=10; cog.games={1:game}
+        view=GameView(cog,1); select=next(item for item in view.children if item.custom_id.endswith(":word_change")); passing=next(item for item in view.children if item.custom_id.endswith(":pass"))
+        self.assertEqual(len(select.options),20); self.assertTrue(passing.disabled); self.assertIn("choose the word replacement",str(cog.game_embed(game).to_dict()))
+
 if __name__ == "__main__":
     unittest.main()

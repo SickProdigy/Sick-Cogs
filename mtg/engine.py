@@ -50,6 +50,8 @@ class Permanent:
     copy_upkeep_creature: bool = False
     temporary_max_blocks: int = 0
     must_block_all: bool = False
+    land_word_changes: Dict[str, str] = field(default_factory=dict)
+    color_word_changes: Dict[str, str] = field(default_factory=dict)
 
 @dataclass
 class Player:
@@ -76,6 +78,7 @@ class Player:
     damage_taken_this_turn: int = 0
     bodyguard_choice: int = 0
     island_sanctuary_active: bool = False
+    sanctuary_landwalk_type: str = "island"
 
 @dataclass
 class Spell:
@@ -94,6 +97,8 @@ class Spell:
     choice_value: int = 0
     choice_owner: Optional[int] = None
     mana_choices: Dict[str, str] = field(default_factory=dict)
+    land_word_changes: Dict[str, str] = field(default_factory=dict)
+    color_word_changes: Dict[str, str] = field(default_factory=dict)
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -167,6 +172,48 @@ class Game:
     def player(self,user):
         try: return self.players[int(user)]
         except KeyError as e: raise GameError("You are not in this game.") from e
+    def _word_change_maps(self,uid):
+        permanent=next((item for player in self.players.values() for item in player.battlefield if item.uid==uid),None) if hasattr(self,"players") else None
+        spell=next((item for item in self.stack if item.uid==uid),None) if hasattr(self,"stack") else None
+        source=permanent or spell
+        return (source.land_word_changes,source.color_word_changes) if source is not None else ({},{})
+
+    def changed_land_word(self,uid,value):
+        return self._word_change_maps(uid)[0].get(value.casefold(),value.casefold())
+
+    def changed_color_word(self,uid,value):
+        return self._word_change_maps(uid)[1].get(value.upper(),value.upper())
+
+    def _text_changed_card(self,uid,card,land_changes=None,color_changes=None):
+        lands,colors=self._word_change_maps(uid) if land_changes is None and color_changes is None else (land_changes or {},color_changes or {})
+        if not lands and not colors: return card
+        updates={}
+        for field_name in ("land_type","animate_land_type","upkeep_land_type_damage","global_land_from_type","global_land_to_type","attack_requires_defender_land_type","sacrifice_without_land_type","aura_set_land_type"):
+            value=getattr(card,field_name)
+            if value: updates[field_name]=lands.get(value.casefold(),value)
+        for field_name in ("target_color","color_change","aura_protection","prevent_source_color","global_buff_color","cast_life_color","animate_land_color"):
+            value=getattr(card,field_name)
+            if value: updates[field_name]=colors.get(value.upper(),value)
+        if card.protection_colors: updates["protection_colors"]=tuple(colors.get(value,value) for value in card.protection_colors)
+        def keyword(value):
+            lower=value.casefold()
+            return lands.get(lower[:-4],lower)+"walk" if lower.endswith("walk") and lower[:-4] in ("plains","island","swamp","mountain","forest") else value
+        updates["keywords"]=tuple(keyword(value) for value in card.keywords)
+        if card.aura_keyword: updates["aura_keyword"]=keyword(card.aura_keyword)
+        if card.lord_keyword: updates["lord_keyword"]=keyword(card.lord_keyword)
+        characteristic=card.characteristic_pt or ""
+        if characteristic in ("plains","islands","swamps","mountains","forests"):
+            roots={"plains":"plains","islands":"island","swamps":"swamp","mountains":"mountain","forests":"forest"}; root=roots[characteristic]; replacement=lands.get(root,root); updates["characteristic_pt"]="plains" if replacement=="plains" else replacement+"s"
+        elif characteristic=="gaea_liege" and "forest" in lands: updates["characteristic_pt"]="gaea_liege:"+lands["forest"]
+        text=card.text; activation_text=card.activation_text
+        for source,target in lands.items():
+            text=re.sub(rf"\b{source}",lambda match: target.title() if match.group(0)[0].isupper() else target,text,flags=re.I); activation_text=re.sub(rf"\b{source}",lambda match: target.title() if match.group(0)[0].isupper() else target,activation_text,flags=re.I)
+        names={"W":"white","U":"blue","B":"black","R":"red","G":"green"}
+        for source,target in colors.items():
+            text=re.sub(rf"\b{names[source]}",lambda match: names[target].title() if match.group(0)[0].isupper() else names[target],text,flags=re.I); activation_text=re.sub(rf"\b{names[source]}",lambda match: names[target].title() if match.group(0)[0].isupper() else names[target],activation_text,flags=re.I)
+        updates["text"]=text; updates["activation_text"]=activation_text
+        return replace(card,**updates)
+
     def card(self,uid):
         key=self.cards[uid]; permanent=None
         if hasattr(self,"players"):
@@ -180,7 +227,7 @@ class Game:
             card=replace(card,type_line=" ".join(words)+(f" — {subtypes[0]}" if subtypes else ""))
         if copy_key and permanent.copy_colors: card=replace(card,colors=tuple(permanent.copy_colors))
         if copy_key and permanent.copy_upkeep_creature: card=replace(card,upkeep_copy_creature=True)
-        return card
+        return self._text_changed_card(uid,card)
     def is_token(self,uid): return self.cards.get(uid,"").startswith("token:")
     def _make_permanent(self,uid,key,**kwargs):
         kwargs.setdefault("layer_timestamp",self.next_layer_timestamp); self.next_layer_timestamp+=1
@@ -225,11 +272,12 @@ class Game:
     def library_search(self,user): return [(position,self.card(uid)) for position,uid in enumerate(reversed(self.player(user).library),1)]
     def characteristic_stats(self,user,card,entering=False,permanent_uid=None):
         player=self.player(user)
-        if card.characteristic_pt=="swamps":
-            value=sum(self.has_current_land_type(x,"swamp") for x in player.battlefield)
-        elif card.characteristic_pt=="gaea_liege":
-            forests=self.player(self.opponent(user) if permanent_uid in self.attackers else user)
-            value=sum(self.has_current_land_type(x,"forest") for x in forests.battlefield)
+        land_characteristics={"plains":"plains","islands":"island","swamps":"swamp","mountains":"mountain","forests":"forest"}
+        if card.characteristic_pt in land_characteristics:
+            value=sum(self.has_current_land_type(x,land_characteristics[card.characteristic_pt]) for x in player.battlefield)
+        elif card.characteristic_pt=="gaea_liege" or (card.characteristic_pt or "").startswith("gaea_liege:"):
+            land_type=card.characteristic_pt.split(":",1)[1] if ":" in card.characteristic_pt else "forest"; lands=self.player(self.opponent(user) if permanent_uid in self.attackers else user)
+            value=sum(self.has_current_land_type(x,land_type) for x in lands.battlefield)
         elif card.characteristic_pt=="plague_rats":
             value=sum(self.card(x.uid).name=="Plague Rats" for p in self.players.values() for x in p.battlefield)+(1 if entering else 0)
         elif card.characteristic_pt=="non_wall_creatures":
@@ -270,8 +318,8 @@ class Game:
         card=self.card(aura.uid)
         if not card.aura_forest_scaling: return card.aura_power,card.aura_toughness
         controller,_=self.find_permanent(aura.uid)
-        forests=sum(self.has_current_land_type(x,"forest") for x in controller.battlefield)
-        return forests//2,(forests+1)//2
+        land_type=self.changed_land_word(aura.uid,"forest"); lands=sum(self.has_current_land_type(x,land_type) for x in controller.battlefield)
+        return lands//2,(lands+1)//2
     def continuous_lords(self,permanent):
         controller=next((player for player in self.players.values() if permanent in player.battlefield),None)
         if controller is None: return []
@@ -330,7 +378,7 @@ class Game:
         elif self._global_land_animation(permanent): power,toughness=1,1
         elif self._aura_artifact_animation(permanent): power=toughness=card.cost
         else: power,toughness=card.power,card.toughness
-        swamp_bonus=1 if card.conditional_swamp_bonus and any(self.has_current_land_type(x,"swamp") for x in self.player(owner).battlefield) else 0
+        swamp_bonus=1 if card.conditional_swamp_bonus and any(self.has_current_land_type(x,self.changed_land_word(permanent.uid,"swamp")) for x in self.player(owner).battlefield) else 0
         auras=self.attached_auras(permanent)
         lords=[self.card(source.uid) for source in self.continuous_lords(permanent)]
         globals_=[source for source_user,player in self.players.items() for source in player.battlefield if self.global_buff_applies(source,source_user,permanent,owner)]
@@ -361,7 +409,7 @@ class Game:
         defender=self.player(self.opponent(self.active_user))
         required=card.attack_requires_defender_land_type
         has_required=not required or any(self.has_current_land_type(x,required) for x in defender.battlefield)
-        sanctuary_allowed=not defender.island_sanctuary_active or "flying" in keywords or "islandwalk" in keywords
+        sanctuary_allowed=not defender.island_sanctuary_active or "flying" in keywords or f"{defender.sanctuary_landwalk_type}walk" in keywords
         return self.is_creature(permanent) and not permanent.tapped and (not permanent.sick or card.haste or "haste" in keywords or attack_haste) and ("defender" not in keywords or defender_override) and has_required and sanctuary_allowed
 
     def _draw_now(self,p,n=1):
@@ -488,7 +536,7 @@ class Game:
         if not self.sanctuary_draw_pending or user!=self.active_user: raise GameError("You do not have an Island Sanctuary draw choice to make.")
         self.sanctuary_pending_draws-=1
         if skip:
-            self.player(user).island_sanctuary_active=True; self.log.append(f"{user} skipped a draw for Island Sanctuary.")
+            self.player(user).island_sanctuary_active=True; source=next((x for x in self.player(user).battlefield if self.card(x.uid).draw_step_sanctuary),None); self.player(user).sanctuary_landwalk_type=self.changed_land_word(source.uid,"island") if source else "island"; self.log.append(f"{user} skipped a draw for Island Sanctuary.")
         else:
             if self.sanctuary_resume_mass_draw:
                 player=self.player(user)
@@ -609,9 +657,9 @@ class Game:
         if card.land:
             flares=sum(self.card(source.uid).mana_flare for player in self.players.values() for source in player.battlefield)
             output[symbol]+=flares
-            if self.has_current_land_type(permanent,"mountain"):
-                gauntlets=sum(self.card(source.uid).mountain_extra_red for player in self.players.values() for source in player.battlefield)
-                if gauntlets: output["R"]=output.get("R",0)+gauntlets
+            gauntlets=sum(self.card(source.uid).mountain_extra_red and self.has_current_land_type(permanent,self.changed_land_word(source.uid,"mountain")) for player in self.players.values() for source in player.battlefield)
+            if gauntlets:
+                output["R"]=output.get("R",0)+gauntlets
             for aura in self.attached_auras(permanent):
                 extra=self.card(aura.uid).aura_extra_mana
                 if extra: output[extra]=output.get(extra,0)+1
@@ -644,8 +692,7 @@ class Game:
             sources.extend((controller.user_id,source,"tap_damage",str(user)) for controller in self.players.values() for source in controller.battlefield if self.card(source.uid).land_tap_damage)
         sources.extend((controller.user_id,aura,"tap_damage",str(user)) for controller in self.players.values() for aura in controller.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_tap_damage)
         sources.extend((controller.user_id,aura,"kudzu_destroy",f"{user}:{permanent.uid}") for controller in self.players.values() for aura in controller.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_kudzu)
-        if self.has_current_land_type(permanent,"forest"):
-            sources.extend((controller.user_id,source,"tap_life",str(controller.user_id)) for controller in self.players.values() if controller.user_id!=user for source in controller.battlefield if self.card(source.uid).opponent_forest_tap_life)
+        sources.extend((controller.user_id,source,"tap_life",str(controller.user_id)) for controller in self.players.values() if controller.user_id!=user for source in controller.battlefield if self.card(source.uid).opponent_forest_tap_life and self.has_current_land_type(permanent,self.changed_land_word(source.uid,"forest")))
         triggers=[]
         for owner,source,effect,target in sources:
             uid=self.next_uid; self.next_uid+=1; card=self.card(source.uid); self.cards[uid]=card.key
@@ -681,9 +728,10 @@ class Game:
         for battlefield in self.players.values():
             for source in battlefield.battlefield:
                 tax=self.card(source.uid)
-                if mana_cost is None and "W" in getattr(card,"colors",()): generic+=tax.tax_white_spells
-                elif mana_cost is not None and activation_is_enchantment and "W" in activation_colors: generic+=tax.tax_white_enchantment_abilities
-        white_as_red=any(self.card(source.uid).white_as_red for source in player.battlefield)
+                taxed_color=self.changed_color_word(source.uid,"W")
+                if mana_cost is None and taxed_color in getattr(card,"colors",()): generic+=tax.tax_white_spells
+                elif mana_cost is not None and activation_is_enchantment and taxed_color in activation_colors: generic+=tax.tax_white_enchantment_abilities
+        mana_conversions={(self.changed_color_word(source.uid,"W"),self.changed_color_word(source.uid,"R")) for source in player.battlefield if self.card(source.uid).white_as_red}
         order=("W","U","B","R","G"); initial=tuple(colored.count(symbol) for symbol in order)+(generic,)
         items=[]
         for symbol,count in player.mana_pool.items():
@@ -700,8 +748,9 @@ class Game:
             remaining=list(requirements); spare=0
             for index,symbol in enumerate(order):
                 amount=output.get(symbol,0); used=min(remaining[index],amount); remaining[index]-=used; amount-=used
-                if symbol=="W" and white_as_red:
-                    red_used=min(remaining[3],amount); remaining[3]-=red_used; amount-=red_used
+                for source_color,target_color in mana_conversions:
+                    if symbol!=source_color or source_color==target_color: continue
+                    target_index=order.index(target_color); converted=min(remaining[target_index],amount); remaining[target_index]-=converted; amount-=converted
                 spare+=amount
             spare+=output.get("C",0); remaining[5]=max(0,remaining[5]-spare)
             return tuple(remaining)
@@ -727,7 +776,7 @@ class Game:
             for produced,count in output.items(): remaining[produced]=remaining.get(produced,0)+count
         for symbol in order:
             for _ in range(colored.count(symbol)):
-                paid_symbol=symbol if remaining.get(symbol,0) else ("W" if symbol=="R" and white_as_red and remaining.get("W",0) else symbol)
+                paid_symbol=symbol if remaining.get(symbol,0) else next((source for source,target in mana_conversions if target==symbol and remaining.get(source,0)),symbol)
                 remaining[paid_symbol]-=1
                 if not remaining[paid_symbol]: remaining.pop(paid_symbol)
         for _ in range(generic):
@@ -829,7 +878,7 @@ class Game:
         if card.activation_effect=="grant_flying_delayed_destroy" and (target_user!=user or not self.is_creature(permanent) or self.current_stats(permanent)[1]>=self.current_stats(source)[0]): raise GameError("Target must be a creature you control with toughness less than this creature’s power.")
         if card.activation_effect=="force_attack" and (target_user!=self.active_user or not self.is_creature(permanent) or self._has_subtype(target_card,"Wall") or permanent.sick): raise GameError("Target must be a non-Wall creature the active player controlled since the turn began.")
         if card.activation_effect in ("untap_land","destroy_land","set_land_forest","add_mire_counter") and not target_card.land: raise GameError("Target must be a land.")
-        if card.activation_effect=="add_mire_counter" and self.has_current_land_type(permanent,"swamp"): raise GameError("Target must be a non-Swamp land.")
+        if card.activation_effect=="add_mire_counter" and self.has_current_land_type(permanent,self.changed_land_word(source.uid,"swamp")): raise GameError("Target must not already have the named basic land type.")
         if card.activation_effect=="tap_permanent" and not any(self.has_current_type(permanent,kind) for kind in ("Artifact","Creature","Land")): raise GameError("Target must be an artifact, creature, or land.")
         return f"{target_user}:{permanent.uid}"
 
@@ -1210,12 +1259,13 @@ class Game:
             permanent=battlefield[pos-1]; target_card=self.card(permanent.uid)
             if c.target_color not in self.current_colors(permanent): raise GameError(f"Target permanent must be {c.target_color}.")
             return f"{target_user}:{permanent.uid}"
-        if c.effect=="set_color":
+        if c.effect in ("set_color","text_change_land","text_change_color"):
+            label="Color-change" if c.effect=="set_color" else "Word-change"
             if target and target.upper().startswith("S:"):
                 spell=self._target_stack(target); return f"S:{spell.uid}"
-            if not target or ":" not in target: raise GameError("Color-change target must be S:POSITION or USER_ID:POSITION.")
+            if not target or ":" not in target: raise GameError(f"{label} target must be S:POSITION or USER_ID:POSITION.")
             try: target_user,pos=(int(x) for x in target.split(":"))
-            except (TypeError,ValueError) as e: raise GameError("Color-change target must be S:POSITION or USER_ID:POSITION.") from e
+            except (TypeError,ValueError) as e: raise GameError(f"{label} target must be S:POSITION or USER_ID:POSITION.") from e
             battlefield=self.player(target_user).battlefield
             if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
             return f"{target_user}:{battlefield[pos-1].uid}"
@@ -1350,6 +1400,10 @@ class Game:
                     s.decision_pending=True; self.priority_user=s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="natural_selection" and self.player(int(s.target)).library:
                     s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
+                if not s.ability_effect and self.card(s.uid).effect in ("text_change_land","text_change_color"):
+                    target=self._word_change_target(s.target)
+                    if target is not None and not (isinstance(target,Permanent) and self._protected_from(target,self.card(s.uid),self.spell_colors(s))):
+                        s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="false_orders":
                     target=self._stable_target_permanent(s.target)
                     if target is not None and self.find_permanent(target.uid)[0].user_id==self.opponent(self.active_user) and self.is_creature(target) and not self._protected_from(target,self.card(s.uid),self.spell_colors(s)):
@@ -1379,6 +1433,39 @@ class Game:
         target=self._stable_target_permanent(self.stack[-1].target)
         if target is None: return []
         return [(position,attacker) for position,uid in enumerate(self.attackers,1) if (attacker:=self.find_permanent(uid)[1]) is not None and any(self.can_block(member,target.uid)[0] for member in self.attack_band(uid))]
+
+    def _word_change_target(self,target):
+        if not target: return None
+        if target.startswith("S:"):
+            try: uid=int(target.split(":",1)[1])
+            except ValueError: return None
+            return next((item for item in self.stack if item.uid==uid and not item.ability_effect),None)
+        return self._stable_target_permanent(target)
+
+    def word_change_choices(self):
+        if not self.stack or not self.stack[-1].decision_pending: return ()
+        effect=self.card(self.stack[-1].uid).effect
+        values=("plains","island","swamp","mountain","forest") if effect=="text_change_land" else ("W","U","B","R","G") if effect=="text_change_color" else ()
+        return tuple((source,target) for source in values for target in values if source!=target)
+
+    def choose_word_change(self,user,source,target):
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.card(self.stack[-1].uid).effect not in ("text_change_land","text_change_color"):
+            raise GameError("No word-change choice is waiting for you.")
+        spell=self.stack[-1]; choices=self.word_change_choices(); source=source.casefold() if self.card(spell.uid).effect=="text_change_land" else source.upper(); target=target.casefold() if self.card(spell.uid).effect=="text_change_land" else target.upper()
+        if (source,target) not in choices: raise GameError("Choose two different supported basic land types or colors.")
+        changed=self._word_change_target(spell.target)
+        if changed is None or (isinstance(changed,Permanent) and self._protected_from(changed,self.card(spell.uid),self.spell_colors(spell))):
+            self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append(f"{self.card(spell.uid).name} fizzled because its target was gone or illegal.")
+        else:
+            mapping=changed.land_word_changes if self.card(spell.uid).effect=="text_change_land" else changed.color_word_changes
+            source_was_mapped=source in mapping
+            for key,value in list(mapping.items()):
+                if value==source: mapping[key]=target
+            if not source_was_mapped: mapping[source]=target
+            self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append(f"{user} changed {source} to {target} with {self.card(spell.uid).name}.")
+        spell.decision_pending=False; self._sba(); self._life(); self.phase_passes=0
+        if self.stack: self.stack[-1].passes=0
+        if not self.finished: self.priority_user=self.active_user
 
     def choose_false_orders(self,user,attacker_position=None):
         choices={position:attacker for position,attacker in self.false_orders_choices(user)}; spell=self.stack[-1]; target=self._stable_target_permanent(spell.target)
@@ -2088,7 +2175,10 @@ class Game:
         if not self.is_creature(blocker_perm) or blocker_perm.tapped: return False,"Invalid blocker."
         attacker_keywords=self.current_keywords(attacker_perm); blocker_keywords=self.current_keywords(blocker_perm)
         if "unblockable" in attacker_keywords: return False,f"{attacker.name} can't be blocked this turn."
-        if "fear" in attacker_keywords and not (blocker.has_type("Artifact") or "B" in self.current_colors(blocker_perm)):
+        fear_sources=[attacker_perm.uid] if "fear" in self.card(attacker_perm.uid).keywords else []
+        fear_sources.extend(aura.uid for aura in self.attached_auras(attacker_perm) if self.card(aura.uid).aura_keyword=="fear")
+        fear_colors={self.changed_color_word(uid,"B") for uid in fear_sources}
+        if "fear" in attacker_keywords and not (blocker.has_type("Artifact") or fear_colors & set(self.current_colors(blocker_perm))):
             return False,f"{blocker.name} cannot block a creature with fear."
         if set(self.current_colors(blocker_perm)) & self.current_protections(attacker_perm): return False,f"{attacker.name} has protection from {blocker.name}."
         if attacker.cant_be_blocked_by_subtype and self._has_subtype(blocker,attacker.cant_be_blocked_by_subtype):
@@ -2513,13 +2603,14 @@ class Game:
             if target_card is None or not target_card.land: fizzle("its target was gone or illegal"); return
             target.tapped=False
         elif effect=="add_mire_counter":
-            if target_card is None or not target_card.land or self.has_current_land_type(target,"swamp"): fizzle("its target was gone or became a Swamp"); return
-            target.land_type_effects.append({"kind":"mire","source_uid":s.source_uid,"source_timestamp":s.choice_value,"effect_timestamp":self.next_layer_timestamp,"land_type":"swamp"}); self.next_layer_timestamp+=1
+            land_type=self.changed_land_word(s.source_uid,"swamp")
+            if target_card is None or not target_card.land or self.has_current_land_type(target,land_type): fizzle(f"its target was gone or became a {land_type.title()}"); return
+            target.land_type_effects.append({"kind":"mire","source_uid":s.source_uid,"source_timestamp":s.choice_value,"effect_timestamp":self.next_layer_timestamp,"land_type":land_type}); self.next_layer_timestamp+=1
         elif effect=="set_land_forest":
             _,source=self.find_permanent(s.source_uid)
             if target_card is None or not target_card.land: fizzle("its target was gone or illegal"); return
             if source is None or source.layer_timestamp!=s.choice_value: fizzle("its source had left the battlefield"); return
-            target.land_type_effects.append({"source_uid":s.source_uid,"source_timestamp":s.choice_value,"effect_timestamp":self.next_layer_timestamp,"land_type":"forest"}); self.next_layer_timestamp+=1
+            target.land_type_effects.append({"source_uid":s.source_uid,"source_timestamp":s.choice_value,"effect_timestamp":self.next_layer_timestamp,"land_type":self.changed_land_word(s.source_uid,"forest")}); self.next_layer_timestamp+=1
         elif effect=="tap_permanent":
             if target_card is None or not any(self.has_current_type(target,kind) for kind in ("Artifact","Creature","Land")): fizzle("its target was gone or illegal"); return
             target.tapped=True
@@ -2530,7 +2621,7 @@ class Game:
 
     def _resolve(self,s):
         if s.ability_effect: self._resolve_ability(s); return
-        p=self.players[s.owner]; c=CARDS[s.key]
+        p=self.players[s.owner]; c=self._text_changed_card(s.uid,CARDS[s.key],s.land_word_changes,s.color_word_changes)
         protected=None if c.enters_copy_types else self._stable_target_permanent(s.target)
         if protected is not None and self._protected_from(protected,c,self.spell_colors(s)):
             p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target gained protection."); return
@@ -2776,7 +2867,7 @@ class Game:
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
             target_card=self.card(target.uid) if target is not None else None
-            legal=target_card is not None and self.is_creature(target) and not (c.target_nonartifact and "Artifact" in target_card.type_line) and not (c.target_nonblack and "B" in self.current_colors(target))
+            legal=target_card is not None and self.is_creature(target) and not (c.target_nonartifact and "Artifact" in target_card.type_line) and not (c.target_nonblack and s.color_word_changes.get("B","B") in self.current_colors(target))
             if not legal:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             life_gain=max(0,self.current_stats(target)[0]) if c.effect=="exile_creature_life" else 0
@@ -2924,6 +3015,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d.setdefault("bodyguard_choice",0); d.setdefault("island_sanctuary_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"base_controller":int(x.get("base_controller",0)),"damage_prevention":x.get("damage_prevention",0),"hydra_counters_first":x.get("hydra_counters_first",False),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"redirect_source_damage_to_player":{int(uid):int(user) for uid,user in x.get("redirect_source_damage_to_player",{}).items()},"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])],"copy_key":x.get("copy_key",""),"copy_added_types":list(x.get("copy_added_types",[])),"copy_colors":list(x.get("copy_colors",[])),"copy_upkeep_creature":bool(x.get("copy_upkeep_creature",False)),"temporary_max_blocks":int(x.get("temporary_max_blocks",0)),"must_block_all":bool(x.get("must_block_all",False))})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d.setdefault("bodyguard_choice",0); d.setdefault("island_sanctuary_active",False); d.setdefault("sanctuary_landwalk_type","island"); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"base_controller":int(x.get("base_controller",0)),"damage_prevention":x.get("damage_prevention",0),"hydra_counters_first":x.get("hydra_counters_first",False),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"redirect_source_damage_to_player":{int(uid):int(user) for uid,user in x.get("redirect_source_damage_to_player",{}).items()},"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])],"copy_key":x.get("copy_key",""),"copy_added_types":list(x.get("copy_added_types",[])),"copy_colors":list(x.get("copy_colors",[])),"copy_upkeep_creature":bool(x.get("copy_upkeep_creature",False)),"temporary_max_blocks":int(x.get("temporary_max_blocks",0)),"must_block_all":bool(x.get("must_block_all",False)),"land_word_changes":{str(k):str(v) for k,v in x.get("land_word_changes",{}).items()},"color_word_changes":{str(k):str(v) for k,v in x.get("color_word_changes",{}).items()}})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.tomb_cleanup_sources=[{"owner":int(x["owner"]),"source_uid":int(x["source_uid"]),"source_timestamp":int(x["source_timestamp"])} for x in r.get("tomb_cleanup_sources",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.turn_start_pending_user=int(r["turn_start_pending_user"]) if r.get("turn_start_pending_user") is not None else None; g.turn_start_pending_extra=bool(r.get("turn_start_pending_extra",False)); g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.sanctuary_draw_pending=bool(r.get("sanctuary_draw_pending",False)); g.sanctuary_pending_draws=int(r.get("sanctuary_pending_draws",int(g.sanctuary_draw_pending))); g.sanctuary_resume_draw_step=bool(r.get("sanctuary_resume_draw_step",False)); g.sanctuary_resume_mass_draw=bool(r.get("sanctuary_resume_mass_draw",False)); g.sanctuary_mass_draw_failed=[int(user) for user in r.get("sanctuary_mass_draw_failed",[])]; g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.forced_attackers=[int(x) for x in r.get("forced_attackers",[])]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.additional_blocks={int(k):[int(uid) for uid in values] for k,values in r.get("additional_blocks",{}).items()}; g.attack_bands=[[int(uid) for uid in band] for band in r.get("attack_bands",[])]; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.attacker_damage_assignments={int(uid):[{"blocker":int(item["blocker"]),"damage":int(item["damage"])} for item in items] for uid,items in r.get("attacker_damage_assignments",{}).items()}; g.blocker_damage_assignments={int(uid):[{"attacker":int(item["attacker"]),"damage":int(item["damage"])} for item in items] for uid,items in r.get("blocker_damage_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory","false_orders","fireball","volcanic_eruption"}
+TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","text_change_land","text_change_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory","false_orders","fireball","volcanic_eruption"}
 
 
 def _target(game, user, card):
@@ -49,10 +49,11 @@ def _target(game, user, card):
         choices=[(game.card(permanent.uid).cost+sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent) and not permanent.damage_prevention and _permanent_damage_threatened(game,user,permanent)]
         if choices: return f"prevent:{user}:{max(choices)[1]}"
         return f"life:{user}" if game.player(user).life<20 else None
-    if card.effect=="set_color":
+    if card.effect in ("set_color","text_change_land","text_change_color"):
         for position,spell in enumerate(reversed(game.stack),1):
             if not spell.ability_effect and spell.owner!=user: return f"S:{position}"
-        choices=[(game.card(permanent.uid).cost,position) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if _can_target(game,card,permanent)]
+        words=("plains","island","swamp","mountain","forest") if card.effect=="text_change_land" else ("white","blue","black","red","green")
+        choices=[(game.card(permanent.uid).cost,position) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if _can_target(game,card,permanent) and (card.effect=="set_color" or any(word in game.card(permanent.uid).text.casefold() for word in words))]
         return f"{game.opponent(user)}:{max(choices)[1]}" if choices else None
     if card.aura_target_types:
         target_user=game.opponent(user) if card.aura_hostile else user
@@ -626,7 +627,7 @@ def _activation_target(game,user,card,source_uid=None):
         if card.activation_self_damage and game.player(user).life<=card.activation_self_damage: return None
         return str(opponent)
     if card.activation_effect in ("set_land_forest","add_mire_counter"):
-        wanted="forest" if card.activation_effect=="set_land_forest" else "swamp"
+        wanted=game.changed_land_word(source_uid,"forest" if card.activation_effect=="set_land_forest" else "swamp")
         for target_user in (opponent,user):
             choices=[]
             for position,permanent in enumerate(game.player(target_user).battlefield,1):
@@ -866,6 +867,11 @@ def advance_solo(game: Game):
                 _,target,entries=game.natural_selection_decision(user)
                 valued=sorted(entries,key=lambda item:(item[1].cost+item[1].power+item[1].toughness+2*len(item[1].keywords),-item[0]),reverse=target.user_id==user)
                 game.choose_natural_selection(user,tuple(position for position,_ in valued)); game.record(user,"ai_natural_selection"); changed=True; continue
+            if not trigger.ability_effect and game.card(trigger.uid).effect in ("text_change_land","text_change_color"):
+                effect=game.card(trigger.uid).effect; target=game._word_change_target(trigger.target); text=game.card(target.uid).text.casefold() if target is not None else ""
+                names=("plains","island","swamp","mountain","forest") if effect=="text_change_land" else ("white","blue","black","red","green"); symbols=names if effect=="text_change_land" else ("W","U","B","R","G")
+                source=next((symbols[index] for index,name in enumerate(names) if name in text),symbols[0]); replacement=next(value for value in symbols if value!=source)
+                game.choose_word_change(user,source,replacement); game.record(user,"ai_word_change"); changed=True; continue
             if not trigger.ability_effect and game.card(trigger.uid).effect=="false_orders":
                 choices=game.false_orders_choices(user); position=max(choices,key=lambda item:game.current_stats(item[1])[0])[0] if choices and user!=game.active_user else None
                 game.choose_false_orders(user,position); game.record(user,"ai_false_orders_block" if position is not None else "ai_false_orders_decline"); changed=True; continue

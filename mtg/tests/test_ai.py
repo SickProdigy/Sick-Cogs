@@ -1003,5 +1003,11 @@ class SoloAITests(unittest.TestCase):
         game.stack=[spell_type(AI,uid,"lea:3",ability_effect="balance_lands",choice_owner=AI,choice_value=1,decision_pending=True)]; game.active_index=0; game.phase="precombat_main"; game.priority_user=AI
         advance_solo(game); self.assertIsNone(game.find_permanent(weak.uid)[1]); self.assertIsNotNone(game.find_permanent(strong.uid)[1]); self.assertIn(uid,game.player(AI).graveyard); self.assertTrue(any(event["action"]=="ai_balance_lands" for event in game.history))
 
+    def test_ai_completes_word_change_choice(self):
+        game=solo(order=(HUMAN,AI)); game.player(HUMAN).kept=game.player(AI).kept=True; game.player(AI).hand=[]; target=self.add(game,HUMAN,"lea:118")
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:63"; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        game.stack=[spell_type(AI,uid,"lea:63",f"{HUMAN}:{target.uid}",decision_pending=True,choice_owner=AI)]; game.active_index=0; game.phase="precombat_main"; game.priority_user=AI
+        advance_solo(game); self.assertTrue(target.land_word_changes); self.assertTrue(any(event["action"]=="ai_word_change" for event in game.history))
+
 if __name__ == "__main__":
     unittest.main()
