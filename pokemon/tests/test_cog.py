@@ -403,6 +403,15 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         Pokemon.consume_ball(conf,"poke_ball");Pokemon.consume_ball(conf,"great_ball");Pokemon.consume_ball(conf,"ultra_ball")
         self.assertEqual((conf["balls"],conf["items"]["great_ball"],conf["items"]["ultra_ball"]),(9,2,0))
 
+    async def test_battle_potion_consumes_inventory_and_wild_turn(self):
+        current=battle();maximum=current.max_hp(current.player);current.player_hp=max(1,maximum-8);current.party_hp[current.player.instance_id]=current.player_hp
+        conf={"collection":[current.player.raw()],"party":[current.player.instance_id],"items":{"potion":1,"revive":0}};section=StoredSection(conf)
+        cog=Pokemon.__new__(Pokemon);cog.battles={1:current};cog.locks={};cog.config=SimpleNamespace(user=lambda user:section);cog.save_battle=AsyncMock();cog.clear_guild=AsyncMock();cog.rendered_battle=AsyncMock(return_value=(discord.Embed(),[]))
+        interaction=SimpleNamespace(user=SimpleNamespace(id=current.user_id),response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock()))
+        previous_turn=current.turn;await cog.use_battle_item(interaction,1,"potion",0)
+        self.assertEqual(section.value["items"]["potion"],0);self.assertEqual(current.turn,previous_turn+1);self.assertIn("Used a Potion",current.last_action)
+        cog.save_battle.assert_awaited_once();interaction.response.edit_message.assert_awaited_once()
+
     async def test_potion_and_revive_consume_inventory_atomically(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
         pokemon=OwnedPokemon.create("medicine",7,10,seed=4)
@@ -640,11 +649,12 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         second=OwnedPokemon.create("backup",7,5,seed=2);current.initialize_party([current.player,second]);current.player_hp=0;current.party_hp[current.player.instance_id]=0
         forced=BattleView(cog,1);controls={item.label:item for item in forced.children}
         self.assertTrue(controls["Fight"].disabled);self.assertFalse(controls["Pokémon"].disabled)
-        fight=FightView(cog,1);party=PartyView(cog,1);bag=BagView(cog,1)
+        fight=FightView(cog,1);party=PartyView(cog,1);bag=BagView(cog,1,{"balls":10,"great_ball":3,"ultra_ball":0,"potion":5,"revive":2})
         self.assertTrue(any("PP" in item.label for item in fight.children))
         self.assertTrue(any(item.label=="Back" for item in fight.children))
         self.assertTrue(any(item.label=="Back" for item in party.children))
-        self.assertEqual([item.label for item in bag.children],["Poké Ball","Great Ball","Ultra Ball","Back"])
+        self.assertEqual([item.label for item in bag.children],["Poké Ball x10","Great Ball x3","Ultra Ball x0","Potion x5","Revive x2","Back"])
+        self.assertTrue(next(item for item in bag.children if item.label=="Ultra Ball x0").disabled)
         allowed = SimpleNamespace(
             user=SimpleNamespace(id=current.user_id),
             response=SimpleNamespace(send_message=AsyncMock()),

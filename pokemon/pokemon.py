@@ -15,7 +15,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MoveLearnView,PartyPlacementView,PartyView,StarterView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -99,7 +99,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.32.4";__author__="SickProdigy"
+    __version__="0.33.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -112,8 +112,8 @@ class Pokemon(commands.Cog):
             if raw.get("battle"):
                 battle=Battle.from_raw(raw["battle"]);self.battles[battle.encounter_id]=battle
                 if battle.state=="active":
-                    for view in (BattleView, FightView, PartyView, BagView):
-                        self.bot.add_view(view(self,battle.encounter_id),message_id=battle.message_id)
+                    for view in (BattleView,FightView,PartyView,BagView):self.bot.add_view(view(self,battle.encounter_id),message_id=battle.message_id)
+                    for item_key in ("potion","revive"):self.bot.add_view(MedicineView(self,battle.encounter_id,item_key),message_id=battle.message_id)
             elif raw.get("state")=="open":self.bot.add_view(EncounterView(self,int(key)),message_id=raw.get("message_id"))
     def cog_unload(self):
         self.cleanup_loop.cancel();self.bot.loop.create_task(self.renderer.close())
@@ -490,6 +490,55 @@ class Pokemon(commands.Cog):
         if ball_key=="poke_ball":conf["balls"]=int(conf.get("balls",0))-1
         else:
             items=conf.setdefault("items",{});items[ball_key]=int(items.get(ball_key,0))-1
+
+    async def open_battle_bag(self,interaction,eid):
+        battle=self.battles.get(eid)
+        if not battle or battle.state!="active":
+            await interaction.response.send_message("This battle is unavailable.",ephemeral=True);return
+        conf=await self.config.user(interaction.user).all();items=conf.get("items",{})
+        inventory={"balls":int(conf.get("balls",0)),"great_ball":int(items.get("great_ball",0)),"ultra_ball":int(items.get("ultra_ball",0)),"potion":int(items.get("potion",0)),"revive":int(items.get("revive",0))}
+        await interaction.response.edit_message(view=BagView(self,eid,inventory))
+
+    async def open_battle_medicine(self,interaction,eid,item_key):
+        battle=self.battles.get(eid)
+        if not battle or battle.state!="active":await interaction.response.send_message("This battle is unavailable.",ephemeral=True);return
+        if battle.needs_switch:await interaction.response.send_message("Switch Pokemon first.",ephemeral=True);return
+        conf=await self.config.user(interaction.user).all()
+        if int(conf.get("items",{}).get(item_key,0))<1:await interaction.response.send_message(f"You have no {item_key.title()}s.",ephemeral=True);return
+        eligible=[]
+        for pokemon in battle.party[:6]:
+            hp=int(battle.party_hp.get(pokemon.instance_id,0));maximum=battle.max_hp(pokemon)
+            if (item_key=="potion" and 0<hp<maximum) or (item_key=="revive" and hp<=0):eligible.append(pokemon)
+        if not eligible:
+            message="No conscious Pokemon needs healing." if item_key=="potion" else "No Pokemon has fainted."
+            await interaction.response.send_message(message,ephemeral=True);return
+        await interaction.response.edit_message(view=MedicineView(self,eid,item_key))
+
+    async def use_battle_item(self,interaction,eid,item_key,index):
+        battle=self.battles.get(eid)
+        if not battle:await interaction.response.send_message("This battle is unavailable.",ephemeral=True);return
+        async with self.lock(("battle",eid)),self.lock(("user",battle.user_id)):
+            battle=self.battles.get(eid)
+            if not battle or battle.state!="active":await interaction.response.send_message("This encounter is over.",ephemeral=True);return
+            if battle.needs_switch:await interaction.response.send_message("Switch Pokemon first.",ephemeral=True);return
+            if item_key not in {"potion","revive"} or not 0<=index<len(battle.party):await interaction.response.send_message("That item choice is unavailable.",ephemeral=True);return
+            conf=await self.config.user(interaction.user).all();items=conf.setdefault("items",{})
+            if int(items.get(item_key,0))<1:await interaction.response.send_message(f"You have no {item_key.title()}s.",ephemeral=True);return
+            pokemon=battle.party[index];maximum=battle.max_hp(pokemon);current=int(battle.party_hp.get(pokemon.instance_id,0))
+            if item_key=="potion":
+                if current<=0 or current>=maximum:await interaction.response.send_message("That Pokemon cannot use a Potion now.",ephemeral=True);return
+                healed=min(20,maximum-current);battle.party_hp[pokemon.instance_id]=current+healed;line=f"Used a Potion on {SPECIES[pokemon.species_id].name}. Restored {healed} HP."
+            else:
+                if current>0:await interaction.response.send_message("That Pokemon has not fainted.",ephemeral=True);return
+                restored=max(1,maximum//2);battle.party_hp[pokemon.instance_id]=restored;battle.party_status[pokemon.instance_id]="";battle.party_status_turns[pokemon.instance_id]=0;line=f"Used a Revive on {SPECIES[pokemon.species_id].name}. Restored {restored} HP."
+            if pokemon.instance_id==battle.player.instance_id:
+                battle.player_hp=battle.party_hp[pokemon.instance_id];battle.player_status=battle.party_status.get(pokemon.instance_id,"");battle.player_status_turns=battle.party_status_turns.get(pokemon.instance_id,0)
+            items[item_key]=int(items.get(item_key,0))-1;battle._wild_response();battle.last_action=f"{line} {battle.last_action}";battle._record(f"item:{item_key}:{pokemon.instance_id}")
+            self.apply_battle_party(conf,battle);conf["items"]=items;await self.config.user(interaction.user).set(conf);await self.save_battle(battle)
+            done=battle.state!="active"
+            if done:await self.clear_guild(battle.guild_id,eid)
+            embed,files=await self.rendered_battle(battle)
+            await interaction.response.edit_message(embed=embed,attachments=files,view=None if done else BattleView(self,eid))
 
     async def throw_ball(self,i,eid,ball_key="poke_ball"):
         battle=self.battles.get(eid)
