@@ -297,6 +297,14 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game)
         self.assertEqual(game.stack[-1].uid,spell); self.assertEqual(game.stack[-1].x_value,2); self.assertEqual(game.stack[-1].target,str(HUMAN))
 
+    def test_ai_casts_drain_life_with_maximum_black_x(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True
+        game.player(AI).hand=[]; spell=self.add(game,AI,"lea:105","hand")
+        [self.add(game,AI,"swamp") for _ in range(4)]
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertEqual(game.stack[-1].uid,spell); self.assertEqual(game.stack[-1].x_value,2); self.assertEqual(game.stack[-1].target,str(HUMAN))
+
     def test_ai_uses_paid_pump_abilities_during_combat(self):
         game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True
         dragon=self.add(game,AI,"lea:174"); self.add(game,AI,"mountain"); self.add(game,AI,"mountain")

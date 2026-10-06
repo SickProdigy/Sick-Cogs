@@ -1064,6 +1064,32 @@ class AlphaXSpellTests(unittest.TestCase):
         hurricane.play(10,1,None,3); self.resolve(hurricane)
         self.assertIn(flyer.uid,hurricane.player(20).graveyard); self.assertIn(ground,hurricane.player(20).battlefield); self.assertEqual([hurricane.player(x).life for x in (10,20)],[17,17])
 
+    def test_drain_life_requires_black_mana_for_x(self):
+        game=ready(); spell=self.add(game,10,"lea:105"); lands=self.lands(game,10,["swamp","swamp","forest","forest"])
+        with self.assertRaisesRegex(GameError,"cannot pay"):
+            game.play(10,1,"20",2)
+        self.assertEqual(game.player(10).hand[0],spell); self.assertTrue(all(not land.tapped for land in lands))
+        third=self.add(game,10,"swamp","battlefield"); game.play(10,1,"20",2)
+        self.assertEqual(game.stack[-1].x_value,2); self.assertTrue(third.tapped)
+
+    def test_drain_life_gains_damage_dealt_with_player_cap(self):
+        game=ready(); self.add(game,10,"lea:105"); self.lands(game,10,["swamp"]*5)
+        game.player(10).life=10; game.player(20).life=1
+        game.play(10,1,"20",3); self.resolve(game)
+        self.assertEqual(game.player(10).life,11); self.assertEqual(game.player(20).life,-2)
+
+    def test_drain_life_uses_prevention_and_creature_toughness_cap(self):
+        game=ready(); spell=self.add(game,10,"lea:105"); bear=self.add(game,20,"bear","battlefield")
+        game.player(10).mana_pool={"B":6,"C":1}; game.player(10).life=10; bear.damage_prevention=3
+        game.play(10,1,"20:1",5); restored=Game.from_raw(game.to_raw()); self.resolve(restored)
+        self.assertEqual(restored.player(10).life,12); self.assertIn(bear.uid,restored.player(20).graveyard); self.assertIn(spell,restored.player(10).graveyard)
+
+    def test_drain_life_fizzle_gains_no_life(self):
+        game=ready(); self.add(game,10,"lea:105"); bear=self.add(game,20,"bear","battlefield"); self.lands(game,10,["swamp"]*3)
+        game.player(10).life=10; game.play(10,1,"20:1",1)
+        game.player(20).battlefield.remove(bear); game.player(20).graveyard.append(bear.uid)
+        self.resolve(game); self.assertEqual(game.player(10).life,10)
+
     def test_stream_of_life_targets_either_player(self):
         game=ready(); spell=self.add(game,10,"lea:217"); self.lands(game,10,["forest","mountain","mountain"])
         game.play(10,1,"20",2); self.resolve(game)

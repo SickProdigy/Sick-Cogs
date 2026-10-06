@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"healing_salve","mana_short","set_color","pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"healing_salve","mana_short","set_color","pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
@@ -35,7 +35,7 @@ def _target(game, user, card):
                 position,_=max(targets,key=lambda item:(game.card(item[1].uid).cost,sum(game.current_stats(item[1])) if game.is_creature(item[1]) else 0))
                 return f"{game.opponent(user)}:{position}"
         return None
-    if card.effect in ("damage","damage_any","damage_x_exile"):
+    if card.effect in ("damage","damage_any","damage_x_exile","drain_life_x"):
         return str(game.opponent(user))
     if card.effect in ("draw_target","draw_target_x","life_target_x"):
         return str(user)
@@ -227,6 +227,8 @@ def _play_one(game, user, difficulty):
             score = 12 + card.amount - card.self_damage
         elif card.effect=="damage_x_exile":
             score=12+(x_value or 0)
+        elif card.effect=="drain_life_x":
+            score=14+2*(x_value or 0)
         elif card.effect in ("draw","draw_target"):
             score = 10 + card.amount
         elif card.effect=="draw_target_x":

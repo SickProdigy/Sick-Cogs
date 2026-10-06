@@ -14,6 +14,7 @@ class Card:
     scryfall_id: str
     oracle_id: str
     mana_cost: str = ""
+    x_mana_color: str = ""
     colors: Tuple[str, ...] = ()
     produces: Tuple[str, ...] = ()
     rarity: str = "common"
@@ -346,6 +347,7 @@ ALPHA_SPELLS = {
     "lea:82": {"effect":"set_color", "color_change":"U"},
     "lea:83": {"effect":"extra_turn"},
     "lea:115": {"effect":"discard_random_x"},
+    "lea:105": {"effect":"drain_life_x", "x_mana_color":"B"},
     "lea:84": {"effect":"timetwister"},
     "lea:183": {"effect":"wheel_seven"},
     "lea:101": {"effect":"set_color", "color_change":"B"},
@@ -452,6 +454,7 @@ for reference in PLAYABLE_ALPHA:
         scryfall_id=reference.scryfall_id,
         oracle_id=reference.oracle_id,
         mana_cost=reference.mana_cost,
+        x_mana_color=ALPHA_SPELLS.get(reference.key,{}).get("x_mana_color",""),
         colors=reference.colors,
         produces=ALPHA_ARTIFACTS.get(reference.key, {}).get("produces", ALPHA_MANA_CREATURES.get(reference.key, reference.color_identity if reference.support_family == "land" else ())),
         rarity=reference.rarity,

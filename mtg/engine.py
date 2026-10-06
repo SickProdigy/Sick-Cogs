@@ -293,7 +293,9 @@ class Game:
         generic=0; colored=[]
         for symbol in symbols:
             if symbol.isdigit(): generic+=int(symbol)
-            elif symbol=="X": generic+=x_value
+            elif symbol=="X":
+                if card.x_mana_color: colored.extend([card.x_mana_color]*x_value)
+                else: generic+=x_value
             elif symbol in {"W","U","B","R","G"}: colored.append(symbol)
             else: raise GameError(f"{card.name} uses an unsupported mana symbol: {{{symbol}}}.")
         return generic,colored
@@ -651,7 +653,7 @@ class Game:
             try: target_user=int(target) if target is not None else self.opponent(user)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
             self.player(target_user); return str(target_user)
-        if c.effect in ("damage_any","damage_x_exile"):
+        if c.effect in ("damage_any","damage_x_exile","drain_life_x"):
             if target and ":" in target:
                 target_user,permanent=self._target_creature(target,"Target must be a player ID or USER_ID:POSITION.")
                 return f"{target_user}:{permanent.uid}"
@@ -1169,15 +1171,18 @@ class Game:
             for permanent in target_player.battlefield:
                 if self.card(permanent.uid).land: self._tap_permanent(target_player.user_id,permanent,pending_triggers=pending)
             target_player.mana_pool.clear(); p.graveyard.append(s.uid); self.stack.extend(pending)
-        elif c.effect in ("damage","damage_any","damage_x_exile"):
-            amount=s.x_value if c.effect=="damage_x_exile" else c.amount
+        elif c.effect in ("damage","damage_any","damage_x_exile","drain_life_x"):
+            amount=s.x_value if c.effect in ("damage_x_exile","drain_life_x") else c.amount
+            life_cap=dealt=0
             if ":" in (s.target or ""):
                 user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
                 if target is None:
                     p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
-                self._damage_permanent(target,amount)
+                life_cap=max(0,self.current_stats(target)[1]); dealt=self._damage_permanent(target,amount,c,self.spell_colors(s))
                 if c.effect=="damage_x_exile": target.exile_on_death=True; target.cant_regenerate=True
-            else: self._damage_player(int(s.target or self.opponent(s.owner)),amount)
+            else:
+                target_player=self.player(int(s.target or self.opponent(s.owner))); life_cap=max(0,target_player.life); dealt=self._damage_player(target_player.user_id,amount)
+            if c.effect=="drain_life_x": p.life+=min(dealt,life_cap)
             self._damage_player(s.owner,c.self_damage); p.graveyard.append(s.uid)
         elif c.effect in ("regenerate_target","grant_keyword","destroy_wall"):
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
