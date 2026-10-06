@@ -297,6 +297,8 @@ def _play_one(game, user, difficulty):
         elif card.effect=="sacrifice_mana":
             sacrifice_position=int(target.split(":",1)[1]); sacrificed=player.battlefield[sacrifice_position-1]
             score=4+game.card(sacrificed.uid).cost-sum(game.current_stats(sacrificed))
+        elif card.effect=="search_library":
+            score=13 if player.library else 0
         elif card.effect in ("draw","draw_target"):
             score = 10 + card.amount
         elif card.effect=="draw_target_x":
@@ -679,7 +681,12 @@ def advance_solo(game: Game):
         if game.priority_user != user:
             return changed
         if game.stack and game.stack[-1].decision_pending:
-            trigger=game.stack[-1]; source=game.find_permanent(trigger.source_uid)[1]
+            trigger=game.stack[-1]
+            if not trigger.ability_effect and game.card(trigger.uid).effect=="search_library":
+                choices=game.library_search(user)
+                position,_=max(choices,key=lambda item:(item[1].cost+item[1].power+item[1].toughness+2*len(item[1].keywords),-item[0]))
+                game.choose_library(user,position); game.record(user,"ai_search_library"); changed=True; continue
+            source=game.find_permanent(trigger.source_uid)[1]
             if trigger.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"):
                 choices=game.trigger_sacrifice_choices(trigger)
                 if trigger.ability_effect=="upkeep_sacrifice": position,_=min(choices,key=lambda item:(game.card(item[1].uid).cost+sum(game.current_stats(item[1])),item[0]))

@@ -861,5 +861,14 @@ class SoloAITests(unittest.TestCase):
         artifact_game=solo(); ring=self.add(artifact_game,HUMAN,"lea:269")
         self.assertEqual(_target(artifact_game,AI,CARDS["lea:81"]),f"{HUMAN}:1")
 
+    def test_ai_completes_a_pending_demonic_tutor_search(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=game.player(AI).kept=True; game.player(AI).library=[]
+        mountain=self.add(game,AI,"mountain","hand"); game.player(AI).hand.remove(mountain); game.player(AI).library.append(mountain)
+        giant=self.add(game,AI,"giant","hand"); game.player(AI).hand.remove(giant); game.player(AI).library.append(giant)
+        tutor=self.add(game,AI,"lea:104","hand"); game.player(AI).hand.remove(tutor)
+        game.stack=[__import__("mtg.engine",fromlist=["Spell"]).Spell(AI,tutor,"lea:104",decision_pending=True)]; game.priority_user=AI; game.phase="precombat_main"
+        advance_solo(game)
+        self.assertNotIn(giant,game.player(AI).library); self.assertTrue(any(event["action"]=="ai_search_library" for event in game.history))
+
 if __name__ == "__main__":
     unittest.main()

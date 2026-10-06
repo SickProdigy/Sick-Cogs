@@ -549,6 +549,21 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.player(10).battlefield=[permanent_type(uid,"giant",owner=20,sick=True)]
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("owned by Player 20",rendered)
 
+    async def test_demonic_tutor_pending_state_is_public_but_library_choices_are_private(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        tutor=game.next_uid; game.next_uid+=1; game.cards[tutor]="lea:104"; game.stack=[spell_type(10,tutor,"lea:104",decision_pending=True)]; game.priority_user=10; cog.games[1]=game
+        rendered=str(cog.game_embed(game).to_dict()); private_names={game.card(uid).name for uid in game.player(10).library}
+        self.assertIn("searching their library",rendered); self.assertTrue(all(name not in rendered for name in private_names))
+        view=GameView(cog,1); search=next(item for item in view.children if item.custom_id.endswith(":search")); pay=next(item for item in view.children if item.custom_id.endswith(":pay"))
+        self.assertFalse(search.disabled); self.assertTrue(pay.disabled)
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock()))
+        await cog.send_library_search(interaction,1,0)
+        sent=interaction.followup.send.await_args; self.assertTrue(sent.kwargs["ephemeral"]); private_view=sent.kwargs["view"]; self.assertGreater(private_view.pages,1)
+        select=next(item for item in private_view.children if hasattr(item,"options")); self.assertLessEqual(len(select.options),25); self.assertTrue(any(name in sent.args[0] for name in private_names))
+        intruder=SimpleNamespace(user=SimpleNamespace(id=20),response=SimpleNamespace(send_message=AsyncMock()))
+        self.assertFalse(await private_view.interaction_check(intruder)); intruder.response.send_message.assert_awaited_once_with("This private library search belongs to another player.",ephemeral=True)
+
     async def test_public_embed_shows_mass_redraw_spell_on_stack(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell

@@ -3404,6 +3404,29 @@ class AlphaSacrificeTests(unittest.TestCase):
         self.resolve_top(token_game); self.assertEqual(token_game.player(10).mana_pool,{})
 
 
+class AlphaLibrarySearchTests(unittest.TestCase):
+    def test_demonic_tutor_chooses_privately_at_resolution_and_shuffles(self):
+        game=ready(); player=game.player(10); player.library=[]
+        mountain=game.next_uid; game.next_uid+=1; game.cards[mountain]="mountain"
+        giant=game.next_uid; game.next_uid+=1; game.cards[giant]="giant"; player.library=[mountain,giant]
+        tutor=game.next_uid; game.next_uid+=1; game.cards[tutor]="lea:104"
+        game.stack=[Spell(10,tutor,"lea:104")]; game.priority_user=10
+        game.pass_priority(10); game.pass_priority(20)
+        self.assertTrue(game.stack[-1].decision_pending); self.assertEqual(game.priority_user,10)
+        restored=Game.from_raw(game.to_raw()); position=next(position for position,card in restored.library_search(10) if card.key=="giant")
+        with patch("mtg.engine.random.SystemRandom.shuffle") as shuffle:
+            restored.choose_library(10,position); shuffle.assert_called_once_with(restored.player(10).library)
+        self.assertIn(giant,restored.player(10).hand); self.assertIn(tutor,restored.player(10).graveyard); self.assertFalse(restored.stack)
+        self.assertNotIn("Giant",restored.log[-1])
+
+    def test_demonic_tutor_rejects_foreign_or_invalid_choices_and_handles_empty_library(self):
+        game=ready(); tutor=game.next_uid; game.next_uid+=1; game.cards[tutor]="lea:104"
+        game.stack=[Spell(10,tutor,"lea:104",decision_pending=True)]; game.priority_user=10
+        with self.assertRaises(GameError): game.choose_library(20,1)
+        with self.assertRaises(GameError): game.choose_library(10,len(game.player(10).library)+1)
+        empty=ready(); empty.player(10).library=[]; tutor=empty.next_uid; empty.next_uid+=1; empty.cards[tutor]="lea:104"
+        empty._resolve(Spell(10,tutor,"lea:104")); self.assertIn(tutor,empty.player(10).graveyard)
+
 class AlphaControlAuraTests(unittest.TestCase):
     def add(self,game,user,key,**kwargs):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

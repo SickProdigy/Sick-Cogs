@@ -12,7 +12,7 @@ from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_battlefield,
 from .cards import BASE_CARDS, CARDS
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
 from .engine import Game, GameError
-from .views import CatalogDetailView, CatalogView, ChallengeView, GameView, HandPaginationView
+from .views import CatalogDetailView, CatalogView, ChallengeView, GameView, HandPaginationView, LibrarySearchView
 
 log=logging.getLogger("red.sick-cogs.MTG")
 CONFIG_IDENTIFIER=813604927115
@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.86.0"
+    __version__="0.87.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -181,7 +181,8 @@ class MTG(commands.Cog):
                 if item.ability_effect=="prevent_source_damage" and item.target:
                     source_uid=int(item.target.split(":")[1]); label+=f" (source: {g.card(source_uid).name if source_uid in g.cards else source_uid})"
                 if item.decision_pending:
-                    label+=(f" (chooser must {g.trigger_accept_label(item)})" if item.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") else f" (controller may {g.trigger_accept_label(item)} or Decline)")
+                    if not item.ability_effect and g.card(item.uid).effect=="search_library": label+=" (controller is searching their library)"
+                    else: label+=(f" (chooser must {g.trigger_accept_label(item)})" if item.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") else f" (controller may {g.trigger_accept_label(item)} or Decline)")
                 stack_lines.append(f"S:{position}. {label}")
             e.add_field(name="Stack · spells targetable with S:POSITION",value="\n".join(stack_lines),inline=False)
         if g.end_combat_destroys:
@@ -252,6 +253,30 @@ class MTG(commands.Cog):
             log.warning("Could not render private hand",exc_info=True)
             if editing: await interaction.edit_original_response(content=text,attachments=[],view=view)
             else: await interaction.followup.send(text,view=view,ephemeral=True)
+    async def send_library_search(self,interaction,game_id,page,editing=False):
+        game=self.games.get(game_id); user=interaction.user.id
+        pending=bool(game and user in game.order and game.stack and game.stack[-1].decision_pending and game.stack[-1].owner==user and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
+        if not pending:
+            content="This private library search is unavailable."
+            if editing: await interaction.edit_original_response(content=content,view=None)
+            else: await interaction.followup.send(content,ephemeral=True)
+            return
+        entries=game.library_search(user); pages=max(1,math.ceil(len(entries)/LibrarySearchView.page_size)); page=max(0,min(page,pages-1)); start=page*LibrarySearchView.page_size; visible=entries[start:start+LibrarySearchView.page_size]
+        text="Demonic Tutor - private library search\n"+"\n".join(f"**{position}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for position,card in visible)
+        view=LibrarySearchView(self,game_id,user,page,pages,game)
+        if editing: await interaction.edit_original_response(content=text,view=view)
+        else: await interaction.followup.send(text,view=view,ephemeral=True)
+    async def choose_library_interaction(self,interaction,game_id,position):
+        game=self.games.get(game_id)
+        if not game:
+            await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
+        async with self.lock(game.game_id):
+            try:
+                game.choose_library(interaction.user.id,position); game.record(interaction.user.id,"search_library"); advance_solo(game); await self.save(game)
+            except (GameError,IndexError,ValueError) as error:
+                await interaction.response.send_message(str(error),ephemeral=True); return
+        await interaction.response.edit_message(content="Library search completed; the chosen card was added to your hand.",view=None)
+        await self.refresh_message(game)
     async def act(self,i,game_id,action,label):
         game=self.games.get(game_id)
         if not game:

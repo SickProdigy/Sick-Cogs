@@ -49,10 +49,12 @@ class GameView(discord.ui.View):
             if game and action in ("keep","mulligan"): item.disabled=game.phase!="opening"
             if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
-                pending=bool(game.stack and game.stack[-1].decision_pending)
+                pending=bool(game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect)
                 mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"))
                 item.disabled=not pending or mandatory
                 if pending and action=="pay": item.label=game.trigger_accept_label(game.stack[-1])
+            if game and action=="search":
+                item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
             if game and action=="concede": item.disabled=game.finished
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") and game.trigger_sacrifice_choices(game.stack[-1]):
             self.add_item(SacrificeSelect(self.cog,self.game_id,game,game.stack[-1]))
@@ -67,6 +69,10 @@ class GameView(discord.ui.View):
     async def hand(self,i,b):
         await i.response.defer(ephemeral=True,thinking=True)
         await self.cog.send_hand(i,self.game_id,0,editing=False)
+    @discord.ui.button(label="Search library",style=discord.ButtonStyle.secondary,custom_id="search")
+    async def search(self,i,b):
+        await i.response.defer(ephemeral=True,thinking=True)
+        await self.cog.send_library_search(i,self.game_id,0,editing=False)
     @discord.ui.button(label="Keep hand",style=discord.ButtonStyle.success,custom_id="keep")
     async def keep(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,True),"keep")
     @discord.ui.button(label="Mulligan",style=discord.ButtonStyle.secondary,custom_id="mulligan")
@@ -98,6 +104,30 @@ class HandPaginationView(discord.ui.View):
         await i.response.defer()
         await self.cog.send_hand(i,self.game_id,self.page+1,editing=True)
 
+
+class LibrarySelect(discord.ui.Select):
+    def __init__(self,browser,game):
+        self.browser=browser; start=browser.page*browser.page_size
+        entries=game.library_search(browser.user_id)[start:start+browser.page_size]
+        options=[discord.SelectOption(label=f"{position}. {card.name}"[:100],description=f"{card.kind} - {card.mana_cost or 'no mana cost'}"[:100],value=str(position)) for position,card in entries]
+        super().__init__(placeholder="Choose a card for Demonic Tutor",min_values=1,max_values=1,options=options,row=0)
+    async def callback(self,interaction):
+        await self.browser.cog.choose_library_interaction(interaction,self.browser.game_id,int(self.values[0]))
+
+class LibrarySearchView(discord.ui.View):
+    page_size=25
+    def __init__(self,cog,game_id,user_id,page,pages,game):
+        super().__init__(timeout=300); self.cog,self.game_id,self.user_id,self.page,self.pages=cog,game_id,user_id,page,pages
+        self.add_item(LibrarySelect(self,game)); self.previous.disabled=page<=0; self.next.disabled=page>=pages-1
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id: return True
+        await interaction.response.send_message("This private library search belongs to another player.",ephemeral=True); return False
+    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary,row=1)
+    async def previous(self,interaction,button):
+        await interaction.response.defer(); await self.cog.send_library_search(interaction,self.game_id,self.page-1,editing=True)
+    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=1)
+    async def next(self,interaction,button):
+        await interaction.response.defer(); await self.cog.send_library_search(interaction,self.game_id,self.page+1,editing=True)
 
 class CatalogSelect(discord.ui.Select):
     def __init__(self, browser):

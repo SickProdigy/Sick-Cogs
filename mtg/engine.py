@@ -177,6 +177,7 @@ class Game:
         return tuple(mapping[kind] for kind in ("plains","island","swamp","mountain","forest") if kind in types) if types else card.produces
     def has_current_type(self,permanent,card_type): return self.is_creature(permanent) if card_type=="Creature" else self.card(permanent.uid).has_type(card_type)
     def hand(self,user): return [self.card(x) for x in self.player(user).hand]
+    def library_search(self,user): return [(position,self.card(uid)) for position,uid in enumerate(reversed(self.player(user).library),1)]
     def characteristic_stats(self,user,card,entering=False,permanent_uid=None):
         player=self.player(user)
         if card.characteristic_pt=="swamps":
@@ -1007,6 +1008,8 @@ class Game:
                     return
                 if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","aura_upkeep_untap","aura_upkeep_life","upkeep_cost","graveyard_return","upkeep_sacrifice"):
                     s.decision_pending=True; self.priority_user=s.choice_owner if s.choice_owner is not None else s.owner; return
+                if not s.ability_effect and self.card(s.uid).effect=="search_library" and self.player(s.owner).library:
+                    s.decision_pending=True; self.priority_user=s.owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
                 if not self.finished: self.priority_user=self.active_user
@@ -1021,6 +1024,17 @@ class Game:
                     self._resolve_end_step_sacrifices(); self.priority_user=self.active_user
                 else:
                     self._empty_mana(); self._advance()
+
+    def choose_library(self,user,position):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].owner!=user or self.stack[-1].ability_effect or self.card(self.stack[-1].uid).effect!="search_library":
+            raise GameError("You do not have a library search to complete.")
+        player=self.player(user); choices=list(reversed(player.library))
+        if not 1<=position<=len(choices): raise GameError("Choose a valid private library position.")
+        chosen=choices[position-1]; spell=self.stack.pop(); player.library.remove(chosen); player.hand.append(chosen); random.SystemRandom().shuffle(player.library); player.graveyard.append(spell.uid)
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0; self.priority_user=self.active_user
+        self.log.append(f"{user} searched their library with {self.card(spell.uid).name}, put a card into their hand, then shuffled.")
 
     def trigger_sacrifice_choices(self,trigger):
         if trigger.ability_effect=="upkeep_sacrifice":
@@ -1666,6 +1680,8 @@ class Game:
         elif c.effect=="sacrifice_mana":
             if s.choice_value: p.mana_pool[c.sacrifice_mana_color]=p.mana_pool.get(c.sacrifice_mana_color,0)+s.choice_value
             p.graveyard.append(s.uid)
+        elif c.effect=="search_library":
+            p.graveyard.append(s.uid)
         elif c.effect=="destroy_all_enchantments":
             for controller in self.players.values():
                 for permanent in list(controller.battlefield):
@@ -1826,7 +1842,9 @@ class Game:
     def _finish(self,winner,reason): self.winner=winner; self.finished_reason=reason; self.phase="finished"; self.priority_user=None
     def _priority(self,user):
         if self.finished: raise GameError("Game is over.")
-        if self.stack and self.stack[-1].decision_pending: raise GameError("The pending trigger controller must pay or decline first.")
+        if self.stack and self.stack[-1].decision_pending:
+            message="The pending trigger controller must pay or decline first." if self.stack[-1].ability_effect else "The pending private library search must be completed first."
+            raise GameError(message)
         if self.priority_user!=user: raise GameError("You do not have priority.")
     def _active(self,user):
         if self.finished: raise GameError("Game is over.")

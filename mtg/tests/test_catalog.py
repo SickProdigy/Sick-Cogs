@@ -14,12 +14,12 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),305)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),305)
+        self.assertEqual(len(CARDS),306)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),306)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
-        self.assertEqual({card.effect for card in CARDS.values()},{None,"damage","damage_any","pump","pump_blocking","berserk","channel","life","draw","draw_target","destroy_land","destroy_all_lands","destroy_land_type","destroy_permanent","destroy_creature","destroy_all_creatures","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","earthquake_x","hurricane_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","add_mana","destroy_wall","destroy_all_enchantments","set_color","prevent_combat_damage","healing_salve","mana_short","extra_turn","discard_random_x","timetwister","wheel_seven","drain_life_x","counter_mana_value_x","sacrifice_mana"})
+        self.assertEqual({card.effect for card in CARDS.values()},{None,"damage","damage_any","pump","pump_blocking","berserk","channel","life","draw","draw_target","destroy_land","destroy_all_lands","destroy_land_type","destroy_permanent","destroy_creature","destroy_all_creatures","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","earthquake_x","hurricane_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","add_mana","destroy_wall","destroy_all_enchantments","set_color","prevent_combat_damage","healing_salve","mana_short","extra_turn","discard_random_x","timetwister","wheel_seven","drain_life_x","counter_mana_value_x","sacrifice_mana","search_library"})
         self.assertTrue(all(card.kind in {"Land","Creature","Instant","Sorcery","Artifact","Enchantment"} for card in CARDS.values()))
         self.assertTrue(all(card.power>=0 and card.toughness>=0 for card in CARDS.values()))
 
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),245)
-        self.assertEqual(len(REFERENCE_ALPHA),50)
+        self.assertEqual(len(PLAYABLE_ALPHA),246)
+        self.assertEqual(len(REFERENCE_ALPHA),49)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -122,6 +122,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(CARDS["lea:83"].effect,"extra_turn")
         self.assertEqual(CARDS["lea:115"].effect,"discard_random_x")
         self.assertTrue(CARDS["lea:124"].additional_sacrifice_creature); self.assertEqual((CARDS["lea:124"].effect,CARDS["lea:124"].sacrifice_mana_color),("sacrifice_mana","B"))
+        self.assertEqual(CARDS["lea:104"].effect,"search_library")
         self.assertEqual(ALPHA_DAMAGE_TRIGGERS,{"lea:112":{"opponent_damage_discard_random":True}})
         self.assertEqual(set(ALPHA_COMBAT_TRIGGERS),{"lea:189","lea:218"})
         self.assertTrue(CARDS["lea:189"].combat_destroy_nonwall and CARDS["lea:218"].combat_destroy_nonwall)
@@ -205,7 +206,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("305 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("306 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))
