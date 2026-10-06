@@ -166,48 +166,67 @@ class BattleRenderer:
     def _gender_mark(draw,origin,gender,fill=RETRO[0]):
         x,y=origin
         if gender=="male":
-            draw.ellipse((x,y+3,x+14,y+17),outline=fill,width=3);draw.line((x+12,y+5,x+24,y-7),fill=fill,width=3)
-            draw.line((x+17,y-7,x+24,y-7,x+24,y),fill=fill,width=3)
+            draw.ellipse((x,y+4,x+9,y+13),outline=fill,width=2);draw.line((x+8,y+5,x+16,y-3),fill=fill,width=2)
+            draw.line((x+12,y-3,x+16,y-3,x+16,y+1),fill=fill,width=2)
         elif gender=="female":
-            draw.ellipse((x,y,x+14,y+14),outline=fill,width=3);draw.line((x+7,y+14,x+7,y+27),fill=fill,width=3);draw.line((x+1,y+21,x+13,y+21),fill=fill,width=3)
-        else:draw.line((x,y+10,x+18,y+10),fill=fill,width=3)
+            draw.ellipse((x,y+2,x+9,y+11),outline=fill,width=2);draw.line((x+4,y+11,x+4,y+20),fill=fill,width=2);draw.line((x,y+16,x+9,y+16),fill=fill,width=2)
+        else:draw.line((x,y+9,x+12,y+9),fill=fill,width=2)
+
+    @staticmethod
+    def _pokeball(draw,center,radius):
+        cx,cy=center;box=(cx-radius,cy-radius,cx+radius,cy+radius)
+        draw.ellipse(box,fill=RETRO[7],outline=RETRO[0],width=5)
+        draw.pieslice(box,180,360,fill=(205,63,58),outline=RETRO[0],width=4)
+        draw.rectangle((cx-radius+3,cy-5,cx+radius-3,cy+6),fill=RETRO[0])
+        button=max(7,radius//3)
+        draw.ellipse((cx-button,cy-button,cx+button,cy+button),fill=RETRO[7],outline=RETRO[0],width=4)
+        inner=max(3,button//2)
+        draw.ellipse((cx-inner,cy-inner,cx+inner,cy+inner),fill=RETRO[5],outline=RETRO[1],width=2)
 
     def _starter_sync(self,pokemon,data,trainer_name):
-        canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
-        # Original retro laboratory: paneled walls, equipment, tiled floor, and center table.
-        for y in range(235):
-            ratio=y/234;color=tuple(round(a+(b-a)*ratio) for a,b in zip((177,211,218),(225,232,211)))
-            draw.line((0,y,800,y),fill=color)
-        draw.rectangle((0,205,800,235),fill=(83,112,103),outline=RETRO[0],width=4)
-        for left in (35,565):
-            draw.rectangle((left,35,left+200,165),fill=(111,174,197),outline=RETRO[0],width=5)
-            draw.line((left+100,38,left+100,162),fill=RETRO[5],width=4);draw.line((left+3,100,left+197,100),fill=RETRO[5],width=4)
-        draw.rectangle((270,40,530,180),fill=(205,218,195),outline=RETRO[0],width=5)
-        for y in (75,115,155):draw.line((275,y,525,y),fill=RETRO[1],width=3)
-        for x,color in ((292,(205,63,58)),(330,(91,158,202)),(368,RETRO[2]),(406,(205,63,58)),(444,(91,158,202)),(482,RETRO[2])):
-            draw.rectangle((x,50,x+22,73),fill=color,outline=RETRO[0],width=2)
-        draw.rectangle((0,235,800,350),fill=(190,199,181))
-        for x in range(-100,901,100):draw.line((400,235,x,350),fill=(137,151,137),width=2)
-        for y in (270,310):draw.line((0,y,800,y),fill=(137,151,137),width=2)
-        draw.polygon(((260,270),(620,270),(680,350),(200,350)),fill=(139,166,158),outline=RETRO[0])
-        draw.line((270,285,610,285),fill=RETRO[5],width=5)
-        # A complete ball sits on the lab table beneath the emerging partner.
-        for end in ((385,165),(440,145),(495,165),(530,205),(350,205)):draw.line((440,235,*end),fill=RETRO[3],width=5)
-        ball=(385,240,495,350)
-        draw.ellipse(ball,fill=RETRO[7],outline=RETRO[0],width=6)
-        draw.pieslice(ball,180,360,fill=(205,63,58),outline=RETRO[0],width=5)
-        draw.rectangle((388,288,492,302),fill=RETRO[0])
-        draw.ellipse((421,272,459,310),fill=RETRO[7],outline=RETRO[0],width=6)
-        draw.ellipse((432,283,448,299),fill=RETRO[5],outline=RETRO[1],width=2)
+        canvas=Image.new("RGB",(800,450),(210,199,168));draw=ImageDraw.Draw(canvas)
+        # Original retro research lab inspired by the early games: stocked shelves and woodwork.
+        draw.rectangle((0,0,800,245),fill=(211,205,174))
+        for y in range(24,246,28):draw.line((0,y,800,y),fill=(160,144,111),width=3)
+        # Computer workstation on the left.
+        draw.rectangle((24,145,245,226),fill=(104,86,65),outline=RETRO[0],width=5)
+        draw.rectangle((42,35,222,145),fill=(76,79,70),outline=RETRO[0],width=5)
+        draw.rectangle((57,49,207,125),fill=(126,183,177),outline=RETRO[0],width=4)
+        draw.rectangle((76,162,207,186),fill=(191,181,143),outline=RETRO[0],width=3)
+        for x in range(85,199,18):draw.line((x,168,x+9,168),fill=RETRO[1],width=3)
+        draw.rectangle((48,193,221,215),fill=(70,61,50),outline=RETRO[0],width=3)
+        for x,color in ((61,(184,87,64)),(91,RETRO[2]),(121,(91,148,163)),(151,(184,87,64))):draw.ellipse((x,197,x+13,210),fill=color,outline=RETRO[0],width=2)
+        # Stocked research shelving on the right.
+        left,right=555,775
+        draw.rectangle((left,20,right,235),fill=(91,74,57),outline=RETRO[0],width=5)
+        for shelf_y in (65,112,159,206):draw.rectangle((left+7,shelf_y,right-7,shelf_y+8),fill=(64,52,43),outline=RETRO[0],width=2)
+        for row_y in (32,79,126,173):
+            for column,color in enumerate(((184,87,64),(91,148,163),(177,164,78),(125,105,83))):
+                x=left+14+column*47;draw.rectangle((x,row_y,x+29,row_y+29),fill=color,outline=RETRO[0],width=2)
+        # Simple framed research diagrams behind the presentation table.
+        for left in (285,405):
+            draw.rectangle((left,45,left+95,155),fill=(234,229,197),outline=RETRO[0],width=4)
+            draw.ellipse((left+24,64,left+71,111),outline=(91,148,163),width=4)
+            draw.line((left+18,130,left+77,130),fill=(112,83,58),width=4)
+        draw.rectangle((0,235,800,350),fill=(173,139,96))
+        for y in range(246,350,22):draw.line((0,y,800,y),fill=(112,83,58),width=3)
+        # A broad wooden presentation table holds the three original starter balls.
+        draw.polygon(((165,258),(635,258),(700,350),(100,350)),fill=(132,82,48),outline=RETRO[0])
+        draw.polygon(((180,245),(620,245),(650,280),(150,280)),fill=(189,125,67),outline=RETRO[0])
+        draw.line((180,258,620,258),fill=(231,170,94),width=5)
+        self._pokeball(draw,(255,297),34)
+        self._pokeball(draw,(545,297),34)
+        for end in ((355,175),(400,150),(445,175),(480,205),(320,205)):draw.line((400,235,*end),fill=RETRO[3],width=5)
+        self._pokeball(draw,(400,298),44)
         image=self._open(data,(250,220),trim=True,upscale=True)
-        canvas.paste(image,(440-image.width//2,255-image.height),image)
+        canvas.paste(image,(400-image.width//2,250-image.height),image)
         species=SPECIES[pokemon.species_id]
         trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"
         draw.rounded_rectangle((20,350,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
         draw.text((45,370),f"@{trainer} received {species.name}!",fill=RETRO[0],font=ImageFont.load_default(size=26))
         draw.text((45,407),f"Lv.{pokemon.level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
-        self._gender_mark(draw,(105,404),pokemon.gender,RETRO[1])
-        draw.text((145,407),"Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
+        self._gender_mark(draw,(105,406),pokemon.gender,RETRO[1])
+        draw.text((132,407),"Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):
