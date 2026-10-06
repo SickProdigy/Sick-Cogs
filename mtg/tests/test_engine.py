@@ -1725,6 +1725,18 @@ class AlphaAuraTests(unittest.TestCase):
         token_game=ready(); token=self.add(token_game,20,"token:wasp"); bond=self.add(token_game,10,"lea:55",attached_to=token.uid)
         token_game._destroy(token_game.player(20),token,allow_regeneration=False); token_game._sba(); self.assertEqual(token_game.stack[-1].choice_value,1)
 
+    def test_gloom_stacks_spell_and_current_color_enchantment_activation_taxes(self):
+        spell=ready(); self.add(spell,20,"lea:110"); self.add(spell,10,"bear"); held=self.add(spell,10,"lea:24","hand"); lands=[self.add(spell,10,"plains") for _ in range(3)]
+        with self.assertRaisesRegex(GameError,"cannot pay"): spell.play(10,1,"10:1")
+        self.assertIn(held,spell.player(10).hand); self.assertFalse(any(x.tapped for x in lands)); lands.append(self.add(spell,10,"plains")); spell.play(10,1,"10:1"); self.assertTrue(all(x.tapped for x in lands))
+
+        ability=ready(); self.add(ability,20,"lea:110"); self.add(ability,20,"lea:110"); bear=self.add(ability,10,"bear"); blessing=self.add(ability,10,"lea:7",attached_to=bear.uid); lands=[self.add(ability,10,"plains") for _ in range(6)]
+        with self.assertRaisesRegex(GameError,"cannot pay"): ability.activate_ability(10,2)
+        self.assertFalse(any(x.tapped for x in lands)); self.add(ability,10,"plains"); ability.activate_ability(10,2); self.assertTrue(all(x.tapped for x in ability.player(10).battlefield[2:]))
+
+        changed=ready(); self.add(changed,20,"lea:110"); bear=self.add(changed,10,"bear"); blessing=self.add(changed,10,"lea:7",attached_to=bear.uid); blessing.color_override="U"; land=self.add(changed,10,"plains")
+        changed.activate_ability(10,2); self.assertTrue(land.tapped)
+
 
 
 class AlphaProtectionTests(unittest.TestCase):

@@ -512,8 +512,13 @@ class Game:
             for symbol,count in output.items(): player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+count
         return output
 
-    def _mana_payment(self,player,card,x_value=0,mana_cost=None,excluded_uids=()):
+    def _mana_payment(self,player,card,x_value=0,mana_cost=None,excluded_uids=(),activation_colors=(),activation_is_enchantment=False):
         generic,colored=self._mana_requirements(card,x_value,mana_cost)
+        for battlefield in self.players.values():
+            for source in battlefield.battlefield:
+                tax=self.card(source.uid)
+                if mana_cost is None and "W" in getattr(card,"colors",()): generic+=tax.tax_white_spells
+                elif mana_cost is not None and activation_is_enchantment and "W" in activation_colors: generic+=tax.tax_white_enchantment_abilities
         white_as_red=any(self.card(source.uid).white_as_red for source in player.battlefield)
         order=("W","U","B","R","G"); initial=tuple(colored.count(symbol) for symbol in order)+(generic,)
         items=[]
@@ -646,7 +651,7 @@ class Game:
             if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate","add_power_counters") and self._protected_from(protected,card,self.current_colors(permanent)): return False
         except GameError: return False
         excluded=(permanent.uid,) if activation_tap else ()
-        return self._mana_payment(player,card,x_value=x_value,mana_cost=activation_cost,excluded_uids=excluded) is not None
+        return self._mana_payment(player,card,x_value=x_value,mana_cost=activation_cost,excluded_uids=excluded,activation_colors=self.current_colors(permanent),activation_is_enchantment=card.has_type("Enchantment")) is not None
 
     def activate_ability(self,user,position,target=None,x_value=None,choice_value=None):
         self._priority(user); player=self.player(user)
@@ -670,7 +675,7 @@ class Game:
         protected=self._stable_target_permanent(stable_target)
         if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate","add_power_counters") and self._protected_from(protected,card,self.current_colors(permanent)): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
         excluded=(permanent.uid,) if activation_tap else ()
-        payment=self._mana_payment(player,card,x_value=x_value,mana_cost=activation_cost,excluded_uids=excluded)
+        payment=self._mana_payment(player,card,x_value=x_value,mana_cost=activation_cost,excluded_uids=excluded,activation_colors=self.current_colors(permanent),activation_is_enchantment=card.has_type("Enchantment"))
         if payment is None: raise GameError(f"You cannot pay {activation_cost or 'that cost'} for {card.name}.")
         sources,remaining,choices=payment; pending_triggers=[]
         for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending_triggers)

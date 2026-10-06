@@ -197,6 +197,11 @@ def _play_one(game, user, difficulty):
             score = 5
         elif card.global_power or card.global_toughness:
             score=_global_enchantment_score(game,user,card)
+        elif card.tax_white_spells:
+            own=sum(game.card(x.uid).has_type("Enchantment") and "W" in game.current_colors(x) and bool(game.card(x.uid).activation_cost or game.card(x.uid).activation_effect) for x in player.battlefield)
+            enemy=sum(game.card(x.uid).has_type("Enchantment") and "W" in game.current_colors(x) and bool(game.card(x.uid).activation_cost or game.card(x.uid).activation_effect) for x in game.player(game.opponent(user)).battlefield)
+            if own>enemy: continue
+            score=4+2*(enemy-own)
         elif card.upkeep_turn_start_untapped_damage:
             own=sum(game.card(x.uid).land and not x.tapped for x in player.battlefield)
             enemy=sum(game.card(x.uid).land and not x.tapped for x in game.player(game.opponent(user)).battlefield)

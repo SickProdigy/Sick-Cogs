@@ -115,6 +115,8 @@ class Card:
     global_land_to_type: str = ""
     upkeep_turn_start_untapped_damage: bool = False
     end_step_sacrifice_without_creatures: bool = False
+    tax_white_spells: int = 0
+    tax_white_enchantment_abilities: int = 0
     upkeep_opponent_hand_damage: bool = False
     draw_step_extra: int = 0
     untap_power_limit: int = 0
@@ -253,6 +255,8 @@ class Card:
         if self.global_land_from_type: abilities.append(f"All {self.global_land_from_type.title()}s are {self.global_land_to_type.title()}s")
         if self.upkeep_turn_start_untapped_damage: abilities.append("At each player’s upkeep, deals damage equal to lands they controlled untapped at the beginning of the turn")
         if self.end_step_sacrifice_without_creatures: abilities.append("At each end step, sacrifice this enchantment if no creatures are on the battlefield")
+        if self.tax_white_spells: abilities.append(f"White spells cost {{{self.tax_white_spells}}} more to cast")
+        if self.tax_white_enchantment_abilities: abilities.append(f"Activated abilities of white enchantments cost {{{self.tax_white_enchantment_abilities}}} more")
         if self.upkeep_opponent_hand_damage: abilities.append("At your opponent's upkeep, deals damage equal to cards in their hand minus 4")
         if self.draw_step_extra: abilities.append(f"At each draw step while untapped, that player draws {self.draw_step_extra} additional card"+("s" if self.draw_step_extra!=1 else ""))
         if self.untap_power_limit: abilities.append(f"Creatures with power {self.untap_power_limit} or greater don't untap")
@@ -355,6 +359,7 @@ ALPHA_ENCHANTMENTS = {
     "lea:167": {"upkeep_turn_start_untapped_damage":True},
     "lea:55": {"aura_target_types":("Creature",), "aura_hostile":True, "aura_death_toughness_damage":True},
     "lea:145": {"aura_target_types":("Creature",), "aura_hostile":True, "aura_enter_flying_damage":2},
+    "lea:110": {"tax_white_spells":3, "tax_white_enchantment_abilities":3},
 }
 
 ALPHA_ARTIFACTS = {
@@ -684,6 +689,8 @@ for reference in PLAYABLE_ALPHA:
         global_land_to_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("global_land_to_type",""),
         upkeep_turn_start_untapped_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("upkeep_turn_start_untapped_damage",False),
         end_step_sacrifice_without_creatures=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("end_step_sacrifice_without_creatures",False),
+        tax_white_spells=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("tax_white_spells",0),
+        tax_white_enchantment_abilities=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("tax_white_enchantment_abilities",0),
         upkeep_opponent_hand_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_opponent_hand_damage",False),
         draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
         untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),
