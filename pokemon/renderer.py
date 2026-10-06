@@ -243,7 +243,7 @@ class BattleRenderer:
         draw.rounded_rectangle((20,350,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
         if choice_species_id is not None:
             draw.text((45,370),f"Would you like {species.name}?",fill=RETRO[0],font=ImageFont.load_default(size=25))
-            draw.text((45,407),"Use ◀ and ▶, then choose your partner.",fill=RETRO[1],font=ImageFont.load_default(size=18))
+            draw.text((45,407),"Use Previous and Next, then choose your partner.",fill=RETRO[1],font=ImageFont.load_default(size=18))
         else:
             trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"
             draw.text((45,370),f"@{trainer} received {species.name}!",fill=RETRO[0],font=ImageFont.load_default(size=26))
