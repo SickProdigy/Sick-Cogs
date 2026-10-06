@@ -563,6 +563,16 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         field=next(field for field in cog.game_embed(game).fields if field.name.startswith("Stack"))
         self.assertIn("spells targetable",field.name); self.assertEqual(field.value,"S:1. Prodigal Sorcerer ability")
 
+    async def test_channel_command_and_public_state_use_shared_game_action(self):
+        cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
+        await MTG.channel.callback(cog,ctx,amount=4)
+        _,mutation,action=cog.mutate_ctx.await_args.args; game=SimpleNamespace(activate_channel=Mock()); mutation(game)
+        game.activate_channel.assert_called_once_with(10,4); self.assertEqual(action,"channel")
+
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        live=Game(1,[10,20],1); live.player(10).channel_active=True
+        rendered=str(cog.game_embed(live).to_dict()); self.assertIn("Channel: pay life for {C} until end of turn",rendered)
+
     async def test_activate_command_uses_shared_game_action(self):
         cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
         await MTG.activate.callback(cog,ctx,position=3,target="20:2")

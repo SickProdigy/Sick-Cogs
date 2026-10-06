@@ -226,6 +226,15 @@ class SoloAITests(unittest.TestCase):
         if zone=="graveyard": game.player(user).graveyard.append(uid); return uid
         permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
 
+    def test_ai_uses_channel_only_to_enable_an_unpayable_spell(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
+        spell=self.add(game,AI,"lea:267","hand"); game.player(AI).channel_active=True; game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertEqual(game.player(AI).life,14); self.assertEqual(game.stack[-1].uid,spell); self.assertTrue(any(event["action"]=="ai_channel" for event in game.history))
+
+        idle=solo(order=(AI,HUMAN)); idle.player(AI).kept=True; idle.player(HUMAN).kept=True; idle.player(AI).hand=[]; idle.player(AI).channel_active=True; idle.active_index=0; idle.phase="precombat_main"; idle.priority_user=AI
+        advance_solo(idle); self.assertEqual(idle.player(AI).life,20)
+
     def test_ai_activates_sol_ring_only_to_enable_a_spell(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
         game.player(HUMAN).kept=True; game.player(AI).kept=True

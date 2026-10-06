@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.81.0"
+    __version__="0.82.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -145,6 +145,7 @@ class MTG(commands.Cog):
             value+=f"\nGraveyard: {len(p.graveyard)} · Exile: {len(p.exile)}"
             if pool: value+=f"\nMana pool: {pool}"
             if p.damage_prevention: value+=f"\nDamage prevention remaining: {p.damage_prevention}"
+            if p.channel_active: value+="\nChannel: pay life for {C} until end of turn"
             if p.source_damage_prevention:
                 sources=[g.card(uid).name if uid in g.cards else f"source {uid}" for uid in p.source_damage_prevention]
                 value+="\nChosen-source prevention: "+", ".join(sources)
@@ -427,6 +428,10 @@ class MTG(commands.Cog):
     async def mana(self,ctx,position:int,color:str=None):
         """Tap a supported mana permanent. Multi-color sources require W/U/B/R/G; sick creatures cannot tap."""
         await self.mutate_ctx(ctx,lambda g:g.activate_mana(ctx.author.id,position,color),"mana")
+    @mtg.command(name="channel")
+    async def channel(self,ctx,amount:int=1):
+        """While Channel is active, pay life to add that much colorless mana."""
+        await self.mutate_ctx(ctx,lambda g:g.activate_channel(ctx.author.id,amount),"channel")
     @mtg.command(name="activate")
     async def activate(self,ctx,position:int,target:str=None,x_value:int=None,choice_value:int=None):
         """Activate an ability. Supply a target when needed; Clockwork Beast uses `- X COUNTERS`."""

@@ -8,7 +8,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 66 creatures playable through 0.71.0; 11 remain |
-| Instants and sorceries | 70 | 50 spells playable through 0.81.0; 20 remain |
+| Instants and sorceries | 70 | 51 spells playable through 0.82.0; 19 remain |
 | Enchantments | 68 | 57 enchantments playable through 0.80.0; 11 remain |
 | Artifacts | 42 | Thirty-two artifacts playable through 0.74.0; 10 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -184,3 +184,5 @@ The 0.79.0 creature-Aura-trigger promotion adds Earthbind and Creature Bond. Ear
 The 0.80.0 cost-modifier promotion adds Gloom. Each copy adds three generic mana to white spell costs and to activated abilities of currently white enchantments. Modifiers stack, consult live permanent color for abilities, remain atomic with colored and generic payment, and leave trigger, mana, and nonenchantment activation costs unchanged. Existing Discord actions and solo AI automatically use the shared effective-cost payment path.
 
 The 0.81.0 combat-pump promotion adds Berserk. Casting is limited to action windows before combat damage. On resolution it doubles the target creature’s live power, grants trample until cleanup, and schedules a persisted next-end-step destruction trigger that destroys only the same battlefield object if it attacked that turn. Attacked-this-turn history survives combat cleanup and reload, zone changes cannot accidentally bind the trigger to a returned object, destruction permits regeneration, and solo AI uses Berserk only on its own attacker.
+
+The 0.82.0 life-for-mana promotion adds Channel. Resolution grants its controller a persisted turn-scoped mana ability exposed through `[p]mtg channel [amount]`; each life paid immediately adds one colorless mana without using the stack, may legally reduce the player to zero life, resets priority passes like other mana abilities, and expires at cleanup. Public Discord state identifies the active permission, legacy saves default safely, and solo AI pays only the minimum life that enables an otherwise unpayable legal spell.

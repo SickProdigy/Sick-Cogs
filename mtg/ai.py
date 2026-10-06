@@ -131,6 +131,13 @@ def _activate_helpful_mana(game, user):
             if any(simulated.can_pay(user,card) for card in candidates):
                 game.activate_mana(user,position,symbol)
                 return "mana"
+    if player.channel_active:
+        for amount in range(1,player.life):
+            simulated=Game.from_raw(game.to_raw())
+            simulated.activate_channel(user,amount)
+            if any(simulated.can_pay(user,card) for card in candidates):
+                game.activate_channel(user,amount)
+                return "channel"
     return None
 
 
@@ -301,6 +308,9 @@ def _play_one(game, user, difficulty):
             score=7+(x_value or 0)
         elif card.effect=="berserk":
             score=12
+        elif card.effect=="channel":
+            if player.life<=2: continue
+            score=7
         elif card.effect == "life":
             score = 4 + card.amount
         elif card.effect=="healing_salve":

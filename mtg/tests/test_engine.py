@@ -50,7 +50,7 @@ class TurnTests(unittest.TestCase):
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("attacked_this_turn"); raw.pop("trample_assignments")
         for player in raw["players"].values():
-            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("lands_played_this_turn")
+            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("lands_played_this_turn"); player.pop("channel_active")
             for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
@@ -3318,6 +3318,34 @@ class AlphaClockworkBeastTests(unittest.TestCase):
         self.assertEqual((saved.power_counters,restored.current_stats(saved)),(5,(5,4)))
         saved.tapped=False; restored.phase="precombat_main"; restored.priority_user=10
         with self.assertRaisesRegex(GameError,"only during your upkeep"): restored.activate_ability(10,1,x_value=1,choice_value=1)
+
+
+class AlphaChannelTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_channel_resolves_persists_and_pays_life_for_immediate_colorless_mana(self):
+        game=ready(); spell=self.add(game,10,"lea:188","hand"); self.add(game,10,"forest"); self.add(game,10,"forest")
+        game.phase="precombat_main"; game.priority_user=10; game.play(10,1); self.resolve_top(game)
+        self.assertTrue(game.player(10).channel_active); self.assertIn(spell,game.player(10).graveyard)
+        game.stack=[Spell(20,game.next_uid,"shock","10",passes=1)]; game.cards[game.next_uid]="shock"; game.next_uid+=1; game.phase_passes=1; game.priority_user=10
+        game.activate_channel(10,3)
+        self.assertEqual((game.player(10).life,game.player(10).mana_pool),(17,{"C":3})); self.assertEqual((game.phase_passes,game.stack[0].passes),(0,0))
+        restored=Game.from_raw(game.to_raw()); self.assertTrue(restored.player(10).channel_active); self.assertEqual(restored.player(10).mana_pool,{"C":3})
+        restored._cleanup(); self.assertFalse(restored.player(10).channel_active)
+
+    def test_channel_rejects_invalid_payment_atomically_and_can_pay_all_remaining_life(self):
+        game=ready(); player=game.player(10); player.channel_active=True; player.life=3; game.priority_user=10
+        for amount in (0,4):
+            with self.subTest(amount=amount):
+                with self.assertRaises(GameError): game.activate_channel(10,amount)
+                self.assertEqual((player.life,player.mana_pool),(3,{}))
+        game.activate_channel(10,3); self.assertEqual((player.life,player.mana_pool),(0,{"C":3})); self.assertTrue(game.finished); self.assertEqual(game.winner,20)
 
 
 class AlphaBerserkTests(unittest.TestCase):

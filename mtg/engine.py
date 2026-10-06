@@ -55,6 +55,7 @@ class Player:
     damage_prevention: int = 0
     source_damage_prevention: List[int] = field(default_factory=list)
     turn_start_untapped_lands: int = 0
+    channel_active: bool = False
 
 @dataclass
 class Spell:
@@ -722,6 +723,18 @@ class Game:
         for spell in self.stack: spell.passes=0
         produced=" ".join(f"{{{mana}}}"+(f"×{count}" if count>1 else "") for mana,count in output.items())
         self.log.append(f"{user} added {produced}.")
+
+    def activate_channel(self,user,amount=1):
+        self._priority(user); player=self.player(user)
+        if not player.channel_active: raise GameError("Channel is not active for you.")
+        try: amount=int(amount)
+        except (TypeError,ValueError) as error: raise GameError("Channel amount must be a positive whole number.") from error
+        if amount<1: raise GameError("Channel amount must be a positive whole number.")
+        if amount>player.life: raise GameError("You cannot pay more life than you have.")
+        player.life-=amount; player.mana_pool["C"]=player.mana_pool.get("C",0)+amount
+        self._life(); self.phase_passes=0
+        for spell in self.stack: spell.passes=0
+        self.log.append(f"{user} paid {amount} life through Channel and added {{C}}×{amount}.")
 
     def _empty_mana(self):
         for player in self.players.values(): player.mana_pool.clear()
@@ -1552,6 +1565,7 @@ class Game:
             p.graveyard.append(s.uid)
         elif c.effect=="prevent_combat_damage": self.prevent_combat_damage=True; p.graveyard.append(s.uid)
         elif c.effect=="extra_turn": self.extra_turns.insert(0,s.owner); p.graveyard.append(s.uid)
+        elif c.effect=="channel": p.channel_active=True; p.graveyard.append(s.uid)
         elif c.effect=="mana_short":
             target_player=self.player(int(s.target)); pending=[]
             for permanent in target_player.battlefield:
@@ -1701,7 +1715,7 @@ class Game:
     def _cleanup(self):
         self.prevent_combat_damage=False; self.creatures_died_this_turn=0; self.attacked_this_turn=[]
         for p in self.players.values():
-            p.damage_prevention=0; p.source_damage_prevention=[]
+            p.channel_active=False; p.damage_prevention=0; p.source_damage_prevention=[]
             for x in p.battlefield:
                 x.damage=x.bonus=x.power_bonus=x.toughness_bonus=x.activations_this_turn=0
                 x.exile_on_death=False; x.cant_regenerate=False; x.regeneration_shields=0; x.damage_prevention=0; x.temporary_keywords=[]; x.damage_source_uids=[]
@@ -1763,6 +1777,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("turn_start_untapped_lands",0); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0)})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0)})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g
