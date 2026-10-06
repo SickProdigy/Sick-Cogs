@@ -177,6 +177,23 @@ class BattleTests(unittest.TestCase):
         self.assertIn(created.gender,{"male","female","genderless"})
         self.assertTrue(created.ability)
         self.assertEqual(created.origin,"starter")
+    def test_battle_ruleset_and_generations_survive_restart(self):
+        current=battle();raw=current.raw()
+        self.assertEqual((raw["ruleset"],raw["mechanics_generation"],raw["content_generation"]),("standard",9,1))
+        restored=Battle.from_raw(raw)
+        self.assertEqual((restored.rules().key,restored.mechanics_generation,restored.content_generation),("standard",9,1))
+        for key in ("ruleset","mechanics_generation","content_generation"):raw.pop(key)
+        legacy=Battle.from_raw(raw)
+        self.assertEqual((legacy.ruleset,legacy.mechanics_generation,legacy.content_generation),("standard",9,1))
+
+    def test_wild_turn_speed_is_level_scaled(self):
+        player=OwnedPokemon.create("speed",7,5,seed=1)
+        current=Battle(1,100,1,2,3,player,150,2,10,10,seed=4)
+        self.assertEqual(current.combat_speed(False),current.wild_stat("speed"))
+        self.assertLess(current.combat_speed(False),SPECIES[150].speed)
+        current.wild_status="paralysis"
+        self.assertEqual(current.combat_speed(False),max(1,current.wild_stat("speed")//2))
+
     def test_experience_levels_up(self):
         pokemon=OwnedPokemon.create("xp",4,5,seed=7)
         pokemon.experience=249
