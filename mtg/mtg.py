@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.120.8"
+    __version__="0.120.10"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -328,7 +328,7 @@ class MTG(commands.Cog):
         paths=[None]*start+visible_paths
         text="\n".join(f"**{start+n}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for n,card in enumerate(visible,1)) or "Your hand is empty."
         view=HandPaginationView(self,game_id,interaction.user.id,page,pages)
-        if game.phase=="opening": guidance="Choose **Keep hand** or **Mulligan** on the public game table before playing cards."
+        if game.phase=="opening": guidance="You kept this hand. Waiting for the other player." if game.player(interaction.user.id).kept else "Choose **Keep hand** or **Mulligan** below."
         elif game.priority_user!=interaction.user.id: guidance="You do not currently have priority. Return to the public game table for the required action."
         elif view.playable_count: guidance="Use the private menu below to play or cast a currently legal card."
         else: guidance="You have no cards you can legally play right now. Return to the public table and use **Pass priority** or the required combat control."
@@ -348,6 +348,19 @@ class MTG(commands.Cog):
                 kwargs={"ephemeral":True}
                 if view is not None: kwargs["view"]=view
                 await interaction.followup.send(text,**kwargs)
+    async def opening_hand_interaction(self,interaction,game_id,keep):
+        game=self.games.get(game_id)
+        if not game or interaction.user.id not in game.order:
+            await interaction.response.send_message("This private hand is unavailable.",ephemeral=True); return
+        async with self.lock(game.game_id):
+            try:
+                game.mulligan(interaction.user.id,keep); game.record(interaction.user.id,"keep" if keep else "mulligan"); advance_solo(game); await self.save(game)
+            except (GameError,IndexError,ValueError) as error:
+                await interaction.response.send_message(str(error),ephemeral=True); return
+        await interaction.response.defer()
+        await self.send_hand(interaction,game_id,0,editing=True)
+        await self.refresh_message(game)
+
     async def play_hand_interaction(self,interaction,game_id,position,target=None,x_value=None):
         game=self.games.get(game_id)
         if not game or interaction.user.id not in game.order:

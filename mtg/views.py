@@ -373,13 +373,22 @@ class HandPlaySelect(discord.ui.Select):
         if not needs_input: await self.browser.cog.play_hand_interaction(interaction,self.browser.game_id,position,None,None)
         else: await interaction.response.send_modal(PlayCardModal(self.browser,position,card,_target(game,self.browser.user_id,card) if _needs_target(card) else None))
 
+class OpeningHandButton(discord.ui.Button):
+    def __init__(self,browser,keep):
+        super().__init__(label="Keep hand" if keep else "Mulligan",style=discord.ButtonStyle.success if keep else discord.ButtonStyle.secondary,row=0)
+        self.browser,self.keep=browser,keep
+    async def callback(self,interaction):
+        await self.browser.cog.opening_hand_interaction(interaction,self.browser.game_id,self.keep)
+
 class HandPaginationView(discord.ui.View):
     def __init__(self,cog,game_id,user_id,page,pages):
         super().__init__(timeout=180)
         self.cog,self.game_id,self.user_id,self.page,self.pages=cog,game_id,user_id,page,pages
         game=cog.games.get(game_id); entries=_playable_hand_entries(game,user_id,page) if game and game.priority_user==user_id and game.phase!="opening" else []
         self.playable_count=len(entries)
-        if entries: self.add_item(HandPlaySelect(self,entries))
+        if game and game.phase=="opening" and not game.player(user_id).kept:
+            self.add_item(OpeningHandButton(self,True)); self.add_item(OpeningHandButton(self,False))
+        elif entries: self.add_item(HandPlaySelect(self,entries))
         self.previous.disabled=page<=0
         self.next.disabled=page>=pages-1
     async def interaction_check(self,i):

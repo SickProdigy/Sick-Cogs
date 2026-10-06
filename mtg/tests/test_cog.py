@@ -841,6 +841,19 @@ class RagingRiverRenderingTests(unittest.TestCase):
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("divide nonflying defenders left/right",rendered); view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":raging_river")); self.assertEqual({option.value for option in select.options},{"none","1"}); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pay")).disabled)
 
 class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
+    async def test_private_opening_keep_replaces_the_same_hand_panel(self):
+        cog=cog_fixture(); game=Game(1,[10,20],1); game.mulligan(20,True); cog.games={1:game}
+        cog.art_cache=SimpleNamespace(get=AsyncMock(return_value="unused.jpg"))
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(defer=AsyncMock(),send_message=AsyncMock()),edit_original_response=AsyncMock())
+        view=HandPaginationView(cog,1,10,0,1); keep=next(item for item in view.children if getattr(item,"label",None)=="Keep hand")
+        with patch("mtg.mtg.render_hand",return_value=Mock()), patch("mtg.mtg.discord.File",return_value=Mock()):
+            await keep.callback(interaction)
+        self.assertTrue(game.player(10).kept)
+        interaction.response.defer.assert_awaited_once()
+        interaction.edit_original_response.assert_awaited_once()
+        self.assertNotIn("Choose **Keep hand**",interaction.edit_original_response.await_args.kwargs["content"])
+        cog.refresh_message.assert_awaited_once_with(game)
+
     def test_private_hand_only_lists_currently_playable_cards(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.phase="precombat_main"; game.priority_user=10; cog.games={1:game}
         game.player(10).hand=[]; game.player(10).battlefield=[]
