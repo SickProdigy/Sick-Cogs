@@ -164,9 +164,10 @@ class BattleTests(unittest.TestCase):
             self.assertNotEqual(image.getpixel((10,10)),other.getpixel((10,10)))
         with Image.open(starter) as image:
             self.assertEqual(image.size,(800,450))
-            self.assertEqual(image.getpixel((390,295)),RETRO[0])
-            self.assertEqual(image.getpixel((50,50)),(111,174,197))
+            self.assertEqual(image.getpixel((255,280)),(205,63,58))
+            self.assertEqual(image.getpixel((120,330)),(132,82,48))
             self.assertEqual(image.getpixel((400,400)),RETRO[5])
+            self.assertEqual(image.getpixel((110,398)),RETRO[5])
         with Image.open(scene) as image:self.assertEqual(image.size,(800,450))
 
 
