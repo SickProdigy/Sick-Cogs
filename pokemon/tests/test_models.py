@@ -42,6 +42,19 @@ class BattleTests(unittest.TestCase):
         fixed=__import__("pokemon.data",fromlist=["MOVES"]).MOVES["dragon_rage"]
         self.assertEqual(current._damage(1,10,5,fixed,current.rng(),target_hp=99),40)
 
+    def test_owned_and_wild_combat_stats_share_level_scaling(self):
+        player=OwnedPokemon.create("scaled",4,5,seed=3)
+        low=Battle(1,100,1,2,3,player,19,2,20,20,seed=8)
+        high=Battle(2,100,1,2,4,player,19,5,20,20,seed=8)
+        self.assertEqual(low.wild_stat("attack"),Battle.scaled_stat(SPECIES[19],2,"attack"))
+        self.assertLess(low.wild_stat("attack"),high.wild_stat("attack"))
+        self.assertLess(low.wild_stat("attack"),SPECIES[19].attack)
+        self.assertEqual(Battle.stat(player,"defense"),Battle.scaled_stat(SPECIES[4],5,"defense",player.ivs["defense"]))
+        move=__import__("pokemon.data",fromlist=["MOVES"]).MOVES["tackle"]
+        low_before=low.player_hp;high_before=high.player_hp
+        low._wild_attack(move);high._wild_attack(move)
+        self.assertLessEqual(low_before-low.player_hp,high_before-high.player_hp)
+
     def test_move_damages_and_wild_responds(self):
         b=battle();old_wild=b.wild_hp;old_player=b.player_hp
         b.use_move(2)
