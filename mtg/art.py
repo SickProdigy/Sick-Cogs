@@ -125,14 +125,14 @@ def render_hand(cards, paths, page=0):
     card_width, card_height = 220, 307
     columns = min(4, len(visible))
     rows = (len(visible) + 3) // 4
-    row_height = 345
-    canvas = Image.new("RGB", (columns * 236 + 20, rows * row_height + 54), (22, 27, 25))
+    row_height = 339
+    canvas = Image.new("RGB", (columns * 236 + 20, rows * row_height + 48), (22, 27, 25))
     draw = ImageDraw.Draw(canvas)
-    title_font, number_font = _font(24), _font(20)
+    title_font, number_font = _font(24), _font(16)
     draw.text((16, 12), f"Private hand - page {page + 1}", fill=(240, 235, 218), font=title_font)
     for offset, (card, path) in enumerate(zip(visible, visible_paths)):
         column, row = offset % 4, offset // 4
-        x, y = 16 + column * 236, 48 + row * row_height
+        x, y = 16 + column * 236, 72 + row * row_height
         panel = Image.new("RGB", (card_width, card_height), (49, 56, 52))
         if path:
             try:
@@ -146,9 +146,9 @@ def render_hand(cards, paths, page=0):
             fallback = ImageDraw.Draw(panel)
             fallback.multiline_text((14, 50), f"{card.name}\n\n{card.kind}\nCost {card.cost}\n\n{card.text}", fill=(240, 235, 218), font=_font(18), spacing=5)
         canvas.paste(panel, (x, y))
-        label = f"Hand position {start + offset + 1}"
-        draw.rounded_rectangle((x + 12, y + card_height + 5, x + card_width - 12, y + card_height + 31), 10, fill=(15, 18, 17), outline=(222, 185, 82), width=2)
-        draw.text((x + card_width / 2, y + card_height + 18), label, fill=(255, 244, 207), font=number_font, anchor="mm")
+        center_x, center_y = x + card_width / 2, y - 16
+        draw.ellipse((center_x - 14, center_y - 14, center_x + 14, center_y + 14), fill=(15, 18, 17), outline=(222, 185, 82), width=2)
+        draw.text((center_x, center_y), str(start + offset + 1), fill=(255, 244, 207), font=number_font, anchor="mm")
     output = io.BytesIO()
     canvas.save(output, format="PNG", optimize=True)
     output.seek(0)
