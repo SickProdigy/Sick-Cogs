@@ -237,15 +237,19 @@ class Battle:
         return max(1,value*(2+stage)//2) if stage>=0 else max(1,value*2//(2-stage))
 
     @staticmethod
-    def stat(pokemon: OwnedPokemon, name: str):
-        species=SPECIES[pokemon.species_id]
-        base = getattr(species, name)
+    def scaled_stat(species, level, name, iv=0):
+        base=getattr(species,name)
         if not base and name=="special_attack":base=species.attack
         if not base and name=="special_defense":base=species.defense
-        iv = int(pokemon.ivs.get(name, 0))
-        if name == "hp":
-            return ((2 * base + iv) * pokemon.level) // 100 + pokemon.level + 10
-        return ((2 * base + iv) * pokemon.level) // 100 + 5
+        if name=="hp":return ((2*base+int(iv))*level)//100+level+10
+        return ((2*base+int(iv))*level)//100+5
+
+    @staticmethod
+    def stat(pokemon: OwnedPokemon, name: str):
+        return Battle.scaled_stat(SPECIES[pokemon.species_id],pokemon.level,name,pokemon.ivs.get(name,0))
+
+    def wild_stat(self,name):
+        return self.scaled_stat(SPECIES[self.wild_species_id],self.wild_level,name)
 
     def max_hp(self, pokemon):
         return pokemon_max_hp(pokemon)
@@ -363,8 +367,10 @@ class Battle:
         if move.category=="status":return self._status_action(move,True)
         critical=rng.randrange(max(1,24-move.crit_rate*4))==0
         attack_name="special_attack" if move.category=="special" else "attack"
+        defense_name="special_defense" if move.category=="special" else "defense"
         attack=self.stage_stat(self.stat(self.player,attack_name),self.player_stages.get(attack_name,0))
-        damage=self._damage(attack,self.wild_species_id,self.player.level,move,rng,critical,self.wild_hp,self.wild_stages,SPECIES[self.player.species_id].types)
+        defense=self.stage_stat(self.wild_stat(defense_name),self.wild_stages.get(defense_name,0))
+        damage=self._damage(attack,self.wild_species_id,self.player.level,move,rng,critical,self.wild_hp,SPECIES[self.player.species_id].types,defense)
         self.wild_hp=max(0,self.wild_hp-damage)
         if move.drain>0:self.player_hp=min(self.max_hp(self.player),self.player_hp+max(1,damage*move.drain//100))
         elif move.drain<0:self.player_hp=max(0,self.player_hp-max(1,damage*(-move.drain)//100))
@@ -379,8 +385,10 @@ class Battle:
         if move.category=="status":return self._status_action(move,False)
         critical=rng.randrange(max(1,24-move.crit_rate*4))==0
         wild=SPECIES[self.wild_species_id];attack_name="special_attack" if move.category=="special" else "attack"
-        attack=self.stage_stat((getattr(wild,attack_name) or wild.attack),self.wild_stages.get(attack_name,0))
-        damage=self._damage(attack,self.player.species_id,self.wild_level,move,rng,critical,self.player_hp,self.player_stages,wild.types)
+        defense_name="special_defense" if move.category=="special" else "defense"
+        attack=self.stage_stat(self.wild_stat(attack_name),self.wild_stages.get(attack_name,0))
+        defense=self.stage_stat(self.stat(self.player,defense_name),self.player_stages.get(defense_name,0))
+        damage=self._damage(attack,self.player.species_id,self.wild_level,move,rng,critical,self.player_hp,wild.types,defense)
         self.player_hp=max(0,self.player_hp-damage)
         if move.drain>0:self.wild_hp=min(self.wild_max_hp,self.wild_hp+max(1,damage*move.drain//100))
         elif move.drain<0:self.wild_hp=max(0,self.wild_hp-max(1,damage*(-move.drain)//100))
@@ -418,15 +426,14 @@ class Battle:
                 self.state = "lost"
                 self.result = f"{SPECIES[self.wild_species_id].name} escaped! Your party has no conscious Pokémon. Go to a Pokémon Center to heal."
 
-    def _damage(self, attack, target_id, level, move, rng, critical=False, target_hp=None, target_stages=None, attacker_types=()):
+    def _damage(self, attack, target_id, level, move, rng, critical=False, target_hp=None, attacker_types=(), defense=None):
         if move.effect.startswith("fixed-"):return int(move.effect.split("-",1)[1])
         if move.effect=="level":return level
         if move.effect=="half":return max(1,int(target_hp or 1)//2)
         if move.effect=="ohko":return int(target_hp or 0)
         if move.effect=="counter" or move.power<=0:return 0
-        target=SPECIES[target_id];defense_name="special_defense" if move.category=="special" else "defense"
-        defense=(target.special_defense or target.defense) if move.category=="special" else target.defense
-        if target_stages:defense=self.stage_stat(defense,target_stages.get(defense_name,0))
+        target=SPECIES[target_id]
+        if defense is None:defense=(target.special_defense or target.defense) if move.category=="special" else target.defense
         base=max(1,(((2*level//5+2)*move.power*attack//max(1,defense))//50)+2)
         modifier=effectiveness(move.type,target.types)
         if move.type in attacker_types:modifier*=1.5
