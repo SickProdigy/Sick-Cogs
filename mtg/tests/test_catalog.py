@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),300)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),300)
+        self.assertEqual(len(CARDS),301)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),301)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),240)
-        self.assertEqual(len(REFERENCE_ALPHA),55)
+        self.assertEqual(len(PLAYABLE_ALPHA),241)
+        self.assertEqual(len(REFERENCE_ALPHA),54)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -104,6 +104,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(promoted_enchantments,set(ALPHA_ENCHANTMENTS)|set(ALPHA_GLOBAL_ENCHANTMENTS)|set(ALPHA_TAP_ENCHANTMENTS))
         self.assertEqual(CARDS["lea:9"].ability_text,"Untapped creatures you control get +0/+2")
         self.assertTrue(CARDS["lea:48"].aura_animate_mana_value); self.assertEqual(CARDS["lea:209"].animate_land_type,"forest")
+        self.assertEqual((CARDS["lea:256"].animate_land_type,CARDS["lea:256"].animate_land_color),("swamp","B"))
+        self.assertIn("1/1 black creatures",CARDS["lea:256"].ability_text)
         self.assertEqual({CARDS[key].prevent_source_color for key in ("lea:10","lea:11","lea:12","lea:13")},{"U","G","R","W"})
         self.assertEqual(CARDS["lea:16"].ability_text,"White creatures get +1/+1")
         self.assertEqual(CARDS["lea:93"].ability_text,"Black creatures get +1/+1")
@@ -198,7 +200,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("300 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("301 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

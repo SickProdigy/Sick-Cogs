@@ -554,6 +554,9 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         source=game.next_uid; game.next_uid+=1; game.cards[source]="lea:209"; forest=game.next_uid; game.next_uid+=1; game.cards[forest]="forest"
         game.player(10).battlefield=[permanent_type(source,"lea:209",sick=False),permanent_type(forest,"forest",sick=False)]
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Living Lands",rendered); self.assertIn("Forest 1/1",rendered)
+        bell=game.next_uid; game.next_uid+=1; game.cards[bell]="lea:256"; swamp=game.next_uid; game.next_uid+=1; game.cards[swamp]="swamp"
+        game.player(20).battlefield=[permanent_type(bell,"lea:256",sick=False),permanent_type(swamp,"swamp",sick=False)]
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Kormus Bell",rendered); self.assertIn("Swamp 1/1",rendered)
 
     async def test_public_embed_labels_activated_abilities_on_stack(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))

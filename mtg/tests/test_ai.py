@@ -831,5 +831,17 @@ class SoloAITests(unittest.TestCase):
         bear.temporary_keywords.append("flying"); self.assertIsNone(_activation_target(game,AI,cards["lea:176"],source.uid))
 
 
+    def test_ai_casts_kormus_bell_only_with_the_swamp_advantage(self):
+        helpful=solo(order=(AI,HUMAN)); helpful.player(HUMAN).kept=helpful.player(AI).kept=True; helpful.player(AI).hand=[]
+        spell=self.add(helpful,AI,"lea:256","hand"); [self.add(helpful,AI,"swamp") for _ in range(4)]
+        helpful.active_index=0; helpful.phase="precombat_main"; helpful.priority_user=AI; helpful.player(AI).land_played=True
+        advance_solo(helpful); self.assertEqual(helpful.stack[-1].uid,spell)
+
+        harmful=solo(order=(AI,HUMAN)); harmful.player(HUMAN).kept=harmful.player(AI).kept=True; harmful.player(AI).hand=[]
+        bell=self.add(harmful,AI,"lea:256","hand"); [self.add(harmful,AI,"swamp") for _ in range(4)]; [self.add(harmful,HUMAN,"swamp") for _ in range(5)]
+        harmful.active_index=0; harmful.phase="precombat_main"; harmful.priority_user=AI; harmful.player(AI).land_played=True
+        advance_solo(harmful); self.assertIn(bell,harmful.player(AI).hand); self.assertFalse(harmful.stack)
+
+
 if __name__ == "__main__":
     unittest.main()

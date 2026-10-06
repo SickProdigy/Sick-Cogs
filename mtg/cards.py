@@ -51,6 +51,7 @@ class Card:
     aura_hostile: bool = False
     aura_animate_mana_value: bool = False
     animate_land_type: str = ""
+    animate_land_color: str = ""
     activation_attached: bool = False
     protection_colors: Tuple[str, ...] = ()
     aura_protection: str = ""
@@ -200,7 +201,9 @@ class Card:
             if self.lord_keyword: granted.append(self.lord_keyword.replace("_"," ").title())
             if self.lord_regeneration_cost: granted.append(f"{self.lord_regeneration_cost}: Regenerate")
             abilities.append(f"Other {self.lord_subtype} creatures have "+", ".join(granted))
-        if self.animate_land_type: abilities.append(f"All {self.animate_land_type.title()}s are 1/1 creatures that are still lands")
+        if self.animate_land_type:
+            color_name={"W":"white","U":"blue","B":"black","R":"red","G":"green"}.get(self.animate_land_color,"")
+            abilities.append(f"All {self.animate_land_type.title()}s are 1/1{(' '+color_name) if color_name else ''} creatures that are still lands")
         if self.global_power or self.global_toughness:
             color_name={"W":"White","U":"Blue","B":"Black","R":"Red","G":"Green"}.get(self.global_buff_color,self.global_buff_color)
             subject=(color_name+" creatures" if color_name else "Creatures")
@@ -393,6 +396,7 @@ ALPHA_ARTIFACTS = {
     "lea:269": {"produces":("C",), "mana_amount":2},
     "lea:270": {"death_life":True},
     "lea:253": {"activation_cost":"{2}", "activation_effect":"animate_self", "activation_text":"Becomes a 3/6 Golem artifact creature until end of combat", "animate_combat":True},
+    "lea:256": {"animate_land_type":"swamp", "animate_land_color":"B"},
     "lea:272": {"activation_cost":"{5}", "activation_tap":True, "activation_effect":"create_token", "activation_text":"Create a 1/1 colorless Insect artifact creature token with flying named Wasp", "creates_token":"token:wasp"},
     "lea:237": {"activation_cost":"{3}", "activation_tap":True, "activation_effect":"prevent_player_damage", "activation_amount":2, "activation_text":"Prevent the next 2 damage that would be dealt to you this turn"},
 }
@@ -628,6 +632,7 @@ for reference in PLAYABLE_ALPHA:
         aura_hostile=ALPHA_ENCHANTMENTS.get(reference.key, ALPHA_TAP_ENCHANTMENTS.get(reference.key, {})).get("aura_hostile",False),
         aura_animate_mana_value=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_animate_mana_value",False),
         animate_land_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("animate_land_type",ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_land_type","")),
+        animate_land_color=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("animate_land_color",ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_land_color","")),
         aura_protection=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_protection",""),
         protection_self_exception=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("protection_self_exception",False),
         protection_colors=ALPHA_PROTECTIONS.get(reference.key,()),

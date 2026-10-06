@@ -3286,6 +3286,30 @@ class AlphaContinuousAnimationTests(unittest.TestCase):
         self.assertIn(strength.uid,game.player(10).graveyard); self.assertFalse(game.is_creature(forest))
 
 
+    def test_kormus_bell_animates_every_typed_swamp_as_a_black_creature(self):
+        game=ready(); bell=self.add(game,10,"lea:256"); swamp=self.add(game,10,"swamp",sick=True); dual=self.add(game,20,"lea:278"); forest=self.add(game,20,"forest")
+        self.assertTrue(game.is_creature(swamp) and game.is_creature(dual)); self.assertEqual(game.current_stats(dual),(1,1)); self.assertEqual(game.current_colors(dual),("B",)); self.assertFalse(game.is_creature(forest))
+        bad_moon=self.add(game,10,"lea:93"); self.assertEqual(game.current_stats(swamp),(2,2)); game.phase="precombat_main"; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"summoning sickness"): game.activate_mana(10,2)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.current_colors(restored.find_permanent(dual.uid)[1]),("B",))
+        restored._destroy(restored.player(10),restored.find_permanent(bell.uid)[1],allow_regeneration=False)
+        self.assertFalse(restored.is_creature(restored.find_permanent(swamp.uid)[1])); self.assertEqual(restored.current_colors(restored.find_permanent(dual.uid)[1]),())
+
+    def test_kormus_and_lace_color_effects_follow_timestamps_and_restore(self):
+        game=ready(); swamp=self.add(game,10,"swamp"); swamp.color_override="G"; swamp.color_timestamp=5
+        bell=self.add(game,20,"lea:256"); bell.layer_timestamp=10; game.next_layer_timestamp=11
+        self.assertEqual(game.current_colors(swamp),("B",))
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:207"; game._resolve(Spell(10,uid,"lea:207",f"10:{swamp.uid}"))
+        self.assertEqual((swamp.color_override,swamp.color_timestamp,game.current_colors(swamp)),("G",11,("G",)))
+        restored=Game.from_raw(game.to_raw()); saved=restored.find_permanent(swamp.uid)[1]; self.assertEqual((saved.color_timestamp,restored.current_colors(saved)),(11,("G",)))
+        restored._destroy(restored.player(20),restored.find_permanent(bell.uid)[1],allow_regeneration=False); self.assertEqual(restored.current_colors(saved),("G",))
+
+    def test_legacy_lace_timestamp_defaults_without_changing_saved_color(self):
+        game=ready(); swamp=self.add(game,10,"swamp"); swamp.color_override="R"; raw=game.to_raw(); raw["players"]["10"]["battlefield"][-1].pop("color_timestamp")
+        restored=Game.from_raw(raw); saved=restored.find_permanent(swamp.uid)[1]
+        self.assertEqual(saved.color_timestamp,saved.layer_timestamp); self.assertEqual(restored.current_colors(saved),("R",))
+
+
 class AlphaClockworkBeastTests(unittest.TestCase):
     def add(self,game,user,key,power_counters=0):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

@@ -26,6 +26,7 @@ class Permanent:
     cant_regenerate: bool = False
     attached_to: Optional[int] = None
     color_override: str = ""
+    color_timestamp: int = 0
     animated_until_end_combat: bool = False
     damage_prevention: int = 0
     plus_one_counters: int = 0
@@ -142,9 +143,9 @@ class Game:
         permanent=Permanent(uid,key,**kwargs)
         permanent.power_counters=self.card(uid).enters_power_counters
         return permanent
-    def _global_land_animation(self,permanent):
-        card=self.card(permanent.uid)
-        return any(self.card(source.uid).animate_land_type and self.has_current_land_type(permanent,self.card(source.uid).animate_land_type) for player in self.players.values() for source in player.battlefield)
+    def _global_land_animation_sources(self,permanent):
+        return [source for player in self.players.values() for source in player.battlefield if self.card(source.uid).animate_land_type and self.has_current_land_type(permanent,self.card(source.uid).animate_land_type)]
+    def _global_land_animation(self,permanent): return bool(self._global_land_animation_sources(permanent))
     def _aura_artifact_animation(self,permanent):
         return self.card(permanent.uid).has_type("Artifact") and any(self.card(aura.uid).aura_animate_mana_value for aura in self.attached_auras(permanent))
     def is_creature(self,permanent): return self.card(permanent.uid).creature or permanent.animated_until_end_combat or self._global_land_animation(permanent) or self._aura_artifact_animation(permanent)
@@ -213,7 +214,9 @@ class Game:
         target_card=self.card(target.uid)
         return any(self.has_current_type(target,kind) for kind in aura_card.aura_target_types) and all(self._has_subtype(target_card,subtype) for subtype in aura_card.aura_target_subtypes)
     def current_colors(self,permanent):
-        return (permanent.color_override,) if permanent.color_override else self.card(permanent.uid).colors
+        layers=[(permanent.color_timestamp,permanent.color_override)] if permanent.color_override else []
+        layers.extend((source.layer_timestamp or source.uid,self.card(source.uid).animate_land_color) for source in self._global_land_animation_sources(permanent) if self.card(source.uid).animate_land_color)
+        return (max(layers)[1],) if layers else self.card(permanent.uid).colors
     def spell_colors(self,spell):
         return (spell.color_override,) if spell.color_override else self.card(spell.uid).colors
     def spell_mana_value(self,spell):
@@ -1537,7 +1540,7 @@ class Game:
                 user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
                 if target is None:
                     p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
-                target.color_override=c.color_change
+                target.color_override=c.color_change; target.color_timestamp=self.next_layer_timestamp; self.next_layer_timestamp+=1
             p.graveyard.append(s.uid)
         elif c.effect=="draw": self._draw(p,c.amount); p.graveyard.append(s.uid)
         elif c.effect in ("draw_target","draw_target_x"): self._draw(self.player(int(s.target)),s.x_value if c.effect=="draw_target_x" else c.amount); p.graveyard.append(s.uid)
@@ -1777,6 +1780,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0)})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0)})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g
