@@ -59,9 +59,10 @@ class BattleTests(unittest.TestCase):
         self.assertTrue(b.last_action.startswith("Quick Attack"))
 
     def test_caught_instance_is_global_identity(self):
-        b=battle(3);b.state="caught"
+        b=battle(3);b.state="caught";b.wild_gender="female"
         caught=b.caught()
         self.assertEqual(caught.species_id,10)
+        self.assertEqual(caught.gender,"female")
         self.assertEqual(caught.caught_guild_id,1)
         self.assertEqual(len(caught.instance_id),32)
     def test_catch_explains_no_battle_xp(self):

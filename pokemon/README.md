@@ -10,7 +10,7 @@ Persistent cross-guild Pokémon catching and wild battles for Red.
 - All 151 Generation 1 species bundled from validated PokéAPI records, plus owner-triggered cache sync for later generations.
 - Persistent level-scaled wild battles with classic Fight/Pokémon/Bag/Run menus, four move slots, PP, accuracy, physical/special damage, priority/Speed ordering, type effectiveness, critical hits, supported status effects, switching, fainting, deterministic action history/recovery, XP, supported move learning, and every Gen 1 level-based evolution.
 - Poké Ball inventory and restart-safe, idempotent catch settlement.
-- Modern encounter art plus a generated Game Boy-inspired battle scene with bounded sprite/render caches and accessible embed text.
+- Centered encounter art with in-image name, sex, level, and HP plus generated Game Boy-inspired battle scenes, bounded sprite/render caches, and accessible embed text.
 - An interactive Pokédex with paginated lists, direct entry selection, search, filters, generation selection, progressive seen/caught detail unlocks, and selectable Retro or Compact presentation.
 - Ordered Kanto Gym Leader challenges, persistent badges, and a trainer-profile badge case without introducing a separate trainer XP level.
 - Persistent party HP/status, server-configured Pokémon Center channels, and atomic Potion/Revive recovery.
