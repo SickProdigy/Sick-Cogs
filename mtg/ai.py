@@ -296,6 +296,17 @@ def _blocks(game, user, difficulty):
     return assignments
 
 
+def _player_damage_threatened(game,user):
+    for item in game.stack:
+        card=game.card(item.uid)
+        if item.ability_effect in ("tap_damage","land_event_damage","upkeep_damage","upkeep_hand_damage","draw_tapped_damage","damage_any") and item.target==str(user): return True
+        if not item.ability_effect and card.effect in ("earthquake_x","hurricane_x"): return item.x_value>0
+        if not item.ability_effect and card.effect in ("damage","damage_any","damage_x_exile") and (item.target or str(game.opponent(item.owner)))==str(user): return True
+        if item.ability_effect=="damage_any" and item.owner==user and card.activation_self_damage: return True
+    if game.opponent(game.active_user)==user and game.phase in ("after_attackers","after_blockers","after_first_strike"):
+        return any(uid not in game.blocks or "trample" in game.current_keywords(next(x for x in game.player(game.active_user).battlefield if x.uid==uid)) for uid in game.attackers)
+    return False
+
 def _activation_target(game,user,card,source_uid=None):
     opponent=game.opponent(user)
     if card.activation_effect=="counter_color":
@@ -303,6 +314,7 @@ def _activation_target(game,user,card,source_uid=None):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
         return None
     if card.activation_effect in ("draw_self","create_token"): return str(user)
+    if card.activation_effect=="prevent_player_damage": return str(user) if not game.player(user).damage_prevention and _player_damage_threatened(game,user) else None
     if card.activation_effect=="animate_self":
         _,source=game.find_permanent(source_uid)
         pending=any(item.ability_effect=="animate_self" and item.source_uid==source_uid for item in game.stack)

@@ -41,6 +41,7 @@ class Player:
     land_played: bool = False
     kept: bool = False
     mulligans: int = 0
+    damage_prevention: int = 0
 
 @dataclass
 class Spell:
@@ -405,7 +406,7 @@ class Game:
             spell=self._target_stack(target)
             if card.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {card.target_color}.")
             return f"S:{spell.uid}"
-        if card.activation_effect in ("draw_self","destroy_all_nonland","create_token"): return str(user)
+        if card.activation_effect in ("draw_self","destroy_all_nonland","create_token","prevent_player_damage"): return str(user)
         if card.activation_effect in ("untap_self","animate_self"): return f"{user}:{source.uid}"
         if card.activation_attached:
             controller,attached=self.find_permanent(source.attached_to)
@@ -829,6 +830,11 @@ class Game:
             for player in self.players.values() for x in player.battlefield if x.uid in combatants
         )
 
+    def _damage_player(self,user,amount):
+        player=self.player(user); amount=max(0,int(amount)); prevented=min(amount,player.damage_prevention)
+        player.damage_prevention-=prevented; player.life-=amount-prevented
+        return amount-prevented
+
     def _combat_damage(self,first_strike):
         atk=self.players[self.active_user]; dfn=self.players[self.opponent(self.active_user)]
         for uid in self.attackers:
@@ -841,13 +847,13 @@ class Game:
                 power=max(0,self.current_stats(a)[0])
                 trample="trample" in self.current_keywords(a)
                 if b is None:
-                    if uid not in self.blocked_attackers or trample: dfn.life-=power
+                    if uid not in self.blocked_attackers or trample: self._damage_player(dfn.user_id,power)
                 else:
                     lethal=max(0,self.current_stats(b)[1]-b.damage)
                     chosen=self.trample_assignments.get(uid,lethal)
                     assigned=min(power,max(lethal,chosen)) if trample else power
                     if not self._protected_from(b,self.card(a.uid),self.current_colors(a)): b.damage+=assigned
-                    if trample: dfn.life-=max(0,power-assigned)
+                    if trample: self._damage_player(dfn.user_id,max(0,power-assigned))
             if blocker_strikes and not self._protected_from(a,self.card(b.uid),self.current_colors(b)): a.damage+=max(0,self.current_stats(b)[0])
         self._sba(); self._life()
 
@@ -925,20 +931,20 @@ class Game:
             self.stack.remove(spell); self.player(spell.owner).graveyard.append(spell.uid)
             self.log.append(f"{card.name} countered {self.card(spell.uid).name}.")
         elif effect=="tap_damage":
-            self.player(int(s.target)).life-=card.land_tap_damage or card.aura_tap_damage
+            self._damage_player(int(s.target),card.land_tap_damage or card.aura_tap_damage)
         elif effect=="tap_life":
             self.player(int(s.target)).life+=card.opponent_forest_tap_life
         elif effect=="land_event_damage":
-            self.player(int(s.target)).life-=card.land_enter_damage or card.land_grave_damage
+            self._damage_player(int(s.target),card.land_enter_damage or card.land_grave_damage)
         elif effect=="upkeep_damage":
-            self.player(int(s.target)).life-=card.upkeep_each_damage
+            self._damage_player(int(s.target),card.upkeep_each_damage)
         elif effect=="upkeep_hand_damage":
-            target_player=self.player(int(s.target)); target_player.life-=max(0,len(target_player.hand)-4)
+            target_player=self.player(int(s.target)); self._damage_player(target_player.user_id,max(0,len(target_player.hand)-4))
         elif effect=="draw_step_draw":
             self._draw(self.player(int(s.target)),card.draw_step_extra)
         elif effect=="draw_tapped_damage":
             _,source=self.find_permanent(s.source_uid)
-            if source is not None and source.tapped: self.player(int(s.target)).life-=card.draw_tapped_damage
+            if source is not None and source.tapped: self._damage_player(int(s.target),card.draw_tapped_damage)
         elif effect=="draw_self":
             self._draw(self.player(s.owner),1)
         elif effect=="untap_self":
@@ -950,6 +956,8 @@ class Game:
         elif effect=="create_token":
             uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.creates_token
             self.player(s.owner).battlefield.append(Permanent(uid,card.creates_token))
+        elif effect=="prevent_player_damage":
+            self.player(s.owner).damage_prevention+=card.activation_amount
         elif effect=="destroy_all_nonland":
             trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
             for player in self.players.values():
@@ -960,8 +968,8 @@ class Game:
             if ":" in (s.target or ""):
                 if target_card is None or not self.is_creature(target): fizzle("its target was gone or illegal"); return
                 target.damage+=card.activation_amount
-            else: self.player(int(s.target)).life-=card.activation_amount
-            self.player(s.owner).life-=card.activation_self_damage
+            else: self._damage_player(int(s.target),card.activation_amount)
+            self._damage_player(s.owner,card.activation_self_damage)
         elif effect in ("destroy_black_permanent","destroy_tapped_creature","destroy_wall"):
             legal=target_card is not None
             if effect=="destroy_black_permanent": legal=legal and "B" in self.current_colors(target)
@@ -1035,8 +1043,8 @@ class Game:
                     p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
                 target.damage+=amount
                 if c.effect=="damage_x_exile": target.exile_on_death=True; target.cant_regenerate=True
-            else: self.player(int(s.target or self.opponent(s.owner))).life-=amount
-            p.life-=c.self_damage; p.graveyard.append(s.uid)
+            else: self._damage_player(int(s.target or self.opponent(s.owner)),amount)
+            self._damage_player(s.owner,c.self_damage); p.graveyard.append(s.uid)
         elif c.effect in ("regenerate_target","grant_keyword","destroy_wall"):
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None); target_card=self.card(target.uid) if target is not None else None
@@ -1105,7 +1113,7 @@ class Game:
             p.graveyard.append(s.uid)
         elif c.effect in ("earthquake_x","hurricane_x"):
             for controller in self.players.values():
-                controller.life-=s.x_value
+                self._damage_player(controller.user_id,s.x_value)
                 for permanent in controller.battlefield:
                     card=self.card(permanent.uid)
                     keywords=self.current_keywords(permanent)
@@ -1160,6 +1168,7 @@ class Game:
             if not affected: return
     def _cleanup(self):
         for p in self.players.values():
+            p.damage_prevention=0
             for x in p.battlefield:
                 x.damage=x.bonus=x.power_bonus=x.toughness_bonus=x.activations_this_turn=0
                 x.exile_on_death=False; x.cant_regenerate=False; x.regeneration_shields=0; x.temporary_keywords=[]
@@ -1204,6 +1213,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

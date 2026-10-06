@@ -433,6 +433,21 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
         game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(game.current_stats(bear),(3,2))
 
+    def test_ai_activates_conservator_only_for_pending_damage(self):
+        quiet=solo(order=(AI,HUMAN)); quiet.player(HUMAN).kept=True; quiet.player(AI).kept=True; quiet.player(AI).hand=[]
+        conservator=self.add(quiet,AI,"lea:237"); [self.add(quiet,AI,"forest") for _ in range(3)]
+        quiet.active_index=0; quiet.phase="precombat_main"; quiet.priority_user=AI; quiet.player(AI).land_played=True
+        advance_solo(quiet); self.assertFalse(conservator.tapped); self.assertFalse(quiet.stack)
+
+        threatened=solo(order=(HUMAN,AI)); threatened.player(HUMAN).kept=True; threatened.player(AI).kept=True; threatened.player(AI).hand=[]
+        conservator=self.add(threatened,AI,"lea:237"); [self.add(threatened,AI,"forest") for _ in range(3)]
+        shock=self.add(threatened,HUMAN,"shock","hand"); self.add(threatened,HUMAN,"mountain")
+        threatened.active_index=0; threatened.phase="precombat_main"; threatened.priority_user=HUMAN; threatened.player(HUMAN).land_played=True
+        threatened.play(HUMAN,1,str(AI)); advance_solo(threatened)
+        self.assertEqual(threatened.stack[-1].source_uid,conservator.uid); self.assertEqual(threatened.stack[-1].ability_effect,"prevent_player_damage")
+        threatened.pass_priority(HUMAN); advance_solo(threatened); self.assertEqual(threatened.player(AI).damage_prevention,2)
+        threatened.pass_priority(HUMAN); advance_solo(threatened); self.assertEqual(threatened.player(AI).life,20); self.assertIn(shock,threatened.player(HUMAN).graveyard)
+
     def test_ai_activates_the_hive_and_resolves_a_wasp(self):
         game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         hive=self.add(game,AI,"lea:272"); [self.add(game,AI,"forest") for _ in range(5)]

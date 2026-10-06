@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 from mtg.cards import CARDS, Card, starter
-from mtg.engine import Game, GameError, Permanent
+from mtg.engine import Game, GameError, Permanent, Spell
 
 def ready(seed=7):
     g=Game(1,[10,20],seed); g.mulligan(10,True); g.mulligan(20,True); return g
@@ -2004,6 +2004,39 @@ class AlphaHiveTokenTests(unittest.TestCase):
         with self.assertRaisesRegex(GameError,"cannot attack"): game.declare_attackers(10,[len(game.player(10).battlefield)])
         wasp.sick=False; game.declare_attackers(10,[len(game.player(10).battlefield)])
         self.assertEqual(game.attackers,[wasp.uid]); self.assertIn("flying",game.current_keywords(wasp))
+
+
+class AlphaConservatorTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_activation_pays_taps_persists_and_survives_source_removal(self):
+        game=ready(); conservator=self.add(game,10,"lea:237"); lands=[self.add(game,10,"plains") for _ in range(3)]
+        game.activate_ability(10,1); self.assertTrue(conservator.tapped); self.assertTrue(all(x.tapped for x in lands))
+        self.assertEqual(game.stack[-1].ability_effect,"prevent_player_damage"); self.assertEqual(game.player(10).damage_prevention,0)
+        game.player(10).battlefield.remove(conservator); game.player(10).graveyard.append(conservator.uid)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.to_raw(),game.to_raw()); self.resolve_top(restored)
+        self.assertEqual(restored.player(10).damage_prevention,2)
+
+    def test_prevention_is_consumed_across_damage_and_expires_at_cleanup(self):
+        game=ready(); game.player(10).damage_prevention=4; before=game.player(10).life
+        self.assertEqual(game._damage_player(10,1),0); self.assertEqual(game.player(10).damage_prevention,3)
+        self.assertEqual(game._damage_player(10,5),2); self.assertEqual(game.player(10).life,before-2); self.assertEqual(game.player(10).damage_prevention,0)
+        game.player(10).damage_prevention=2; game._cleanup(); self.assertEqual(game.player(10).damage_prevention,0)
+
+    def test_prevention_applies_to_spells_triggers_combat_and_self_damage(self):
+        spell=ready(); spell.player(20).damage_prevention=2; uid=spell.next_uid; spell.next_uid+=1; spell.cards[uid]="shock"
+        spell.stack.append(Spell(10,uid,"shock","20")); spell._resolve(spell.stack.pop()); self.assertEqual(spell.player(20).life,20)
+        trigger=ready(); self.add(trigger,20,"lea:238"); trigger.active_index=0; trigger._start_turn(); trigger.player(10).damage_prevention=1; self.resolve_top(trigger)
+        self.assertEqual(trigger.player(10).life,20); self.assertEqual(trigger.player(10).damage_prevention,0)
+        combat=ready(); attacker=self.add(combat,20,"giant"); combat.player(10).damage_prevention=2; combat.active_index=1; combat.attackers=[attacker.uid]
+        combat._combat_damage(False); self.assertEqual(combat.player(10).life,19)
+        recoil=ready(); recoil.player(10).damage_prevention=3; uid=recoil.next_uid; recoil.next_uid+=1; recoil.cards[uid]="lea:74"
+        recoil.stack.append(Spell(10,uid,"lea:74","20")); recoil._resolve(recoil.stack.pop()); self.assertEqual(recoil.player(10).life,20)
 
 
 class AlphaStaticArtifactTests(unittest.TestCase):
