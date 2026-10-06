@@ -268,7 +268,7 @@ class BattleRenderer:
         for y in range(360):
             ratio=y/359;draw.line((0,y,1200,y),fill=(int(246-66*ratio),int(220-74*ratio),int(132-63*ratio)))
         draw.rounded_rectangle((20,18,1180,342),20,fill=(255,244,194),outline=(92,66,25),width=5)
-        draw.text((46,34),"YOUR POKÉMON PARTY",fill=(92,66,25),font=ImageFont.load_default(size=28))
+        draw.text((46,34),"YOUR POKEMON PARTY",fill=(92,66,25),font=ImageFont.load_default(size=28))
         self._pokeball(draw,(1138,56),26)
         slots=list(zip(pokemon,data))
         for index in range(6):
@@ -284,6 +284,7 @@ class BattleRenderer:
             if item.shiny:draw.text((left+10,top+34),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=12))
             draw.text((left+10,top+190),f"Lv.{item.level}",fill=(82,62,29),font=ImageFont.load_default(size=15))
             draw.text((left+10,top+211),f"HP {current}/{maximum}",fill=(82,62,29),font=ImageFont.load_default(size=14))
+            self._gender_mark(draw,(left+145,top+207),item.gender,(82,62,29))
         return self._save(canvas)
 
     def _collection_card_sync(self,pokemon,data,page,pages,total):
