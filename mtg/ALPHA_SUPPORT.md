@@ -7,10 +7,10 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 67 creatures playable through 0.84.0; 10 remain |
+| Creatures with abilities | 77 | 68 creatures playable through 0.92.0; 9 remain |
 | Instants and sorceries | 70 | 58 spells playable through 0.91.0; 12 remain |
 | Enchantments | 68 | 60 enchantments playable through 0.90.0; 8 remain |
-| Artifacts | 42 | Thirty-five artifacts playable through 0.89.0; 7 remain |
+| Artifacts | 42 | Thirty-six artifacts playable through 0.92.0; 6 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
 | Dexterity adaptation | 1 | Chaos Orb requires a deterministic digital design before promotion |
@@ -204,3 +204,5 @@ The 0.89.0 private-hand promotion adds Disrupting Scepter and Glasses of Urza. T
 The 0.90.0 damage-history promotion adds Simulacrum and Living Artifact. Actual post-prevention player damage accumulates for the turn and survives reloads before resetting at cleanup. Simulacrum targets a creature its caster controls, gains life equal to that history, then deals the same amount to the stable target, with a full fizzle if that target becomes illegal. Living Artifact creates one persisted, respondable trigger per damage event that snapshots the amount and adds vitality counters only while the Aura remains; each upkeep offers its controller an optional one-counter exchange for one life. Trigger batches retain event order and use APNAP ordering within simultaneous batches, while public rendering and solo AI use the same rules.
 
 The 0.91.0 flexible-prevention promotion adds Guardian Angel and Reverse Damage. Guardian Angel applies its chosen X to a stable player or creature target, then grants its caster a persisted turn-scoped Discord action that atomically pays {1} for each additional point of next-damage prevention. Reverse Damage records a stable chosen spell, ability, or permanent source, consumes the replacement only on that source’s next damage event to its caster, prevents the damage, and gains exactly the prevented amount. Both effects survive reloads, clear at cleanup, render publicly without hidden information, and use the same legal paths in solo AI.
+
+The 0.92.0 permanent-replacement promotion adds Forcefield and Personal Incarnation. Forcefield chooses a currently unblocked attacker after blockers, persists a source-bound next-combat-damage cap through responses and reloads, and consumes it only when that creature next deals damage to the controller. Personal Incarnation stacks one-point owner redirections, transfers those points through the shared player-damage path, clears unused shields at cleanup, and makes its owner lose half their life rounded up when it dies. Its owner-only activation remains available through a dedicated Discord action even while an opponent controls the creature. Public rendering and solo AI use the same legal actions.

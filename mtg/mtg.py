@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.91.0"
+    __version__="0.92.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -136,6 +136,7 @@ class MTG(commands.Cog):
                 if granted_regeneration: ability_parts.append(f"Granted: {granted_regeneration}: Regenerate this creature")
                 if x.regeneration_shields: ability_parts.append(f"Regeneration shield ×{x.regeneration_shields}")
                 if x.damage_prevention: ability_parts.append(f"Damage prevention remaining: {x.damage_prevention}")
+                if x.redirect_damage_to_owner: ability_parts.append(f"Next damage redirected to owner: {x.redirect_damage_to_owner}")
                 if x.plus_one_counters: ability_parts.append(f"+1/+1 counters: {x.plus_one_counters}")
                 if x.power_counters: ability_parts.append(f"+1/+0 counters: {x.power_counters}")
                 if x.corpse_counters: ability_parts.append(f"Corpse counters: {x.corpse_counters}")
@@ -159,6 +160,9 @@ class MTG(commands.Cog):
             if p.source_damage_lifegain:
                 sources=[g.card(uid).name if uid in g.cards else f"source {uid}" for uid in p.source_damage_lifegain]
                 value+="\nReverse Damage awaiting: "+", ".join(sources)
+            if p.source_damage_caps:
+                sources=[g.card(uid).name if uid in g.cards else f"source {uid}" for uid in p.source_damage_caps]
+                value+="\nForcefield awaiting: "+", ".join(sources)
             e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value=value,inline=False)
         if g.phase=="untap" and g.untap_pending:
             pending=set(g.untap_pending); player=g.player(g.active_user)
@@ -503,6 +507,10 @@ class MTG(commands.Cog):
     async def angel(self,ctx,target:str):
         """While Guardian Angel is active, pay {1} to prevent the next 1 damage to PLAYER_ID or USER_ID:POSITION."""
         await self.mutate_ctx(ctx,lambda g:g.activate_guardian_angel(ctx.author.id,target),"guardian_angel")
+    @mtg.command(name="incarnation")
+    async def incarnation(self,ctx,controller_id:int,position:int):
+        """Activate a Personal Incarnation you own while another player controls it."""
+        await self.mutate_ctx(ctx,lambda g:g.activate_personal_incarnation(ctx.author.id,controller_id,position),"activate_owned_incarnation")
     @mtg.command(name="activate")
     async def activate(self,ctx,position:int,target:str=None,x_value:int=None,choice_value:int=None):
         """Activate an ability. Supply a target when needed; Clockwork Beast uses `- X COUNTERS`."""

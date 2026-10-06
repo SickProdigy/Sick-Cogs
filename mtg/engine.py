@@ -30,6 +30,7 @@ class Permanent:
     color_timestamp: int = 0
     animated_until_end_combat: bool = False
     damage_prevention: int = 0
+    redirect_damage_to_owner: int = 0
     plus_one_counters: int = 0
     power_counters: int = 0
     corpse_counters: int = 0
@@ -59,6 +60,7 @@ class Player:
     damage_prevention: int = 0
     source_damage_prevention: List[int] = field(default_factory=list)
     source_damage_lifegain: List[int] = field(default_factory=list)
+    source_damage_caps: Dict[int, int] = field(default_factory=dict)
     guardian_angel_active: bool = False
     turn_start_untapped_lands: int = 0
     channel_active: bool = False
@@ -643,6 +645,16 @@ class Game:
                 source=battlefield[pos-1]; colors=self.current_colors(source); source_uid=source.uid
             if card.prevent_source_color not in colors: raise GameError(f"Chosen source must be {card.prevent_source_color}.")
             return f"D:{source_uid}:{card.prevent_source_color}"
+        if card.activation_effect=="cap_unblocked_damage":
+            if self.phase not in ("after_blockers","after_first_strike") or self.active_user==user: raise GameError("Choose an unblocked attacking creature after blockers.")
+            if not target or ":" not in target: raise GameError("Target must be USER_ID:POSITION.")
+            try: target_user,pos=(int(x) for x in target.split(":"))
+            except (TypeError,ValueError) as error: raise GameError("Target must be USER_ID:POSITION.") from error
+            battlefield=self.player(target_user).battlefield
+            if target_user!=self.active_user or not 1<=pos<=len(battlefield): raise GameError("Choose an unblocked attacking creature.")
+            attacker=battlefield[pos-1]
+            if attacker.uid not in self.attackers or attacker.uid in self.blocks: raise GameError("Choose an unblocked attacking creature.")
+            return f"{target_user}:{attacker.uid}"
         if card.activation_effect=="counter_color":
             spell=self._target_stack(target)
             if card.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {card.target_color}.")
@@ -653,6 +665,7 @@ class Game:
             except (TypeError,ValueError) as error: raise GameError("Target must be a player ID.") from error
             self.player(target_user); return str(target_user)
         if card.activation_effect in ("untap_self","animate_self","add_power_counters"): return f"{user}:{source.uid}"
+        if card.activation_effect=="redirect_one_to_owner": return f"{user}:{source.uid}"
         if card.activation_attached:
             controller,attached=self.find_permanent(source.attached_to)
             if attached is None or not self._aura_can_attach(card,attached,source): raise GameError(f"{card.name} is not attached to a legal permanent.")
@@ -687,6 +700,7 @@ class Game:
         if activation_effect=="corpse_regenerate" and permanent.corpse_counters<=0: return False
         if card.activation_upkeep_only and (self.phase!="upkeep" or self.active_user!=user): return False
         if card.activation_controller_turn_only and self.active_user!=user: return False
+        if card.activation_owner_only and permanent.owner!=user: return False
         if card.activation_once_per_turn and permanent.activations_this_turn: return False
         if card.activation_x_choice:
             if not isinstance(x_value,int) or not isinstance(choice_value,int) or x_value<0 or choice_value<0 or choice_value>x_value or permanent.power_counters+choice_value>7: return False
@@ -696,7 +710,7 @@ class Game:
         try:
             stable_target=self._target_for_activation(card,user,target,permanent)
             protected=self._stable_target_permanent(stable_target)
-            if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate","add_power_counters") and self._protected_from(protected,card,self.current_colors(permanent)): return False
+            if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate","add_power_counters","redirect_one_to_owner","cap_unblocked_damage") and self._protected_from(protected,card,self.current_colors(permanent)): return False
         except GameError: return False
         excluded=(permanent.uid,) if activation_tap else ()
         return self._mana_payment(player,card,x_value=x_value,mana_cost=activation_cost,excluded_uids=excluded,activation_colors=self.current_colors(permanent),activation_is_enchantment=card.has_type("Enchantment")) is not None
@@ -710,6 +724,7 @@ class Game:
         if activation_effect=="corpse_regenerate" and permanent.corpse_counters<=0: raise GameError(f"{card.name} has no corpse counters to remove.")
         if card.activation_upkeep_only and (self.phase!="upkeep" or self.active_user!=user): raise GameError(f"{card.name} can be activated only during your upkeep.")
         if card.activation_controller_turn_only and self.active_user!=user: raise GameError(f"{card.name} can be activated only during your turn.")
+        if card.activation_owner_only and permanent.owner!=user: raise GameError(f"Only {card.name}’s owner may activate it.")
         if card.activation_once_per_turn and permanent.activations_this_turn: raise GameError(f"{card.name} can be activated only once each turn.")
         if card.activation_x_choice:
             if not isinstance(x_value,int) or x_value<0: raise GameError(f"Choose a nonnegative X value for {card.name}.")
@@ -721,7 +736,7 @@ class Game:
         if activation_tap and self.is_creature(permanent) and permanent.sick and not card.haste and "haste" not in self.current_keywords(permanent): raise GameError(f"{card.name} has summoning sickness.")
         stable_target=self._target_for_activation(card,user,target,permanent)
         protected=self._stable_target_permanent(stable_target)
-        if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate","add_power_counters") and self._protected_from(protected,card,self.current_colors(permanent)): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
+        if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate","add_power_counters","redirect_one_to_owner","cap_unblocked_damage") and self._protected_from(protected,card,self.current_colors(permanent)): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
         excluded=(permanent.uid,) if activation_tap else ()
         payment=self._mana_payment(player,card,x_value=x_value,mana_cost=activation_cost,excluded_uids=excluded,activation_colors=self.current_colors(permanent),activation_is_enchantment=card.has_type("Enchantment"))
         if payment is None: raise GameError(f"You cannot pay {activation_cost or 'that cost'} for {card.name}.")
@@ -743,6 +758,17 @@ class Game:
         if not self.finished: self.priority_user=self.opponent(user)
         ability_text=card.ability_text if native else f"{activation_cost}: Regenerate this creature (granted)"
         self.log.append(f"{user} activated {card.name}: {ability_text}.")
+
+    def activate_personal_incarnation(self,user,controller_id,position):
+        self._priority(user); controller=self.player(controller_id)
+        if not 1<=position<=len(controller.battlefield): raise GameError("No permanent at that battlefield position.")
+        permanent=controller.battlefield[position-1]; card=self.card(permanent.uid)
+        if card.key!="lea:31" or permanent.owner!=user: raise GameError("Choose a Personal Incarnation you own.")
+        ability_uid=self.next_uid; self.next_uid+=1; self.cards[ability_uid]=card.key
+        self.stack.append(Spell(user,ability_uid,card.key,f"{controller_id}:{permanent.uid}",ability_effect="redirect_one_to_owner",source_uid=permanent.uid,color_override=permanent.color_override))
+        self.phase_passes=0
+        for item in self.stack[:-1]: item.passes=0
+        self.priority_user=self.opponent(user); self.log.append(f"{user} activated {card.name} as its owner.")
 
     def activate_mana(self,user,position,color=None):
         self._priority(user); player=self.player(user)
@@ -1413,6 +1439,10 @@ class Game:
     def _damage_permanent(self,permanent,amount,source=None,colors=None,trigger_batch=None,source_uid=None):
         amount=max(0,int(amount))
         if source is not None and self._protected_from(permanent,source,colors): return 0
+        redirected=min(amount,permanent.redirect_damage_to_owner)
+        if redirected:
+            permanent.redirect_damage_to_owner-=redirected; amount-=redirected; source_controller,source_permanent=self.find_permanent(source_uid) if source_uid is not None else (None,None)
+            self._damage_player(self.permanent_owner(permanent).user_id,redirected,source_permanent,source_controller.user_id if source_controller is not None else None,source_uid)
         prevented=min(amount,permanent.damage_prevention); permanent.damage_prevention-=prevented; dealt=amount-prevented; permanent.damage+=dealt
         if dealt and source_uid is not None and source_uid not in permanent.damage_source_uids: permanent.damage_source_uids.append(source_uid)
         if dealt and self.card(permanent.uid).dealt_damage_plus_counter:
@@ -1428,10 +1458,12 @@ class Game:
         for uid in chosen: player.hand.remove(uid); player.graveyard.append(uid)
         return chosen
 
-    def _damage_player(self,user,amount,source=None,source_controller=None,source_uid=None):
+    def _damage_player(self,user,amount,source=None,source_controller=None,source_uid=None,combat=False):
         player=self.player(user); amount=max(0,int(amount)); identity=source_uid if source_uid is not None else getattr(source,"uid",None)
         if amount and identity in player.source_damage_lifegain:
             player.source_damage_lifegain.remove(identity); player.life+=amount; return 0
+        if combat and amount and identity in player.source_damage_caps:
+            cap=player.source_damage_caps.pop(identity); amount=min(amount,cap)
         if amount and identity in player.source_damage_prevention:
             player.source_damage_prevention.remove(identity); dealt=0
         else:
@@ -1470,13 +1502,13 @@ class Game:
                 power=max(0,self.current_stats(a)[0])
                 trample="trample" in self.current_keywords(a)
                 if b is None:
-                    if uid not in self.blocked_attackers or trample: self._damage_player(dfn.user_id,power,a,atk.user_id)
+                    if uid not in self.blocked_attackers or trample: self._damage_player(dfn.user_id,power,a,atk.user_id,combat=True)
                 else:
                     lethal=max(0,self.current_stats(b)[1]-b.damage)
                     chosen=self.trample_assignments.get(uid,lethal)
                     assigned=min(power,max(lethal,chosen)) if trample else power
                     self._damage_permanent(b,assigned,self.card(a.uid),self.current_colors(a),damage_batch,a.uid)
-                    if trample: self._damage_player(dfn.user_id,max(0,power-assigned),a,atk.user_id)
+                    if trample: self._damage_player(dfn.user_id,max(0,power-assigned),a,atk.user_id,combat=True)
             if blocker_strikes: self._damage_permanent(a,max(0,self.current_stats(b)[0]),self.card(b.uid),self.current_colors(b),damage_batch,b.uid)
         self._sba(); self._life()
 
@@ -1527,6 +1559,8 @@ class Game:
         dies=not permanent.exile_on_death
         token=self.is_token(permanent.uid); owner=self.permanent_owner(permanent,controller)
         if not token: (owner.graveyard if dies else owner.exile).append(permanent.uid)
+        if dies and self.card(permanent.uid).death_owner_half_life:
+            owner.life-=max(0,(owner.life+1)//2)
         if dies and self.is_creature(permanent):
             self.creatures_died_this_turn+=1
             self._death_triggers(permanent,self.next_uid if batch_id is None else batch_id,death_sources,controller)
@@ -1577,11 +1611,17 @@ class Game:
             self.cards.pop(s.uid,None); self.log.append(f"{card.name} ability fizzled because {reason}.")
         controller,target=target_permanent()
         target_card=self.card(target.uid) if target is not None else None
-        if target is not None and effect not in ("self","regenerate","corpse_regenerate","end_step_corpse_counters","empty_battlefield_sacrifice","earthbind_enter","end_step_sacrifice","end_step_destroy","berserk_end_step_destroy","end_combat_destroy","end_combat_remove_power_counter","no_land_sacrifice","dealt_damage_counter","damaged_creature_death_counter","add_power_counters") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
+        if target is not None and effect not in ("self","regenerate","corpse_regenerate","end_step_corpse_counters","empty_battlefield_sacrifice","earthbind_enter","end_step_sacrifice","end_step_destroy","berserk_end_step_destroy","end_combat_destroy","end_combat_remove_power_counter","no_land_sacrifice","dealt_damage_counter","damaged_creature_death_counter","add_power_counters","redirect_one_to_owner","cap_unblocked_damage") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
         if effect=="prevent_source_damage":
             try: _,source_uid,_=s.target.split(":")
             except (AttributeError,ValueError): fizzle("its chosen source was invalid"); return
             self.player(s.owner).source_damage_prevention.append(int(source_uid))
+        elif effect=="cap_unblocked_damage":
+            if target is None or target.uid not in self.attackers or target.uid in self.blocks: fizzle("the chosen creature was no longer attacking unblocked"); return
+            self.player(s.owner).source_damage_caps[target.uid]=1
+        elif effect=="redirect_one_to_owner":
+            if target is None or target.uid!=s.source_uid: fizzle("its source was gone"); return
+            target.redirect_damage_to_owner+=1
         elif effect=="vitality_counter":
             if target is None or target.uid!=s.source_uid: fizzle("its source was gone"); return
             target.vitality_counters+=s.choice_value
@@ -1995,9 +2035,10 @@ class Game:
     def _cleanup(self):
         self.prevent_combat_damage=False; self.creatures_died_this_turn=0; self.attacked_this_turn=[]
         for p in self.players.values():
-            p.channel_active=False; p.guardian_angel_active=False; p.damage_prevention=0; p.source_damage_prevention=[]; p.source_damage_lifegain=[]; p.damage_taken_this_turn=0
+            p.channel_active=False; p.guardian_angel_active=False; p.damage_prevention=0; p.source_damage_prevention=[]; p.source_damage_lifegain=[]; p.source_damage_caps={}; p.damage_taken_this_turn=0
             for x in p.battlefield:
                 x.damage=x.bonus=x.power_bonus=x.toughness_bonus=x.activations_this_turn=0
+                x.redirect_damage_to_owner=0
                 x.exile_on_death=False; x.cant_regenerate=False; x.regeneration_shields=0; x.damage_prevention=0; x.temporary_keywords=[]; x.damage_source_uids=[]
     def _begin_end_step(self):
         pending_sacrifices=set(self.end_step_sacrifices)
@@ -2059,6 +2100,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"damage_prevention":x.get("damage_prevention",0),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

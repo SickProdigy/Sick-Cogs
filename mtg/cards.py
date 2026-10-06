@@ -77,6 +77,7 @@ class Card:
     end_combat_remove_power_counter: bool = False
     activation_upkeep_only: bool = False
     activation_controller_turn_only: bool = False
+    activation_owner_only: bool = False
     activation_once_per_turn: bool = False
     activation_x_choice: bool = False
     prevent_source_color: str = ""
@@ -138,6 +139,7 @@ class Card:
     upkeep_sacrifice_damage: int = 0
     draw_tapped_damage: int = 0
     death_life: bool = False
+    death_owner_half_life: bool = False
     animate_combat: bool = False
     creates_token: str = ""
     opponent_damage_discard_random: bool = False
@@ -408,6 +410,7 @@ ALPHA_ARTIFACTS = {
     "lea:256": {"animate_land_type":"swamp", "animate_land_color":"B"},
     "lea:272": {"activation_cost":"{5}", "activation_tap":True, "activation_effect":"create_token", "activation_text":"Create a 1/1 colorless Insect artifact creature token with flying named Wasp", "creates_token":"token:wasp"},
     "lea:237": {"activation_cost":"{3}", "activation_tap":True, "activation_effect":"prevent_player_damage", "activation_amount":2, "activation_text":"Prevent the next 2 damage that would be dealt to you this turn"},
+    "lea:243": {"activation_cost":"{1}", "activation_effect":"cap_unblocked_damage", "activation_text":"Prevent all but 1 combat damage from a chosen unblocked creature"},
     "lea:242": {"activation_cost":"{3}", "activation_tap":True, "activation_effect":"discard_choice", "activation_text":"Target player discards a card", "activation_controller_turn_only":True},
     "lea:245": {"activation_tap":True, "activation_effect":"look_hand", "activation_text":"Look at target player’s hand"},
 }
@@ -418,6 +421,7 @@ ALPHA_MANA_CREATURES = {
 }
 
 ALPHA_ACTIVATED_CREATURES = {
+    "lea:31": {"activation_cost":"{0}", "activation_effect":"redirect_one_to_owner", "activation_owner_only":True, "death_owner_half_life":True, "activation_text":"The next 1 damage to this creature is dealt to its owner instead"},
     "lea:37": {"activation_tap":True, "activation_effect":"prevent_any_damage", "activation_amount":1, "activation_text":"Prevent the next 1 damage that would be dealt to any target this turn"},
     "lea:106": {"activation_cost":"{B}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
     "lea:132": {"activation_cost":"{B}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
@@ -676,6 +680,7 @@ for reference in PLAYABLE_ALPHA:
         end_combat_remove_power_counter=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("end_combat_remove_power_counter",False),
         activation_upkeep_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_upkeep_only",False),
         activation_controller_turn_only=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_controller_turn_only",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_controller_turn_only",False)),
+        activation_owner_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_owner_only",False),
         activation_once_per_turn=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_once_per_turn",False),
         activation_x_choice=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_x_choice",False),
         prevent_source_color=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("prevent_source_color",""),
@@ -738,6 +743,7 @@ for reference in PLAYABLE_ALPHA:
         upkeep_sacrifice_damage=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_sacrifice_damage",0),
         draw_tapped_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_tapped_damage",0),
         death_life=ALPHA_ARTIFACTS.get(reference.key,{}).get("death_life",False),
+        death_owner_half_life=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("death_owner_half_life",False),
         animate_combat=ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_combat",False),
         creates_token=ALPHA_ARTIFACTS.get(reference.key,{}).get("creates_token",""),
         opponent_damage_discard_random=ALPHA_DAMAGE_TRIGGERS.get(reference.key,{}).get("opponent_damage_discard_random",False),

@@ -50,13 +50,13 @@ class TurnTests(unittest.TestCase):
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("attacked_this_turn"); raw.pop("trample_assignments")
         for player in raw["players"].values():
-            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("source_damage_lifegain"); player.pop("guardian_angel_active"); player.pop("lands_played_this_turn"); player.pop("channel_active")
-            for permanent in player["battlefield"]: permanent.pop("owner",None); permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
+            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("source_damage_lifegain"); player.pop("source_damage_caps"); player.pop("guardian_angel_active"); player.pop("lands_played_this_turn"); player.pop("channel_active")
+            for permanent in player["battlefield"]: permanent.pop("owner",None); permanent.pop("damage_prevention"); permanent.pop("redirect_damage_to_owner"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.combat_participants,[]); self.assertEqual(restored.extra_turns,[]); self.assertEqual(restored.untap_pending,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
-        self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.source_damage_lifegain==[] and not player.guardian_angel_active and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
-        self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] and permanent.owner==player.user_id for player in restored.players.values() for permanent in player.battlefield))
+        self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.source_damage_lifegain==[] and player.source_damage_caps=={} and not player.guardian_angel_active and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
+        self.assertTrue(all(permanent.damage_prevention==0 and permanent.redirect_damage_to_owner==0 and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] and permanent.owner==player.user_id for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
     def test_time_walk_queue_persists_and_gives_a_full_extra_turn(self):
@@ -3699,5 +3699,26 @@ class AlphaFlexiblePreventionTests(unittest.TestCase):
         game=ready(); player=game.player(10); source=game.next_uid; game.next_uid+=1; game.cards[source]="lea:161"; reverse=game.next_uid; game.next_uid+=1; game.cards[reverse]="lea:35"
         game._resolve(Spell(10,reverse,"lea:35",f"D:{source}")); restored=Game.from_raw(game.to_raw()); before=restored.player(10).life
         self.assertEqual(restored._damage_player(10,3,source_uid=source),0); self.assertEqual(restored.player(10).life,before+3); self.assertEqual(restored._damage_player(10,2,source_uid=source),2)
+
+class AlphaDamageReplacementPermanentTests(unittest.TestCase):
+    def test_forcefield_caps_next_unblocked_combat_source_and_persists(self):
+        game=ready(); attacker=Permanent(game.next_uid,"giant",owner=10,sick=False); game.cards[attacker.uid]="giant"; game.next_uid+=1; game.player(10).battlefield=[attacker]
+        forcefield=Permanent(game.next_uid,"lea:243",owner=20,sick=False); game.cards[forcefield.uid]="lea:243"; game.next_uid+=1; land=Permanent(game.next_uid,"plains",owner=20,sick=False); game.cards[land.uid]="plains"; game.next_uid+=1; game.player(20).battlefield=[forcefield,land]
+        game.active_index=0; game.phase="after_blockers"; game.attackers=[attacker.uid]; game.priority_user=20; game.activate_ability(20,1,"10:1"); game.pass_priority(10); game.pass_priority(20)
+        restored=Game.from_raw(game.to_raw()); before=restored.player(20).life; self.assertEqual(restored._damage_player(20,5,restored.find_permanent(attacker.uid)[1],10,attacker.uid,combat=True),1); self.assertEqual(restored.player(20).life,before-1); self.assertFalse(restored.player(20).source_damage_caps)
+
+    def test_forcefield_rejects_blocked_or_noncombat_choices(self):
+        game=ready(); attacker=Permanent(game.next_uid,"giant",owner=10,sick=False); game.cards[attacker.uid]="giant"; game.next_uid+=1; game.player(10).battlefield=[attacker]; source=Permanent(game.next_uid,"lea:243",owner=20,sick=False); game.cards[source.uid]="lea:243"; game.next_uid+=1; game.player(20).battlefield=[source]
+        game.phase="precombat_main"; game.priority_user=20
+        with self.assertRaises(GameError): game.activate_ability(20,1,"10:1")
+
+    def test_personal_incarnation_redirects_one_and_owner_loses_half_on_death(self):
+        game=ready(); incarnation=Permanent(game.next_uid,"lea:31",owner=10,sick=False); game.cards[incarnation.uid]="lea:31"; game.next_uid+=1; game.player(10).battlefield=[incarnation]; game.phase="precombat_main"; game.priority_user=10
+        game.activate_ability(10,1); game.pass_priority(20); game.pass_priority(10); restored=Game.from_raw(game.to_raw()); incarnation=restored.find_permanent(incarnation.uid)[1]; before=restored.player(10).life
+        self.assertEqual(restored._damage_permanent(incarnation,3,source_uid=999),2); self.assertEqual(restored.player(10).life,before-1); restored._destroy(restored.player(10),incarnation,False); self.assertEqual(restored.player(10).life,(before-1)//2)
+
+    def test_personal_incarnation_owner_can_activate_under_opponent_control(self):
+        game=ready(); incarnation=Permanent(game.next_uid,"lea:31",owner=10,sick=False); game.cards[incarnation.uid]="lea:31"; game.next_uid+=1; game.player(20).battlefield=[incarnation]; game.phase="precombat_main"; game.priority_user=10
+        game.activate_personal_incarnation(10,20,1); game.pass_priority(20); game.pass_priority(10); self.assertEqual(incarnation.redirect_damage_to_owner,1)
 
 if __name__=="__main__": unittest.main()

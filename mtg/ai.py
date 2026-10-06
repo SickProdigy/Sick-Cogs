@@ -512,6 +512,15 @@ def _activation_target(game,user,card,source_uid=None):
                 permanent=game.find_permanent(uid)[1]
                 if uid not in protected and uid not in game.blocks and permanent is not None and card.prevent_source_color in game.current_colors(permanent): return f"{game.active_user}:{attacker_player.battlefield.index(permanent)+1}"
         return None
+    if card.activation_effect=="cap_unblocked_damage":
+        if game.phase not in ("after_blockers","after_first_strike") or game.active_user==user: return None
+        protected=game.player(user).source_damage_caps
+        attackers=game.player(game.active_user)
+        choices=[(game.current_stats(permanent)[0],position) for position,permanent in enumerate(attackers.battlefield,1) if permanent.uid in game.attackers and permanent.uid not in game.blocks and permanent.uid not in protected]
+        return f"{game.active_user}:{max(choices)[1]}" if choices else None
+    if card.activation_effect=="redirect_one_to_owner":
+        _,source=game.find_permanent(source_uid)
+        return f"{user}:{game.player(user).battlefield.index(source)+1}" if source is not None and source.owner==user and not source.redirect_damage_to_owner and _permanent_damage_threatened(game,user,source) else None
     if card.activation_effect=="counter_color":
         for position,spell in enumerate(reversed(game.stack),1):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
@@ -656,6 +665,15 @@ def _activate_untap_aura(game,user):
             game.activate_ability(user,position); return "activate"
     return None
 
+def _activate_owned_incarnation(game,user):
+    for controller in game.players.values():
+        if controller.user_id==user: continue
+        for position,permanent in enumerate(controller.battlefield,1):
+            if game.card(permanent.uid).key=="lea:31" and permanent.owner==user and not permanent.redirect_damage_to_owner and _permanent_damage_threatened(game,controller.user_id,permanent):
+                game.activate_personal_incarnation(user,controller.user_id,position); return "activate_owned_incarnation"
+    return None
+
+
 def _activate_targeted_ability(game,user):
     candidates=[]
     for position,permanent in enumerate(game.player(user).battlefield,1):
@@ -756,7 +774,7 @@ def advance_solo(game: Game):
             cost=game.trigger_cost(trigger)
             pay=useful and (not cost or game._mana_payment(game.player(user),game.card(trigger.uid),mana_cost=cost) is not None)
             game.choose_trigger(user,pay); game.record(user,("ai_trigger_accept" if not cost else "ai_trigger_pay") if pay else "ai_trigger_decline"); changed=True; continue
-        action = _activate_regeneration(game,user) or _activate_guardian_angel(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
+        action = _activate_regeneration(game,user) or _activate_owned_incarnation(game,user) or _activate_guardian_angel(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:
             game.record(user, f"ai_{action}")
         else:
