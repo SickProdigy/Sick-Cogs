@@ -6,7 +6,7 @@ Persistent cross-guild Pokémon catching and wild battles for Red.
 
 - One global collection per Discord user across every guild served by the same bot.
 - Bulbasaur, Charmander, or Squirtle starter; immutable owned-Pokémon IDs; six-member parties; ten 30-slot boxes; Pokédex tracking; and profiles.
-- Opt-in spawn channels with randomized thresholds, cooldowns, repeat suppression, generation filters, rarity weighting, expiry, and administrator recovery.
+- Opt-in spawn channels with randomized thresholds, cooldowns, repeat suppression, owner-bounded generation filters, approachable rarity tiers, 15-minute wild encounter expiry, and administrator recovery.
 - All 151 Generation 1 species bundled from validated PokéAPI records, plus owner-triggered cache sync for later generations.
 - Persistent level-scaled wild battles with classic Fight/Pokémon/Bag/Run menus, four move slots, PP, accuracy, physical/special damage, priority/Speed ordering, type effectiveness, critical hits, supported status effects, switching, fainting, deterministic action history/recovery, XP, supported move learning, and every Gen 1 level-based evolution.
 - Poké Ball inventory and restart-safe, idempotent catch settlement.
@@ -23,12 +23,19 @@ Collections are global only within one bot installation. Separate bots do not sh
 1. Load the cog.
 2. Grant Embed Links and Attach Files in spawn channels.
 3. Enable a spawn channel with `[p]pokemon set channel #channel` and designate any existing healing channel with `[p]pokemon set center #chat`.
-4. Review settings with `[p]pokemon set status`; choose `[p]pokemon set pace active|normal|relaxed`, or configure threshold, cooldown, expiry, and generations individually.
+4. Review settings with `[p]pokemon set status`; choose `[p]pokemon set pace active|normal|relaxed`, or configure slower threshold, cooldown, battle expiry, and allowed-generation subsets individually.
 5. Members choose `[p]pokemon starter bulbasaur|charmander|squirtle`.
 6. Meaningful conversation triggers encounters, or an administrator can use `[p]pokemon set spawn` while testing.
 7. Review the next Kanto Gym with `[p]pokemon gym` and challenge it with `[p]pokemon gym challenge`.
 
 Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `gym`, `gym challenge`, `party`, `party add`, `party remove`, `profile`, `bag`, `use potion <slot-or-id>`, `use revive <slot-or-id>`, and `center`. Defeating a wild Pokémon awards XP; catching it adds it to the collection but awards no battle XP. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemon set catalogsync <1-9>`.
+
+
+## Encounter fairness and control
+
+Wild encounters remain open for 15 minutes by default. The bot owner controls that lifetime, the friendly/standard/challenging rarity curve, available generations, minimum activity and cooldown floors, and whether legendary or mythical species may enter ordinary spawns. Special species are event-only by default. Server administrators choose spawn channels and may slow pacing or select a subset of bot-enabled generations, but cannot make encounters faster than the bot-wide floors. Manual server spawns obey the effective cooldown; the bot owner retains a testing bypass.
+
+Owner controls are `[p]pokemon set globalstatus`, `encountertime <minutes>`, `globallimits <activity> <seconds>`, `globalgenerations <1-9...>`, `rarity friendly|standard|challenging`, and `specials true|false`. Server battle duration remains adjustable through `[p]pokemon set battleexpiry <minutes>`; wild lifetime is not server-configurable.
 
 ## Healing and persistent health
 

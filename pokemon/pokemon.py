@@ -20,11 +20,17 @@ log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","badges":[],"items":{"potion":5,"revive":2},"center_last_at":None}
-GLOBAL={"schema":4,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro"}
+GLOBAL={"schema":4,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
 PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
+SPECIAL_SPECIES={144,145,146,150,151}
+RARITY_PROFILES={
+    "friendly":{"common":100,"uncommon":65,"rare":35,"very_rare":15},
+    "standard":{"common":100,"uncommon":45,"rare":18,"very_rare":5},
+    "challenging":{"common":100,"uncommon":30,"rare":8,"very_rare":1},
+}
 
 def pace_for_settings(minimum,maximum,cooldown):
     for name,values in PACE.items():
@@ -45,8 +51,27 @@ def encounter_gender(species,rng):
     if species.gender_rate<0:return "genderless"
     return "female" if rng.randrange(8)<species.gender_rate else "male"
 
-def available_species(generations):
-    return [item for item in SPECIES.values() if item.id not in {1,4,7} and generation_for(item.id) in generations]
+def rarity_tier(species):
+    if species.catch_rate>=190:return "common"
+    if species.catch_rate>=90:return "uncommon"
+    if species.catch_rate>=45:return "rare"
+    return "very_rare"
+
+def spawn_weight(species,profile="friendly"):
+    weights=RARITY_PROFILES.get(profile,RARITY_PROFILES["friendly"])
+    return weights[rarity_tier(species)]
+
+def available_species(generations,allow_special=False):
+    return [item for item in SPECIES.values() if item.id not in {1,4,7} and (allow_special or item.id not in SPECIAL_SPECIES) and generation_for(item.id) in generations]
+
+def effective_generations(selected,allowed):
+    effective=sorted(set(selected)&set(allowed))
+    return effective or sorted(set(allowed))
+
+def bounded_pace(minimum,maximum,cooldown,policy):
+    floor=max(5,int(policy.get("minimum_threshold",8)))
+    minimum=max(floor,int(minimum));maximum=max(minimum,int(maximum))
+    return minimum,maximum,max(int(policy.get("minimum_cooldown",120)),int(cooldown))
 
 def encounter_is_expired(raw,now):
     try:due=datetime.fromisoformat(raw.get("expires_at",""))
@@ -59,7 +84,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.11.0";__author__="SickProdigy"
+    __version__="0.12.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -143,6 +168,7 @@ class Pokemon(commands.Cog):
         if not message.guild or message.author.bot or len((message.content or "").strip())<3:return
         conf=await self.config.guild(message.guild).all()
         if not conf["enabled"] or message.channel.id not in conf["channels"] or conf["active_encounter"]:return
+        policy=await self.config.all();minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
         now=time.monotonic();content=" ".join((message.content or "").casefold().split())
         recent_key=(message.guild.id,message.author.id)
         previous=self.recent_content.get(recent_key)
@@ -156,8 +182,8 @@ class Pokemon(commands.Cog):
         if conf["last_spawn_at"]:
             try:last=datetime.fromisoformat(conf["last_spawn_at"])
             except (TypeError,ValueError):last=None
-            if last and datetime.now(timezone.utc)<last+timedelta(seconds=conf["spawn_cooldown"]):return
-        if count<conf["threshold"]:return
+            if last and datetime.now(timezone.utc)<last+timedelta(seconds=cooldown):return
+        if count<max(minimum,conf["threshold"]):return
         async with self.lock(("spawn",message.guild.id)):
             current=await self.config.guild(message.guild).active_encounter()
             if current:return
@@ -174,11 +200,12 @@ class Pokemon(commands.Cog):
     async def spawn(self,channel):
         async with self.lock("encounters"):
             eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
-        conf=await self.config.guild(channel.guild).all()
-        pool=available_species(conf["generations"])
-        if not pool:raise RuntimeError("No Pokémon are available for the configured generations.")
+        conf=await self.config.guild(channel.guild).all();policy=await self.config.all()
+        generations=effective_generations(conf["generations"],policy["allowed_generations"])
+        pool=available_species(generations,policy["allow_special_species"])
+        if not pool:raise RuntimeError("No Pokémon are available under the bot-wide encounter policy.")
         rng=random.SystemRandom()
-        chosen=rng.choices(pool,weights=[max(1,item.catch_rate) for item in pool],k=1)[0]
+        chosen=rng.choices(pool,weights=[spawn_weight(item,policy["rarity_profile"]) for item in pool],k=1)[0]
         sid=chosen.id;level=await self.spawn_level(channel.guild.id);gender=encounter_gender(chosen,rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
         embed=discord.Embed(title=f"A wild {SPECIES[sid].name} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green())
         try:
@@ -186,11 +213,12 @@ class Pokemon(commands.Cog):
             msg=await channel.send(embed=embed,file=file,view=EncounterView(self,eid))
         except RenderError:
             log.exception("Encounter rendering failed");embed.set_image(url=sprite(sid));msg=await channel.send(embed=embed,view=EncounterView(self,eid))
-        raw={"state":"open","species_id":sid,"level":level,"gender":gender,"backdrop":backdrop,"level_locked":True,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=conf["encounter_timeout"])).isoformat(),"encounter_timeout":conf["encounter_timeout"]}
+        raw={"state":"open","species_id":sid,"level":level,"gender":gender,"backdrop":backdrop,"level_locked":True,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=policy["encounter_timeout"])).isoformat(),"encounter_timeout":policy["encounter_timeout"]}
         await self.put_encounter(eid,raw)
         self.activity[channel.guild.id]=0
         await self.config.guild(channel.guild).active_encounter.set(eid);await self.config.guild(channel.guild).activity.set(0)
-        await self.config.guild(channel.guild).threshold.set(random.SystemRandom().randrange(conf["threshold_min"],conf["threshold_max"]+1))
+        minimum,maximum,_=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
+        await self.config.guild(channel.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1))
         await self.config.guild(channel.guild).last_spawn_at.set(datetime.now(timezone.utc).isoformat())
     async def claim(self,i,eid):
         async with self.lock(("user",i.user.id)), self.lock(("encounter",eid)), self.lock("encounters"):
@@ -613,16 +641,18 @@ class Pokemon(commands.Cog):
 
     @pokemon_set.command(name="status")
     async def spawn_status(self,ctx):
-        conf=await self.config.guild(ctx.guild).all()
+        conf=await self.config.guild(ctx.guild).all();policy=await self.config.all()
+        minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
+        generations=effective_generations(conf["generations"],policy["allowed_generations"])
         channels=", ".join(f"<#{value}>" for value in conf["channels"]) or "None"
         await ctx.send(
             f"Enabled: **{conf['enabled']}**\n"
             f"Channels: {channels}\n"
-            f"Threshold: {conf['threshold_min']}–{conf['threshold_max']}\n"
+            f"Threshold: {minimum}–{maximum}\n"
             f"Pace: {conf['pace']}\n"
-            f"Cooldown: {conf['spawn_cooldown']}s\n"
-            f"Encounter/battle expiry: {conf['encounter_timeout']}s/{conf['battle_timeout']}s\n"
-            f"Generations: {', '.join(map(str,conf['generations']))}\n"
+            f"Cooldown: {cooldown}s\n"
+            f"Encounter/battle expiry: {policy['encounter_timeout']}s/{conf['battle_timeout']}s\n"
+            f"Generations: {', '.join(map(str,generations))}\n"
             f"Active: {conf['active_encounter'] or 'None'}\n"
             f"Catalog species: {len(SPECIES)}"
         )
@@ -631,7 +661,7 @@ class Pokemon(commands.Cog):
         setting=setting.casefold()
         if setting not in PACE:
             await ctx.send("Choose active, normal, or relaxed.");return
-        minimum,maximum,cooldown=PACE[setting]
+        policy=await self.config.all();minimum,maximum,cooldown=bounded_pace(*PACE[setting],policy)
         await self.config.guild(ctx.guild).threshold_min.set(minimum)
         await self.config.guild(ctx.guild).threshold_max.set(maximum)
         await self.config.guild(ctx.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1))
@@ -641,28 +671,37 @@ class Pokemon(commands.Cog):
 
     @pokemon_set.command(name="threshold")
     async def threshold(self,ctx,minimum:int,maximum:int):
-        if not 5<=minimum<=maximum<=500:await ctx.send("Use 5–500 with minimum <= maximum.");return
+        policy=await self.config.all();floor=policy["minimum_threshold"]
+        if not floor<=minimum<=maximum<=500:await ctx.send(f"Use {floor}–500 with minimum <= maximum.");return
         await self.config.guild(ctx.guild).pace.set("custom")
         await self.config.guild(ctx.guild).threshold_min.set(minimum);await self.config.guild(ctx.guild).threshold_max.set(maximum)
         await self.config.guild(ctx.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1));await ctx.send("Spawn threshold updated.")
     @pokemon_set.command(name="cooldown")
     async def cooldown(self,ctx,seconds:int):
-        if not 60<=seconds<=86400:await ctx.send("Use 60–86400 seconds.");return
+        policy=await self.config.all();floor=policy["minimum_cooldown"]
+        if not floor<=seconds<=86400:await ctx.send(f"Use {floor}–86400 seconds.");return
         await self.config.guild(ctx.guild).pace.set("custom")
         await self.config.guild(ctx.guild).spawn_cooldown.set(seconds);await ctx.send("Spawn cooldown updated.")
-    @pokemon_set.command(name="expiry")
-    async def expiry(self,ctx,encounter_minutes:int,battle_minutes:int):
-        if not 1<=encounter_minutes<=1440 or not 5<=battle_minutes<=1440:await ctx.send("Encounter: 1–1440 minutes; battle: 5–1440.");return
-        await self.config.guild(ctx.guild).encounter_timeout.set(encounter_minutes*60);await self.config.guild(ctx.guild).battle_timeout.set(battle_minutes*60);await ctx.send("Expiry updated.")
+    @pokemon_set.command(name="battleexpiry")
+    async def battle_expiry(self,ctx,battle_minutes:int):
+        if not 5<=battle_minutes<=1440:await ctx.send("Use 5–1440 minutes.");return
+        await self.config.guild(ctx.guild).battle_timeout.set(battle_minutes*60);await ctx.send("Battle expiry updated. Wild encounter lifetime is controlled by the bot owner.")
     @pokemon_set.command(name="generations")
     async def generations(self,ctx,*values:int):
-        selected=sorted(set(values))
-        if not selected or any(value<1 or value>9 for value in selected):await ctx.send("Choose generations 1–9.");return
+        selected=sorted(set(values));allowed=await self.config.allowed_generations()
+        if not selected or not set(selected)<=set(allowed):await ctx.send(f"Choose from bot-enabled generations: {', '.join(map(str,allowed))}.");return
         await self.config.guild(ctx.guild).generations.set(selected);await ctx.send(f"Enabled generations: {', '.join(map(str,selected))}.")
     @pokemon_set.command(name="spawn")
     async def force_spawn(self,ctx,channel:discord.TextChannel=None):
         channel=channel or ctx.channel
-        if await self.config.guild(ctx.guild).active_encounter():await ctx.send("This server already has an encounter.");return
+        conf=await self.config.guild(ctx.guild).all()
+        if conf["active_encounter"]:await ctx.send("This server already has an encounter.");return
+        if not await self.bot.is_owner(ctx.author) and conf["last_spawn_at"]:
+            policy=await self.config.all();_,_,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
+            try:last=datetime.fromisoformat(conf["last_spawn_at"])
+            except (TypeError,ValueError):last=None
+            remaining=max(0,round((last+timedelta(seconds=cooldown)-datetime.now(timezone.utc)).total_seconds())) if last else 0
+            if remaining:await ctx.send(f"The bot-wide spawn cooldown is active for another {remaining}s.");return
         await self.spawn(channel)
     @pokemon_set.command(name="pokedexstyle")
     @commands.is_owner()
@@ -678,6 +717,43 @@ class Pokemon(commands.Cog):
             return
         await self.config.pokedex_default_style.set(style)
         await ctx.send(f"Default Pokédex style set to **{POKEDEX_STYLES[style].label}**.")
+
+    @pokemon_set.command(name="globalstatus")
+    @commands.is_owner()
+    async def global_status(self,ctx):
+        policy=await self.config.all()
+        await ctx.send(f"Encounter lifetime: {policy['encounter_timeout']//60}m\nMinimum threshold/cooldown: {policy['minimum_threshold']} points/{policy['minimum_cooldown']}s\nAllowed generations: {', '.join(map(str,policy['allowed_generations']))}\nRarity: {policy['rarity_profile']}\nSpecial species: {'enabled' if policy['allow_special_species'] else 'event-only'}")
+
+    @pokemon_set.command(name="encountertime")
+    @commands.is_owner()
+    async def encounter_time(self,ctx,minutes:int):
+        if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes.");return
+        await self.config.encounter_timeout.set(minutes*60);await ctx.send(f"Global wild encounter lifetime set to {minutes} minutes.")
+
+    @pokemon_set.command(name="globallimits")
+    @commands.is_owner()
+    async def global_limits(self,ctx,minimum_threshold:int,minimum_cooldown:int):
+        if not 5<=minimum_threshold<=500 or not 60<=minimum_cooldown<=86400:await ctx.send("Threshold: 5–500; cooldown: 60–86400 seconds.");return
+        await self.config.minimum_threshold.set(minimum_threshold);await self.config.minimum_cooldown.set(minimum_cooldown);await ctx.send("Global spawn-rate floors updated. Servers may only use slower settings.")
+
+    @pokemon_set.command(name="globalgenerations")
+    @commands.is_owner()
+    async def global_generations(self,ctx,*values:int):
+        selected=sorted(set(values))
+        if not selected or any(value<1 or value>9 for value in selected):await ctx.send("Choose generations 1–9.");return
+        await self.config.allowed_generations.set(selected);await ctx.send(f"Bot-wide generations: {', '.join(map(str,selected))}.")
+
+    @pokemon_set.command(name="rarity")
+    @commands.is_owner()
+    async def rarity(self,ctx,profile:str):
+        profile=profile.casefold()
+        if profile not in RARITY_PROFILES:await ctx.send("Choose friendly, standard, or challenging.");return
+        await self.config.rarity_profile.set(profile);await ctx.send(f"Global encounter rarity set to {profile}.")
+
+    @pokemon_set.command(name="specials")
+    @commands.is_owner()
+    async def specials(self,ctx,enabled:bool):
+        await self.config.allow_special_species.set(enabled);await ctx.send("Special species may appear normally." if enabled else "Legendary and mythical species are event-only.")
 
     @pokemon_set.command(name="catalogsync")
     @commands.is_owner()
