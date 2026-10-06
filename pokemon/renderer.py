@@ -184,40 +184,40 @@ class BattleRenderer:
         draw.ellipse((cx-inner,cy-inner,cx+inner,cy+inner),fill=RETRO[5],outline=RETRO[1],width=2)
 
     def _starter_sync(self,pokemon,data,trainer_name):
-        canvas=Image.new("RGB",(800,450),(210,199,168));draw=ImageDraw.Draw(canvas)
+        canvas=Image.new("RGB",(800,450),(224,227,222));draw=ImageDraw.Draw(canvas)
         # Original retro research lab inspired by the early games: stocked shelves and woodwork.
-        draw.rectangle((0,0,800,245),fill=(211,205,174))
-        for y in range(24,246,28):draw.line((0,y,800,y),fill=(160,144,111),width=3)
+        draw.rectangle((0,0,800,245),fill=(218,222,216))
+        for y in range(24,246,28):draw.line((0,y,800,y),fill=(178,185,181),width=2)
         # Computer workstation on the left.
-        draw.rectangle((24,145,245,226),fill=(104,86,65),outline=RETRO[0],width=5)
-        draw.rectangle((42,35,222,145),fill=(76,79,70),outline=RETRO[0],width=5)
+        draw.rectangle((24,145,245,226),fill=(119,124,126),outline=RETRO[0],width=5)
+        draw.rectangle((42,35,222,145),fill=(92,98,101),outline=RETRO[0],width=5)
         draw.rectangle((57,49,207,125),fill=(126,183,177),outline=RETRO[0],width=4)
-        draw.rectangle((76,162,207,186),fill=(191,181,143),outline=RETRO[0],width=3)
+        draw.rectangle((76,162,207,186),fill=(179,184,181),outline=RETRO[0],width=3)
         for x in range(85,199,18):draw.line((x,168,x+9,168),fill=RETRO[1],width=3)
-        draw.rectangle((48,193,221,215),fill=(70,61,50),outline=RETRO[0],width=3)
-        for x,color in ((61,(184,87,64)),(91,RETRO[2]),(121,(91,148,163)),(151,(184,87,64))):draw.ellipse((x,197,x+13,210),fill=color,outline=RETRO[0],width=2)
+        draw.rectangle((48,193,221,215),fill=(78,84,87),outline=RETRO[0],width=3)
+        for x,color in ((61,(151,157,154)),(91,(124,143,145)),(121,(167,153,117)),(151,(151,157,154))):draw.ellipse((x,197,x+13,210),fill=color,outline=RETRO[0],width=2)
         # Stocked research shelving on the right.
         left,right=555,775
-        draw.rectangle((left,20,right,235),fill=(91,74,57),outline=RETRO[0],width=5)
-        for shelf_y in (65,112,159,206):draw.rectangle((left+7,shelf_y,right-7,shelf_y+8),fill=(64,52,43),outline=RETRO[0],width=2)
+        draw.rectangle((left,20,right,235),fill=(112,118,122),outline=RETRO[0],width=5)
+        for shelf_y in (65,112,159,206):draw.rectangle((left+7,shelf_y,right-7,shelf_y+8),fill=(75,82,86),outline=RETRO[0],width=2)
         for row_y in (32,79,126,173):
-            for column,color in enumerate(((184,87,64),(91,148,163),(177,164,78),(125,105,83))):
+            for column,color in enumerate(((165,168,163),(125,151,158),(172,157,117),(145,148,145))):
                 x=left+14+column*47;draw.rectangle((x,row_y,x+29,row_y+29),fill=color,outline=RETRO[0],width=2)
         # Simple framed research diagrams behind the presentation table.
         for left in (285,405):
             draw.rectangle((left,45,left+95,155),fill=(234,229,197),outline=RETRO[0],width=4)
             draw.ellipse((left+24,64,left+71,111),outline=(91,148,163),width=4)
             draw.line((left+18,130,left+77,130),fill=(112,83,58),width=4)
-        draw.rectangle((0,235,800,350),fill=(173,139,96))
-        for y in range(246,350,22):draw.line((0,y,800,y),fill=(112,83,58),width=3)
-        # A broad wooden presentation table holds the three original starter balls.
+        draw.rectangle((0,235,800,350),fill=(222,226,223))
+        for x in range(-160,961,80):draw.line((400,235,x,350),fill=(184,191,188),width=2)
+        for y in (270,310):draw.line((0,y,800,y),fill=(184,191,188),width=2)
+        # A broad wooden presentation table holds the two unchosen starter balls.
         draw.polygon(((165,258),(635,258),(700,350),(100,350)),fill=(132,82,48),outline=RETRO[0])
         draw.polygon(((180,245),(620,245),(650,280),(150,280)),fill=(189,125,67),outline=RETRO[0])
         draw.line((180,258,620,258),fill=(231,170,94),width=5)
         self._pokeball(draw,(255,297),34)
         self._pokeball(draw,(545,297),34)
         for end in ((355,175),(400,150),(445,175),(480,205),(320,205)):draw.line((400,235,*end),fill=RETRO[3],width=5)
-        self._pokeball(draw,(400,298),44)
         image=self._open(data,(250,220),trim=True,upscale=True)
         canvas.paste(image,(400-image.width//2,250-image.height),image)
         species=SPECIES[pokemon.species_id]
