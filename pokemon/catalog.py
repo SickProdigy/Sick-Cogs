@@ -9,7 +9,7 @@ import aiohttp
 from .data import MOVES, SPECIES, Species
 
 API_ROOT = "https://pokeapi.co/api/v2"
-USER_AGENT = "Sick-Cogs-Pokemon/0.10.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Pokemon/0.11.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 MAX_SPECIES = 1025
 
 
