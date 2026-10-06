@@ -61,6 +61,33 @@ class BattleTests(unittest.TestCase):
         fixed=__import__("pokemon.data",fromlist=["MOVES"]).MOVES["dragon_rage"]
         self.assertEqual(current._damage(1,10,5,fixed,current.rng(),target_hp=99),40)
 
+    def test_standard_status_immunities_and_residual_damage(self):
+        player=OwnedPokemon.create("status",4,20,seed=3)
+        current=Battle(1,100,1,2,3,player,4,20,50,50,seed=8)
+        rng=type("Fixed",(),{"randrange":lambda self,n:0})()
+        self.assertEqual(current._set_status("burn",False,rng),"")
+        self.assertEqual(current.wild_status,"")
+        current.wild_species_id=23
+        self.assertEqual(current._set_status("poison",False,rng),"")
+        current.player_status="burn";current.wild_status="poison"
+        current.player_hp=current.max_hp(player);current.wild_hp=current.wild_max_hp
+        before=(current.player_hp,current.wild_hp);current._end_turn_status()
+        self.assertEqual(before[0]-current.player_hp,max(1,current.max_hp(player)//16))
+        self.assertEqual(before[1]-current.wild_hp,max(1,current.wild_max_hp//8))
+
+    def test_sleep_and_confusion_are_bounded_and_restart_safe(self):
+        player=OwnedPokemon.create("status",7,10,seed=3)
+        current=Battle(1,100,1,2,3,player,19,10,40,40,seed=8)
+        rng=type("Fixed",(),{"randrange":lambda self,n:0})()
+        self.assertEqual(current._set_status("sleep",True,rng),"sleep")
+        self.assertEqual(current.player_status_turns,1)
+        current._set_status("confusion",False,rng)
+        restored=Battle.from_raw(current.raw())
+        self.assertEqual((restored.player_status,restored.player_status_turns,restored.wild_confusion_turns),("sleep",1,2))
+        before=restored.wild_hp
+        allowed,message=restored._can_act(False,rng)
+        self.assertFalse(allowed);self.assertLess(restored.wild_hp,before);self.assertIn("confusion",message)
+
     def test_owned_and_wild_combat_stats_share_level_scaling(self):
         player=OwnedPokemon.create("scaled",4,5,seed=3)
         low=Battle(1,100,1,2,3,player,19,2,20,20,seed=8)

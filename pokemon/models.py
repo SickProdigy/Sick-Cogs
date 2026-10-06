@@ -32,6 +32,7 @@ class OwnedPokemon:
     caught_at: Optional[str] = None
     current_hp: Optional[int] = None
     status: str = ""
+    status_turns: int = 0
     pending_moves: list = field(default_factory=list)
 
     def __post_init__(self):
@@ -99,6 +100,7 @@ class OwnedPokemon:
         data.setdefault("origin","wild" if data.get("caught_guild_id") is not None else "starter")
         data.setdefault("current_hp",None)
         data.setdefault("status","")
+        data.setdefault("status_turns",0)
         data.setdefault("pending_moves",[])
         return cls(**data)
 
@@ -154,6 +156,7 @@ class Battle:
     party: list = field(default_factory=list)
     party_hp: dict = field(default_factory=dict)
     party_status: dict = field(default_factory=dict)
+    party_status_turns: dict = field(default_factory=dict)
     action_history: list = field(default_factory=list)
     action_count: int = 0
     battle_kind: str = "wild"
@@ -171,14 +174,23 @@ class Battle:
     participants: list = field(default_factory=list)
     experience_awards: dict = field(default_factory=dict)
     progression_events: list = field(default_factory=list)
+    player_status_turns: int = 0
+    wild_status_turns: int = 0
+    player_confusion_turns: int = 0
+    wild_confusion_turns: int = 0
 
     def __post_init__(self):
         if not self.party:
             self.party = [self.player]
         self.party_hp.setdefault(self.player.instance_id, self.player_hp)
         self.party_status.setdefault(self.player.instance_id, self.player_status)
+        self.party_status_turns.setdefault(self.player.instance_id,self.player_status_turns or self.player.status_turns)
         if self.player.current_hp is not None:self.player_hp=max(0,min(self.max_hp(self.player),int(self.player.current_hp)))
         if self.player.status:self.player_status=self.player.status
+        self.party_status[self.player.instance_id]=self.player_status
+        self.party_status_turns[self.player.instance_id]=self.player_status_turns or self.player.status_turns
+        if self.player_status=="sleep" and self.player_status_turns<=0:self.player_status_turns=1
+        if self.wild_status=="sleep" and self.wild_status_turns<=0:self.wild_status_turns=1
         if self.player.instance_id not in self.participants:self.participants.append(self.player.instance_id)
 
     def rules(self):
@@ -192,10 +204,12 @@ class Battle:
             for pokemon in self.party
         }
         self.party_status = {pokemon.instance_id:pokemon.status for pokemon in self.party}
+        self.party_status_turns = {pokemon.instance_id:pokemon.status_turns for pokemon in self.party}
         conscious=next((pokemon for pokemon in self.party if self.party_hp[pokemon.instance_id]>0),self.party[0])
         self.player = conscious
         self.player_hp = self.party_hp[conscious.instance_id]
         self.player_status=self.party_status.get(conscious.instance_id,"")
+        self.player_status_turns=self.party_status_turns.get(conscious.instance_id,0)
 
     @property
     def needs_switch(self):
@@ -217,10 +231,13 @@ class Battle:
             raise BattleError("That Pokémon has fainted.")
         self.party_hp[self.player.instance_id]=self.player_hp
         self.party_status[self.player.instance_id]=self.player_status
+        self.party_status_turns[self.player.instance_id]=self.player_status_turns
+        self.player_confusion_turns=0
         self.player=candidate
         if candidate.instance_id not in self.participants:self.participants.append(candidate.instance_id)
         self.player_hp=self.party_hp[candidate.instance_id]
         self.player_status=self.party_status.get(candidate.instance_id,"")
+        self.player_status_turns=self.party_status_turns.get(candidate.instance_id,0)
         self.last_action=f"Go, {SPECIES[candidate.species_id].name}!"
         self.result=None
         self._record("switch")
@@ -230,6 +247,7 @@ class Battle:
             raise BattleError("This encounter is over.")
         self.party_hp[self.player.instance_id] = self.player_hp
         self.party_status[self.player.instance_id] = self.player_status
+        self.party_status_turns[self.player.instance_id] = self.player_status_turns
         if not self.party:
             raise BattleError("No party Pokémon are available.")
         start = next(
@@ -337,7 +355,24 @@ class Battle:
             changed.append(f"{stat.replace('_',' ')} {'rose' if change>0 else 'fell'}")
         return changed
 
-    def _status_action(self, move, player):
+    def _set_status(self,status,target_player,rng):
+        species=SPECIES[self.player.species_id] if target_player else SPECIES[self.wild_species_id]
+        target_name=species.name
+        if status=="confusion":
+            attr="player_confusion_turns" if target_player else "wild_confusion_turns"
+            if getattr(self,attr)>0:return ""
+            setattr(self,attr,self.rules().status_duration(status,rng));return status
+        current=self.player_status if target_player else self.wild_status
+        if current or self.rules().status_immune(status,species.types):return ""
+        if target_player:self.player_status=status
+        else:self.wild_status=status
+        if status=="sleep":
+            turns=self.rules().status_duration(status,rng)
+            if target_player:self.player_status_turns=turns
+            else:self.wild_status_turns=turns
+        return status
+
+    def _status_action(self, move, player, rng):
         user_name=SPECIES[self.player.species_id].name if player else SPECIES[self.wild_species_id].name
         target_name=SPECIES[self.wild_species_id].name if player else SPECIES[self.player.species_id].name
         changes=self._apply_stat_changes(move,player)
@@ -348,33 +383,48 @@ class Battle:
             else:self.wild_hp=min(maximum,self.wild_hp+amount)
             changes.append(f"restored {amount} HP")
         if move.name=="Rest":
-            if player:self.player_hp=self.max_hp(self.player);self.player_status="sleep"
-            else:self.wild_hp=self.wild_max_hp;self.wild_status="sleep"
+            if player:self.player_hp=self.max_hp(self.player);self.player_status="sleep";self.player_status_turns=2
+            else:self.wild_hp=self.wild_max_hp;self.wild_status="sleep";self.wild_status_turns=2
             changes.append("fell asleep and restored its HP")
         if move.status in {"burn","poison","paralysis","sleep","freeze","confusion"}:
-            if player and not self.wild_status:self.wild_status=move.status;changes.append(f"{target_name} is {move.status}")
-            elif not player and not self.player_status:self.player_status=move.status;changes.append(f"{target_name} is {move.status}")
+            applied=self._set_status(move.status,not player,rng)
+            if applied:changes.append(f"{target_name} is {applied}")
         if move.name in {"Teleport","Roar","Whirlwind"} and self.battle_kind=="wild":
             self.state="ran";self.result=f"{user_name} used {move.name}. {SPECIES[self.wild_species_id].name} escaped!"
             changes.append(f"{SPECIES[self.wild_species_id].name} escaped")
         detail="; ".join(changes) if changes else "but nothing happened"
         return f"{user_name} used {move.name}; {detail}."
 
+    def _confusion_damage(self,player,rng):
+        pokemon=self.player if player else None;species=SPECIES[pokemon.species_id] if player else SPECIES[self.wild_species_id]
+        level=pokemon.level if player else self.wild_level
+        attack=self.stat(pokemon,"attack") if player else self.wild_stat("attack")
+        defense=self.stat(pokemon,"defense") if player else self.wild_stat("defense")
+        if (self.player_status if player else self.wild_status)=="burn":attack=self.rules().burned_attack(attack)
+        base=max(1,(((2*level//5+2)*40*attack//max(1,defense))//50)+2)
+        return max(1,base*(85+rng.randrange(16))//100)
+
     def _can_act(self, player, rng):
         status=self.player_status if player else self.wild_status
         name=SPECIES[self.player.species_id].name if player else f"Wild {SPECIES[self.wild_species_id].name}"
         if status=="paralysis" and rng.randrange(100)<25:return False,f"{name} is paralyzed."
         if status=="sleep":
-            if rng.randrange(3):return False,f"{name} is asleep."
+            attr="player_status_turns" if player else "wild_status_turns";remaining=max(0,getattr(self,attr)-1);setattr(self,attr,remaining)
+            if remaining:return False,f"{name} is asleep."
             if player:self.player_status=""
             else:self.wild_status=""
         if status=="freeze":
-            if rng.randrange(5):return False,f"{name} is frozen solid."
+            if rng.randrange(100)>=20:return False,f"{name} is frozen solid."
             if player:self.player_status=""
             else:self.wild_status=""
-        if status=="confusion" and rng.randrange(3)==0:
-            if player:self.player_status=""
-            else:self.wild_status=""
+        attr="player_confusion_turns" if player else "wild_confusion_turns";remaining=getattr(self,attr)
+        if remaining:
+            remaining-=1;setattr(self,attr,remaining)
+            if remaining and rng.randrange(3)==0:
+                damage=self._confusion_damage(player,rng)
+                if player:self.player_hp=max(0,self.player_hp-damage)
+                else:self.wild_hp=max(0,self.wild_hp-damage)
+                return False,f"{name} hurt itself in confusion for {damage} damage."
         return True,""
 
     @staticmethod
@@ -411,19 +461,20 @@ class Battle:
         rng=self.rng();allowed,message=self._can_act(True,rng)
         if not allowed:return message
         if rng.randrange(100)>=move.accuracy:return f"{SPECIES[self.player.species_id].name} used {move.name}, but it missed."
-        if self.rules().move_category(move)=="status":return self._status_action(move,True)
+        if self.rules().move_category(move)=="status":return self._status_action(move,True,rng)
         critical=rng.randrange(self.rules().critical_denominator(move,self.combat_speed(True)))==0
         category=self.rules().move_category(move)
         attack_name="special_attack" if category=="special" else "attack"
         defense_name="special_defense" if category=="special" else "defense"
         attack=self.stage_stat(self.stat(self.player,attack_name),self.player_stages.get(attack_name,0))
+        if category=="physical" and self.player_status=="burn":attack=self.rules().burned_attack(attack)
         defense=self.stage_stat(self.wild_stat(defense_name),self.wild_stages.get(defense_name,0))
         damage=self._damage(attack,self.wild_species_id,self.player.level,move,rng,critical,self.wild_hp,SPECIES[self.player.species_id].types,defense)
         self.wild_hp=max(0,self.wild_hp-damage)
         if move.drain>0:self.player_hp=min(self.max_hp(self.player),self.player_hp+max(1,damage*move.drain//100))
         elif move.drain<0:self.player_hp=max(0,self.player_hp-max(1,damage*(-move.drain)//100))
         applied_status="";stat_changes=[]
-        if move.status and not self.wild_status and rng.randrange(100)<move.status_chance:self.wild_status=move.status;applied_status=move.status
+        if move.status and rng.randrange(100)<move.status_chance:applied_status=self._set_status(move.status,False,rng)
         if move.stat_changes and rng.randrange(100)<move.stat_chance:stat_changes=self._apply_stat_changes(move,True)
         return self.attack_line(SPECIES[self.player.species_id].name,self.wild_species_id,move,damage,critical,applied_status,stat_changes,ruleset=self.ruleset)
 
@@ -431,26 +482,27 @@ class Battle:
         rng=self.rng();allowed,message=self._can_act(False,rng)
         if not allowed:return message
         if rng.randrange(100)>=move.accuracy:return f"{SPECIES[self.wild_species_id].name} used {move.name}, but it missed."
-        if self.rules().move_category(move)=="status":return self._status_action(move,False)
+        if self.rules().move_category(move)=="status":return self._status_action(move,False,rng)
         critical=rng.randrange(self.rules().critical_denominator(move,self.combat_speed(False)))==0
         wild=SPECIES[self.wild_species_id];category=self.rules().move_category(move);attack_name="special_attack" if category=="special" else "attack"
         defense_name="special_defense" if category=="special" else "defense"
         attack=self.stage_stat(self.wild_stat(attack_name),self.wild_stages.get(attack_name,0))
+        if category=="physical" and self.wild_status=="burn":attack=self.rules().burned_attack(attack)
         defense=self.stage_stat(self.stat(self.player,defense_name),self.player_stages.get(defense_name,0))
         damage=self._damage(attack,self.player.species_id,self.wild_level,move,rng,critical,self.player_hp,wild.types,defense)
         self.player_hp=max(0,self.player_hp-damage)
         if move.drain>0:self.wild_hp=min(self.wild_max_hp,self.wild_hp+max(1,damage*move.drain//100))
         elif move.drain<0:self.wild_hp=max(0,self.wild_hp-max(1,damage*(-move.drain)//100))
         applied_status="";stat_changes=[]
-        if move.status and not self.player_status and rng.randrange(100)<move.status_chance:self.player_status=move.status;applied_status=move.status
+        if move.status and rng.randrange(100)<move.status_chance:applied_status=self._set_status(move.status,True,rng)
         if move.stat_changes and rng.randrange(100)<move.stat_chance:stat_changes=self._apply_stat_changes(move,False)
         return self.attack_line(wild.name,self.player.species_id,move,damage,critical,applied_status,stat_changes,ruleset=self.ruleset)
 
     def _end_turn_status(self):
-        if self.player_status in {"poison", "burn"} and self.player_hp > 0:
-            self.player_hp = max(0, self.player_hp - max(1, self.max_hp(self.player) // 8))
-        if self.wild_status in {"poison", "burn"} and self.wild_hp > 0:
-            self.wild_hp = max(0, self.wild_hp - max(1, self.wild_max_hp // 8))
+        if self.player_status in {"poison","burn"} and self.player_hp>0:
+            divisor=self.rules().residual_divisor(self.player_status);self.player_hp=max(0,self.player_hp-max(1,self.max_hp(self.player)//divisor))
+        if self.wild_status in {"poison","burn"} and self.wild_hp>0:
+            divisor=self.rules().residual_divisor(self.wild_status);self.wild_hp=max(0,self.wild_hp-max(1,self.wild_max_hp//divisor))
 
     def _award_experience(self,amount):
         self.experience_award=max(0,int(amount));self.experience_awards={};self.progression_events=[]
@@ -601,6 +653,7 @@ class Battle:
                 break
         data.setdefault("party_hp", {})
         data.setdefault("party_status", {})
+        data.setdefault("party_status_turns", {})
         data.setdefault("action_history", [])
         data.setdefault("action_count", len(data["action_history"]))
         data["action_history"]=list(data["action_history"])[-100:]
@@ -616,6 +669,10 @@ class Battle:
         data.setdefault("participants",[data["player"].instance_id])
         data.setdefault("experience_awards",{})
         data.setdefault("progression_events",[])
+        data.setdefault("player_status_turns",0)
+        data.setdefault("wild_status_turns",0)
+        data.setdefault("player_confusion_turns",0)
+        data.setdefault("wild_confusion_turns",0)
         battle=cls(**data)
         if not battle.party:battle.party=[battle.player]
         return battle
