@@ -757,6 +757,10 @@ def advance_solo(game: Game):
                 changed = True
                 continue
             return changed
+        if game.sanctuary_draw_pending:
+            if game.active_user!=user: return changed
+            opponent=game.player(game.opponent(user)); threatened=not game.player(user).island_sanctuary_active and any(game.is_creature(permanent) and "flying" not in game.current_keywords(permanent) and "islandwalk" not in game.current_keywords(permanent) for permanent in opponent.battlefield)
+            game.choose_sanctuary_draw(user,threatened); game.record(user,"ai_sanctuary_skip" if threatened else "ai_sanctuary_draw"); changed=True; continue
         if game.phase == "untap":
             choices=game.untap_choices()
             def untap_value(choice):

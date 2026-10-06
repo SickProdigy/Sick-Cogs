@@ -921,5 +921,10 @@ class SoloAITests(unittest.TestCase):
         choice_game.stack=[__import__("mtg.engine",fromlist=["Spell"]).Spell(AI,uid,"lea:240",str(AI),ability_effect="tomb_cleanup",source_uid=777,choice_owner=AI,choice_value=9,decision_pending=True)]; choice_game.priority_user=AI; choice_game.phase="upkeep"
         advance_solo(choice_game); self.assertFalse(land.land_type_effects); self.assertTrue(any(event["action"]=="ai_tomb_cleanup" for event in choice_game.history))
 
+    def test_ai_uses_island_sanctuary_against_ground_threats(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(AI).hand=[]; self.add(game,HUMAN,"giant")
+        before=len(game.player(AI).hand); game.active_index=0; game.phase="draw"; game.priority_user=AI; game.sanctuary_draw_pending=True; game.sanctuary_pending_draws=2
+        advance_solo(game); self.assertTrue(game.player(AI).island_sanctuary_active); self.assertEqual(len(game.player(AI).hand),before+1); self.assertTrue(any(event["action"]=="ai_sanctuary_skip" for event in game.history))
+
 if __name__ == "__main__":
     unittest.main()

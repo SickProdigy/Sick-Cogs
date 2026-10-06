@@ -724,5 +724,12 @@ class CyclopeanTombRenderingTests(unittest.TestCase):
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Mire counters: 1",rendered); self.assertIn("chooser must Choose a mire-counter land",rendered)
         view=GameView(cog,1); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pay")).disabled); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":decline_trigger")).disabled)
 
+class IslandSanctuaryRenderingTests(unittest.TestCase):
+    def test_draw_choice_buttons_and_protection_are_public(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:None); game=Game(1,[10,20],1); game.sanctuary_draw_pending=True; game.sanctuary_pending_draws=1; game.phase="draw"; game.priority_user=10; game.player(20).island_sanctuary_active=True; cog.games={1:game}
+        view=GameView(cog,1); draw=next(item for item in view.children if item.custom_id.endswith(":sanctuary_draw")); skip=next(item for item in view.children if item.custom_id.endswith(":sanctuary_skip")); passing=next(item for item in view.children if item.custom_id.endswith(":pass"))
+        self.assertFalse(draw.disabled); self.assertFalse(skip.disabled); self.assertTrue(passing.disabled)
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("must choose Draw or Skip",rendered); self.assertIn("flying or islandwalk",rendered)
+
 if __name__ == "__main__":
     unittest.main()

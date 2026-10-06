@@ -3832,4 +3832,35 @@ class AlphaCyclopeanTombTests(unittest.TestCase):
         game.activate_ability(10,1,"20:1"); ability=game.stack.pop(); game.player(10).battlefield.remove(tomb); game.player(10).hand.append(tomb.uid); game._resolve_ability(ability)
         self.assertEqual(game.current_land_types(land),{"swamp"}); self.assertFalse(game.tomb_cleanup_sources)
 
+class AlphaIslandSanctuaryTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_draw_or_skip_choice_persists_and_keeps_draw_step_triggers(self):
+        game=ready(); self.add(game,10,"lea:25"); mine=self.add(game,20,"lea:247"); before=len(game.player(10).hand); game._begin_draw_step()
+        restored=Game.from_raw(game.to_raw()); self.assertTrue(restored.sanctuary_draw_pending); restored.choose_sanctuary_draw(10,False)
+        self.assertEqual(len(restored.player(10).hand),before+1); self.assertTrue(any(item.source_uid==mine.uid and item.ability_effect=="draw_step_draw" for item in restored.stack))
+        skip=Game.from_raw(game.to_raw()); skip.choose_sanctuary_draw(10,True); self.assertEqual(len(skip.player(10).hand),before); self.assertTrue(skip.player(10).island_sanctuary_active); self.assertTrue(skip.stack)
+        trigger=skip.stack.pop(); skip._resolve_ability(trigger); self.assertTrue(skip.sanctuary_draw_pending); skip.choose_sanctuary_draw(10,False); self.assertEqual(len(skip.player(10).hand),before+1)
+
+    def test_only_flying_or_islandwalk_can_attack_and_protection_expires_next_turn(self):
+        game=ready(); self.add(game,10,"lea:25"); game.sanctuary_draw_pending=True; game.sanctuary_pending_draws=1; game.phase="draw"; game.priority_user=10; game.choose_sanctuary_draw(10,True)
+        bear=self.add(game,20,"bear"); flyer=self.add(game,20,"lea:46"); self.add(game,20,"lea:62"); walker=self.add(game,20,"lea:66"); game.active_index=1; game.phase="attackers"
+        self.assertFalse(game.can_attack_permanent(bear)); self.assertTrue(game.can_attack_permanent(flyer)); self.assertTrue(game.can_attack_permanent(walker))
+        with self.assertRaisesRegex(GameError,"cannot attack"): game.declare_attackers(20,[1])
+        game.declare_attackers(20,[2,4]); game.active_index=0; game._start_turn(); self.assertFalse(game.player(10).island_sanctuary_active)
+
+    def test_spell_and_mass_draws_offer_sequential_replacements(self):
+        game=ready(); self.add(game,10,"lea:25"); game.phase="draw"; before=len(game.player(10).hand); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:47"
+        game._resolve(Spell(20,uid,"lea:47",str(10))); self.assertEqual(game.sanctuary_pending_draws,3); game.choose_sanctuary_draw(10,True); restored=Game.from_raw(game.to_raw()); restored.choose_sanctuary_draw(10,False); restored.choose_sanctuary_draw(10,False)
+        self.assertEqual(len(restored.player(10).hand),before+2); self.assertTrue(restored.player(10).island_sanctuary_active)
+        mass=ready(); self.add(mass,10,"lea:25"); mass.phase="draw"; mass.player(10).library=mass.player(10).library[:2]; mass.player(20).library=mass.player(20).library[:2]; mass._draw_each(3)
+        self.assertEqual(mass.sanctuary_pending_draws,3); [mass.choose_sanctuary_draw(10,True) for _ in range(3)]; self.assertEqual(mass.winner,10)
+
+    def test_legacy_state_defaults_sanctuary_fields_off(self):
+        raw=ready().to_raw(); raw.pop("sanctuary_draw_pending"); raw.pop("sanctuary_pending_draws"); raw.pop("sanctuary_resume_draw_step"); raw.pop("sanctuary_resume_mass_draw"); raw.pop("sanctuary_mass_draw_failed")
+        for player in raw["players"].values(): player.pop("island_sanctuary_active")
+        restored=Game.from_raw(raw); self.assertFalse(restored.sanctuary_draw_pending); self.assertFalse(any(player.island_sanctuary_active for player in restored.players.values()))
+
 if __name__=="__main__": unittest.main()

@@ -59,7 +59,7 @@ class GameView(discord.ui.View):
             item.custom_id=f"mtg:{game_id}:{item.custom_id}"
             action=item.custom_id.rsplit(":",1)[-1]
             if game and action in ("keep","mulligan"): item.disabled=game.phase!="opening"
-            if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or bool(game.stack and game.stack[-1].decision_pending)
+            if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
                 mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup"))
@@ -70,6 +70,7 @@ class GameView(discord.ui.View):
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
             if game and action=="private_hand":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand"))
+            if game and action in ("sanctuary_draw","sanctuary_skip"): item.disabled=not game.sanctuary_draw_pending or game.active_user is None
             if game and action=="concede": item.disabled=game.finished
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") and game.trigger_sacrifice_choices(game.stack[-1]):
             self.add_item(SacrificeSelect(self.cog,self.game_id,game,game.stack[-1]))
@@ -104,6 +105,10 @@ class GameView(discord.ui.View):
     async def pay_trigger(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_trigger(i.user.id,True),"trigger_pay")
     @discord.ui.button(label="Decline trigger",style=discord.ButtonStyle.secondary,custom_id="decline_trigger")
     async def decline_trigger(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_trigger(i.user.id,False),"trigger_decline")
+    @discord.ui.button(label="Sanctuary: Draw",style=discord.ButtonStyle.secondary,custom_id="sanctuary_draw")
+    async def sanctuary_draw(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_sanctuary_draw(i.user.id,False),"sanctuary_draw")
+    @discord.ui.button(label="Sanctuary: Skip",style=discord.ButtonStyle.success,custom_id="sanctuary_skip")
+    async def sanctuary_skip(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_sanctuary_draw(i.user.id,True),"sanctuary_skip")
     @discord.ui.button(label="Concede",style=discord.ButtonStyle.danger,custom_id="concede")
     async def concede(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.concede(i.user.id),"concede")
 

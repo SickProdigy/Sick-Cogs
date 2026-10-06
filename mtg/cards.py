@@ -124,6 +124,7 @@ class Card:
     tax_white_enchantment_abilities: int = 0
     upkeep_opponent_hand_damage: bool = False
     draw_step_extra: int = 0
+    draw_step_sanctuary: bool = False
     untap_power_limit: int = 0
     untap_creature_limit: int = 0
     untap_land_limit: int = 0
@@ -238,6 +239,7 @@ class Card:
         if self.upkeep_cost and self.upkeep_unpaid_effect=="damage": abilities.append(f"At your upkeep, this creature deals {self.upkeep_unpaid_damage} damage to you unless you pay {self.upkeep_cost}")
         if self.upkeep_cost and self.upkeep_unpaid_effect=="tap_opponent_land_sacrifice": abilities.append(f"At your upkeep, tap this creature and sacrifice a land an opponent chooses unless you pay {self.upkeep_cost}")
         if self.upkeep_sacrifice_other: abilities.append(f"At your upkeep, sacrifice another creature or this creature deals {self.upkeep_sacrifice_damage} damage to you")
+        if self.draw_step_sanctuary: abilities.append("At your draw step, you may skip your draw; until your next turn, only creatures with flying or islandwalk can attack you")
         if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
         if self.opponent_damage_discard_random: abilities.append("Whenever this creature deals damage to an opponent, that player discards a card at random")
         if self.combat_destroy_nonwall: abilities.append("Whenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat")
@@ -329,6 +331,7 @@ ALPHA_TAP_ENCHANTMENTS = {
 }
 
 ALPHA_ENCHANTMENTS = {
+    "lea:25": {"draw_step_sanctuary":True},
     "lea:100": {"activation_cost":"{B}{B}", "activation_effect":"counter_color", "target_color":"G", "activation_text":"Counter target green spell"},
     "lea:10": {"activation_cost":"{1}", "activation_effect":"prevent_source_damage", "prevent_source_color":"U", "activation_text":"Prevent the next damage a chosen blue source would deal to you this turn"},
     "lea:11": {"activation_cost":"{1}", "activation_effect":"prevent_source_damage", "prevent_source_color":"G", "activation_text":"Prevent the next damage a chosen green source would deal to you this turn"},
@@ -743,6 +746,7 @@ for reference in PLAYABLE_ALPHA:
         tax_white_enchantment_abilities=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("tax_white_enchantment_abilities",0),
         upkeep_opponent_hand_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_opponent_hand_damage",False),
         draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
+        draw_step_sanctuary=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("draw_step_sanctuary",False),
         untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),
         untap_creature_limit=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("untap_creature_limit",0),
         untap_land_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_land_limit",0),
