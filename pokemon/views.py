@@ -3,6 +3,31 @@ import discord
 from .data import MOVES, SPECIES
 
 
+STARTERS = ((1, "Bulbasaur", "🌿"), (4, "Charmander", "🔥"), (7, "Squirtle", "💧"))
+
+
+class StarterButton(discord.ui.Button):
+    def __init__(self,cog,user_id,species_id,label,emoji,encounter_id=None):
+        super().__init__(label=label,emoji=emoji,style=discord.ButtonStyle.primary,custom_id=f"pokemon:starter:{species_id}")
+        self.cog=cog;self.user_id=user_id;self.species_id=species_id;self.encounter_id=encounter_id
+
+    async def callback(self,interaction):
+        await self.cog.choose_starter(interaction,self.species_id,self.encounter_id)
+
+
+class StarterView(discord.ui.View):
+    def __init__(self,cog,user_id,encounter_id=None):
+        super().__init__(timeout=180)
+        self.user_id=user_id
+        for species_id,label,emoji in STARTERS:
+            self.add_item(StarterButton(cog,user_id,species_id,label,emoji,encounter_id))
+
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This starter choice belongs to another trainer.",ephemeral=True)
+        return False
+
+
 class EncounterView(discord.ui.View):
     def __init__(self, cog, encounter_id):
         super().__init__(timeout=None)

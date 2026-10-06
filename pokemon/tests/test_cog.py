@@ -15,7 +15,7 @@ from pokemon.models import Battle,OwnedPokemon
 from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, pace_for_settings, scaled_wild_level
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, FightView, PartyView
+from pokemon.views import BagView, BattleView, FightView, PartyView, StarterView
 
 
 class StoredValue:
@@ -200,6 +200,26 @@ class PokedexTests(unittest.TestCase):
 
 
 class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_starter_picker_is_one_time_and_encounter_scoped(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        conf={"collection":[],"party":[],"starter_chosen":False,"pokedex_seen":[],"pokedex_caught":[]}
+        section=StoredSection(conf);encounters=StoredEncounters();encounters.value={"9":{"state":"open"}}
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={}
+        cog.config=SimpleNamespace(user=lambda user:section,encounters=encounters)
+        response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock())
+        interaction=SimpleNamespace(user=SimpleNamespace(id=42,display_name="Trainer"),response=response)
+        await cog.claim(interaction,9)
+        sent=response.send_message.await_args.kwargs
+        self.assertTrue(sent["ephemeral"])
+        self.assertIsInstance(sent["view"],StarterView)
+        self.assertEqual(len(sent["view"].children),3)
+        await cog.choose_starter(interaction,4,9)
+        self.assertTrue(section.value["starter_chosen"])
+        self.assertEqual(section.value["collection"][0]["species_id"],4)
+        self.assertIn("Press **Encounter** again",response.edit_message.await_args.kwargs["content"])
+        self.assertIsNone(await cog.grant_starter(interaction.user,7))
+        self.assertEqual(len(section.value["collection"]),1)
+
     async def test_potion_and_revive_consume_inventory_atomically(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
         pokemon=OwnedPokemon.create("medicine",7,10,seed=4)

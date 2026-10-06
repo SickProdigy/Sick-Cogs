@@ -14,7 +14,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,EncounterView,FightView,PartyView
+from .views import BagView,BattleView,EncounterView,FightView,PartyView,StarterView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -59,7 +59,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.10.0";__author__="SickProdigy"
+    __version__="0.11.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -199,7 +199,10 @@ class Pokemon(commands.Cog):
             encounters=await self.config.encounters();raw=encounters.get(str(eid))
             if not raw or raw.get("state")!="open":await i.response.send_message("This encounter was already claimed.",ephemeral=True);return
             user=await self.config.user(i.user).all()
-            if not user["party"]:await i.response.send_message("Choose a starter first with the Pokémon starter command.",ephemeral=True);return
+            if not user["party"]:
+                embed=self.starter_embed(i.user)
+                await i.response.send_message(embed=embed,view=StarterView(self,i.user.id,eid),ephemeral=True)
+                return
             owned_raw=next((p for p in user["collection"] if p["instance_id"]==user["party"][0]),None)
             if not owned_raw:
                 await i.response.send_message("Your active party needs repair.",ephemeral=True);return
@@ -334,16 +337,46 @@ class Pokemon(commands.Cog):
         if await conf.active_encounter()==eid:await conf.active_encounter.set(None)
     @commands.group(name="pokemon",aliases=["pkmn"],invoke_without_command=True)
     async def pokemon(self,ctx):await ctx.send_help()
+    @staticmethod
+    def starter_embed(user):
+        embed=discord.Embed(title="Choose your first Pokémon",description="Every trainer begins with one partner. Choose carefully—this can only be done once.",color=discord.Color.green())
+        embed.add_field(name="Bulbasaur 🌿",value="Grass / Poison",inline=True)
+        embed.add_field(name="Charmander 🔥",value="Fire",inline=True)
+        embed.add_field(name="Squirtle 💧",value="Water",inline=True)
+        trainer=getattr(user,"display_name",getattr(user,"name",str(user)))
+        embed.set_footer(text=f"Trainer: {trainer}")
+        return embed
+
+    async def grant_starter(self,user,sid):
+        async with self.lock(("user",user.id)):
+            section=self.config.user(user);conf=await section.all()
+            if conf["starter_chosen"] or conf["collection"]:
+                return None
+            pokemon=OwnedPokemon.create(__import__("uuid").uuid4().hex,sid,seed=random.SystemRandom().randrange(1,2**31))
+            conf["collection"]=[pokemon.raw()];conf["party"]=[pokemon.instance_id];conf["starter_chosen"]=True;conf["pokedex_seen"]=[sid];conf["pokedex_caught"]=[sid]
+            await section.set(conf)
+            return pokemon
+
+    async def choose_starter(self,interaction,sid,encounter_id=None):
+        pokemon=await self.grant_starter(interaction.user,sid)
+        if pokemon is None:
+            await interaction.response.edit_message(content="You already chose a starter.",embed=None,view=None)
+            return
+        suffix=" Press **Encounter** again to begin the battle." if encounter_id is not None else ""
+        await interaction.response.edit_message(content=f"{SPECIES[sid].name} joined your global party!{suffix}",embed=None,view=None)
+
     @pokemon.command(name="starter")
-    async def starter(self,ctx,choice:str):
-        choices={"bulbasaur":1,"charmander":4,"squirtle":7};sid=choices.get(choice.casefold())
-        if not sid:await ctx.send("Choose Bulbasaur, Charmander, or Squirtle.");return
-        async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all()
-            if conf["starter_chosen"]:await ctx.send("You already chose a starter.");return
-            pokemon=OwnedPokemon.create(__import__("uuid").uuid4().hex,sid,seed=random.SystemRandom().randrange(1,2**31));conf["collection"]=[pokemon.raw()];conf["party"]=[pokemon.instance_id];conf["starter_chosen"]=True;conf["pokedex_seen"]=[sid];conf["pokedex_caught"]=[sid]
-            await self.config.user(ctx.author).set(conf)
-        await ctx.send(f"{SPECIES[sid].name} joined your global party!")
+    async def starter(self,ctx,choice:str=None):
+        choices={"bulbasaur":1,"charmander":4,"squirtle":7}
+        if choice is None:
+            await ctx.send(embed=self.starter_embed(ctx.author),view=StarterView(self,ctx.author.id))
+            return
+        sid=choices.get(choice.casefold())
+        if not sid:
+            await ctx.send("Choose Bulbasaur, Charmander, or Squirtle.",embed=self.starter_embed(ctx.author),view=StarterView(self,ctx.author.id))
+            return
+        pokemon=await self.grant_starter(ctx.author,sid)
+        await ctx.send("You already chose a starter." if pokemon is None else f"{SPECIES[sid].name} joined your global party!")
     @pokemon.command(name="collection",aliases=["box"])
     async def collection(self,ctx,page:int=1):
         conf=await self.config.user(ctx.author).all()
