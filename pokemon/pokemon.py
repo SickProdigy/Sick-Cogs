@@ -20,14 +20,16 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None}
-USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None}
-GLOBAL={"schema":6,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
+USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[]}
+GLOBAL={"schema":7,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
 COLLECTION_PAGE_SIZE=9
 PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
 SPECIAL_SPECIES={144,145,146,150,151}
+COLLECTION_REWARDS={5:{"balls":5},10:{"great_ball":5},25:{"ultra_ball":3},50:{"balls":10,"great_ball":5,"ultra_ball":5},100:{"balls":20,"great_ball":10,"ultra_ball":10}}
+VICTORY_REWARDS={5:{"potion":5},10:{"revive":3},25:{"potion":10,"revive":5},50:{"potion":15,"revive":8},100:{"potion":25,"revive":12}}
 RARITY_PROFILES={
     "friendly":{"common":100,"uncommon":65,"rare":35,"very_rare":15},
     "standard":{"common":100,"uncommon":45,"rare":18,"very_rare":5},
@@ -91,6 +93,19 @@ def migrate_ball_items(data):
     items=dict(data.get("items",{}));items.setdefault("great_ball",3);items.setdefault("ultra_ball",1);data["items"]=items
     return data
 
+def migrated_pokedex_stats(data):
+    stats={str(key):dict(value) for key,value in data.get("pokedex_stats",{}).items() if str(key).isdigit() and isinstance(value,dict)}
+    caught_counts={}
+    for raw in data.get("collection",[]):
+        key=str(raw.get("species_id",""));caught_counts[key]=caught_counts.get(key,0)+1
+    for species_id in data.get("pokedex_seen",[]):
+        key=str(species_id);entry=stats.setdefault(key,{});entry["seen"]=max(1,int(entry.get("seen",0)))
+    for species_id in data.get("pokedex_caught",[]):
+        key=str(species_id);entry=stats.setdefault(key,{});entry["seen"]=max(1,int(entry.get("seen",0)));entry["caught"]=max(1,caught_counts.get(key,0),int(entry.get("caught",0)))
+    for entry in stats.values():
+        for field in ("seen","battled","defeated","caught","escaped"):entry[field]=max(0,int(entry.get(field,0)))
+    return stats
+
 def authentic_moves_raw(raw):
     pokemon=OwnedPokemon.from_raw(raw);old_pp=dict(pokemon.move_pp)
     pokemon.moves=moves_for_level(pokemon.species_id,pokemon.level)
@@ -99,7 +114,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.33.1";__author__="SickProdigy"
+    __version__="0.34.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -139,6 +154,7 @@ class Pokemon(commands.Cog):
                     message=await channel.fetch_message(int(raw["message_id"]));await message.edit(content="The previous trainer timed out. This encounter is available again.",view=EncounterView(self,eid))
                 except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
         for eid,raw in expired:
+            if raw.get("battle"):await self.settle_expired_battle(raw)
             self.battles.pop(eid,None);await self.clear_guild(int(raw["guild_id"]),eid)
             channel=self.bot.get_channel(int(raw["channel_id"]))
             if channel:
@@ -152,6 +168,14 @@ class Pokemon(commands.Cog):
                         await message.edit(content=None,embed=embed,attachments=files,view=None)
                 except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
         await self.process_timed_spawns(now)
+    async def settle_expired_battle(self,raw):
+        try:battle=Battle.from_raw(raw["battle"])
+        except (KeyError,TypeError,ValueError):return
+        battle.state="expired"
+        async with self.lock(("user",battle.user_id)):
+            conf=await self.config.user_from_id(battle.user_id).all();self.apply_battle_party(conf,battle);self.record_battle_result(conf,battle)
+            await self.config.user_from_id(battle.user_id).set(conf)
+
     async def process_timed_spawns(self,now=None):
         now=now or datetime.now(timezone.utc)
         for guild_id,conf in (await self.config.all_guilds()).items():
@@ -212,9 +236,12 @@ class Pokemon(commands.Cog):
                 battle["wild_pp"]={}
             await self.config.encounters.set(encounters)
         if schema<6:
+            for user_id,data in (await self.config.all_users()).items():await self.config.user_from_id(int(user_id)).set(migrate_ball_items(data))
+        if schema<7:
             for user_id,data in (await self.config.all_users()).items():
-                await self.config.user_from_id(int(user_id)).set(migrate_ball_items(data))
-            await self.config.schema.set(6)
+                data["pokedex_stats"]=migrated_pokedex_stats(data);data.setdefault("recorded_battles",[]);data.setdefault("achievement_rewards",[])
+                await self.config.user_from_id(int(user_id)).set(data)
+            await self.config.schema.set(7)
     def lock(self,key):return self.locks.setdefault(key,asyncio.Lock())
     async def put_encounter(self,eid,raw):
         async with self.lock("encounters"):
@@ -306,7 +333,7 @@ class Pokemon(commands.Cog):
                 raw["gender"]=encounter_gender(SPECIES[int(raw["species_id"])],random.SystemRandom())
                 raw["level_locked"]=True
             seen={int(value) for value in user.get("pokedex_seen",[])}
-            seen.add(int(raw["species_id"]));user["pokedex_seen"]=sorted(seen)
+            seen.add(int(raw["species_id"]));user["pokedex_seen"]=sorted(seen);self.pokedex_stat(user,raw["species_id"])["seen"]+=1
             await self.config.user(i.user).set(user)
             collection={item["instance_id"]:item for item in user["collection"]}
             party=[OwnedPokemon.from_raw(collection[identity]) for identity in user["party"] if identity in collection]
@@ -467,10 +494,44 @@ class Pokemon(commands.Cog):
         updates[battle.player.instance_id]=battle.player.raw()
         conf["collection"]=[updates.get(raw["instance_id"],raw) for raw in conf["collection"]]
 
+    @staticmethod
+    def pokedex_stat(conf,species_id):
+        stats=conf.setdefault("pokedex_stats",{});entry=stats.setdefault(str(int(species_id)),{})
+        for field in ("seen","battled","defeated","caught","escaped"):entry[field]=max(0,int(entry.get(field,0)))
+        return entry
+
+    @staticmethod
+    def grant_achievement_rewards(conf):
+        claimed=set(conf.setdefault("achievement_rewards",[]));awarded=[];items=conf.setdefault("items",{})
+        unique_caught=len({int(value) for value in conf.get("pokedex_caught",[])})
+        victories=sum(int(value.get("defeated",0)) for value in conf.get("pokedex_stats",{}).values())
+        for group,total,rewards in (("collection",unique_caught,COLLECTION_REWARDS),("victories",victories,VICTORY_REWARDS)):
+            for target,reward in rewards.items():
+                key=f"{group}:{target}"
+                if total<target or key in claimed:continue
+                parts=[]
+                for item,amount in reward.items():
+                    if item=="balls":conf["balls"]=int(conf.get("balls",0))+amount;label="Poké Balls"
+                    else:items[item]=int(items.get(item,0))+amount;label=item.replace("_"," ").title()+("s" if amount!=1 else "")
+                    parts.append(f"{amount} {label}")
+                claimed.add(key);awarded.append(f"{group.title()} goal {target}: "+", ".join(parts))
+        conf["achievement_rewards"]=sorted(claimed);conf["items"]=items
+        return awarded
+
+    def record_battle_result(self,conf,battle):
+        key=str(battle.encounter_id);recorded=list(conf.setdefault("recorded_battles",[]))
+        if key in recorded:return []
+        entry=self.pokedex_stat(conf,battle.wild_species_id);entry["battled"]+=1
+        if battle.state=="won":entry["defeated"]+=1
+        elif battle.state=="caught":entry["caught"]+=1
+        elif battle.state in {"lost","ran","expired"}:entry["escaped"]+=1
+        recorded.append(key);conf["recorded_battles"]=recorded[-500:]
+        return self.grant_achievement_rewards(conf)
+
     async def sync_battle_player(self,battle):
         conf=await self.config.user_from_id(battle.user_id).all()
         self.apply_battle_party(conf,battle)
-        gym=GYMS.get(battle.gym_key) if battle.battle_kind=="gym" else None
+        rewards=self.record_battle_result(conf,battle);gym=GYMS.get(battle.gym_key) if battle.battle_kind=="gym" else None
         if gym:
             defeated=f"Gym Leader {gym.leader}'s {SPECIES[battle.wild_species_id].name} fainted."
             battle.result=(battle.result or "Victory!").replace("The wild Pokémon fainted.",defeated,1)
@@ -479,6 +540,7 @@ class Pokemon(commands.Cog):
                 badges.append(gym.key)
                 battle.result+=f" Earned the {gym.badge}!"
             conf["badges"]=badges
+        if rewards:battle.result=(battle.result or "")+" Reward: "+"; ".join(rewards)+"."
         await self.config.user_from_id(battle.user_id).set(conf)
     @staticmethod
     def ball_inventory(conf,ball_key):
@@ -534,8 +596,11 @@ class Pokemon(commands.Cog):
             if pokemon.instance_id==battle.player.instance_id:
                 battle.player_hp=battle.party_hp[pokemon.instance_id];battle.player_status=battle.party_status.get(pokemon.instance_id,"");battle.player_status_turns=battle.party_status_turns.get(pokemon.instance_id,0)
             items[item_key]=int(items.get(item_key,0))-1;battle._wild_response();battle.last_action=f"{line} {battle.last_action}";battle._record(f"item:{item_key}:{pokemon.instance_id}")
-            self.apply_battle_party(conf,battle);conf["items"]=items;await self.config.user(interaction.user).set(conf);await self.save_battle(battle)
             done=battle.state!="active"
+            if done:
+                rewards=self.record_battle_result(conf,battle)
+                if rewards:battle.result=(battle.result or "")+" Reward: "+"; ".join(rewards)+"."
+            self.apply_battle_party(conf,battle);conf["items"]=items;await self.config.user(interaction.user).set(conf);await self.save_battle(battle)
             if done:await self.clear_guild(battle.guild_id,eid)
             embed,files=await self.rendered_battle(battle)
             await interaction.response.edit_message(embed=embed,attachments=files,view=None if done else BattleView(self,eid))
@@ -572,8 +637,14 @@ class Pokemon(commands.Cog):
                 first_registration=first_pokedex_registration(conf,pokemon.species_id)
                 seen.add(pokemon.species_id);caught_ids.add(pokemon.species_id)
                 conf["pokedex_seen"]=sorted(seen);conf["pokedex_caught"]=sorted(caught_ids)
+                rewards=self.record_battle_result(conf,battle)
+                if rewards:battle.result=(battle.result or "")+" Reward: "+"; ".join(rewards)+"."
                 if len(conf["party"])<6 and identity not in conf["party"]:conf["party"].append(identity)
                 tx["settled"]=True;tx["caught_id"]=identity;conf["transactions"][tx_key]=tx
+            if battle.state!="active" and not caught:
+                rewards=self.record_battle_result(conf,battle)
+                if rewards:battle.result=(battle.result or "")+" Reward: "+"; ".join(rewards)+"."
+                self.apply_battle_party(conf,battle)
             while len(conf["transactions"])>100:conf["transactions"].pop(next(iter(conf["transactions"])))
             await self.config.user(i.user).set(conf);await self.save_battle(battle)
             if battle.state!="active":await self.clear_guild(battle.guild_id,eid)
@@ -636,7 +707,7 @@ class Pokemon(commands.Cog):
             if conf["starter_chosen"] or conf["collection"]:
                 return None
             pokemon=OwnedPokemon.create(__import__("uuid").uuid4().hex,sid,1,seed=random.SystemRandom().randrange(1,2**31))
-            conf["collection"]=[pokemon.raw()];conf["party"]=[pokemon.instance_id];conf["starter_chosen"]=True;conf["pokedex_seen"]=[sid];conf["pokedex_caught"]=[sid]
+            conf["collection"]=[pokemon.raw()];conf["party"]=[pokemon.instance_id];conf["starter_chosen"]=True;conf["pokedex_seen"]=[sid];conf["pokedex_caught"]=[sid];conf["pokedex_stats"]={str(sid):{"seen":1,"battled":0,"defeated":0,"caught":1,"escaped":0}}
             await section.set(conf)
             return pokemon
 
@@ -877,6 +948,7 @@ class Pokemon(commands.Cog):
             caught={int(value) for value in conf.get("pokedex_caught",[])},
             style=await self.selected_pokedex_style(ctx.author),
             page=max(0,page-1),
+            stats=migrated_pokedex_stats(conf),
         )
         view=PokedexView(self,session)
         view.message=await ctx.send(embed=render_pokedex(session),view=view)
@@ -933,6 +1005,7 @@ class Pokemon(commands.Cog):
             lead=party[0]
             battle=Battle(eid,ctx.author.id,ctx.guild.id,ctx.channel.id,0,lead,gym.species_id,gym.level,Battle.stat(lead,"hp"),1,seed=random.SystemRandom().randrange(1,2**31),battle_kind="gym",gym_key=gym.key)
             battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
+            seen={int(value) for value in conf.get("pokedex_seen",[])};seen.add(gym.species_id);conf["pokedex_seen"]=sorted(seen);self.pokedex_stat(conf,gym.species_id)["seen"]+=1;await self.config.user(ctx.author).set(conf)
             self.battles[eid]=battle
             try:
                 embed,files=await self.rendered_battle(battle)

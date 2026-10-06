@@ -1,5 +1,5 @@
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 import discord
 from .data import SPECIES,generation_for,sprite
 PAGE_SIZE=15
@@ -19,6 +19,7 @@ class PokedexSession:
     filter_name:str="all"
     page:int=0
     selected_id:int|None=None
+    stats:dict=field(default_factory=dict)
     def entries(self):
         values=generation_entries(self.generation)
         if self.filter_name=="seen":values=[x for x in values if x.id in self.seen]
@@ -48,7 +49,8 @@ class PokedexStyle:
     def details(cls,session,item):
         state=cls.status(session,item.id)
         if state=="unseen":return ["Entry locked.","Encounter this Pokemon to reveal its identity."]
-        lines=["Type: "+" / ".join(x.title() for x in item.types)]
+        record=session.stats.get(str(item.id),{});counts="Seen: "+str(int(record.get("seen",0)))+" | Battled: "+str(int(record.get("battled",0)))+" | Defeated: "+str(int(record.get("defeated",0)))+" | Caught: "+str(int(record.get("caught",0)))+" | Escaped: "+str(int(record.get("escaped",0)))
+        lines=[counts,"Type: "+" / ".join(x.title() for x in item.types)]
         if state=="seen":return lines+["Catch this Pokemon to unlock its complete research data."]
         return lines+[f"HP {item.hp} | Attack {item.attack} | Defense {item.defense}",f"Sp. Atk {item.special_attack} | Sp. Def {item.special_defense} | Speed {item.speed}","Abilities: "+(", ".join(x.replace("-"," ").title() for x in item.abilities) or "Unknown"),f"Catch rate: {item.catch_rate}"]
     @staticmethod
@@ -72,7 +74,7 @@ class RetroStyle(PokedexStyle):
         box=["+----------------------+",f"| #{item.id:03d} {name[:14]:<14} |",f"| {mark:<20} |","+----------------------+"]
         embed=discord.Embed(title="POKEDEX DATA",description="\n".join([FENCE,*box,FENCE,*self.details(session,item)]),color=discord.Color.red())
         if state!="unseen":embed.set_thumbnail(url=sprite(item.id))
-        embed.set_footer(text=self.footer(session));return embed
+        embed.set_footer(text=f"Generation {session.generation} · Entry #{item.id:03d}");return embed
 
 class CompactStyle(PokedexStyle):
     key="compact";label="Compact"
@@ -87,7 +89,7 @@ class CompactStyle(PokedexStyle):
         state=self.status(session,item.id);name=item.name if state!="unseen" else "Unknown Pokemon"
         embed=discord.Embed(title=f"#{item.id:03d} | {name}",description="\n".join(self.details(session,item)),color=discord.Color.blurple())
         if state!="unseen":embed.set_thumbnail(url=sprite(item.id))
-        embed.set_footer(text=self.footer(session));return embed
+        embed.set_footer(text=f"Generation {session.generation} · Entry #{item.id:03d}");return embed
 
 POKEDEX_STYLES={x.key:x for x in (RetroStyle(),CompactStyle())}
 def resolve_style(key):return POKEDEX_STYLES.get(key,POKEDEX_STYLES[STYLE_DEFAULT])
