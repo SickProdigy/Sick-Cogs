@@ -67,10 +67,11 @@ class CogPolicyTests(unittest.TestCase):
     def test_activity_weight_is_bounded(self):
         self.assertEqual([activity_weight(n) for n in (0, 1, 2, 8)], [1, 1, 2, 3])
 
-    def test_spawn_level_uses_bounded_participant_median(self):
-        self.assertEqual(encounter_level([]),5)
-        self.assertEqual(encounter_level([4,20,10]),10)
-        self.assertEqual(encounter_level([-4,200]),100)
+    def test_spawn_level_uses_strongest_recent_trainer_with_cap(self):
+        self.assertEqual(encounter_level([]),1)
+        self.assertEqual(encounter_level([4,20,10]),20)
+        self.assertEqual(encounter_level([4,20,10],4),24)
+        self.assertEqual(encounter_level([-4,200],4),30)
 
     def test_spawn_gender_obeys_species_ratio(self):
         female_rng=SimpleNamespace(randrange=lambda maximum:0)
@@ -80,9 +81,10 @@ class CogPolicyTests(unittest.TestCase):
         self.assertEqual(encounter_gender(SimpleNamespace(gender_rate=-1),female_rng),"genderless")
 
     def test_wild_level_scales_near_player(self):
-        self.assertEqual(scaled_wild_level(1,-2),2)
-        self.assertEqual(scaled_wild_level(50,2),52)
-        self.assertEqual(scaled_wild_level(100,2),100)
+        self.assertEqual(scaled_wild_level(1,-2),1)
+        self.assertEqual(scaled_wild_level(20,4),24)
+        self.assertEqual(scaled_wild_level(50,2),30)
+        self.assertEqual(scaled_wild_level(100,2),30)
 
     def test_spawn_pool_excludes_starters_specials_and_filters_generation(self):
         pool = available_species([1])
