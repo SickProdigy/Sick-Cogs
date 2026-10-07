@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import GUILD, MART_ITEMS, PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
+from pokemon.pokemon import GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
@@ -64,6 +64,13 @@ class CogPolicyTests(unittest.TestCase):
         self.assertLess(PACE["active"][2],PACE["relaxed"][2])
         self.assertEqual(pace_for_settings(*PACE["normal"]),"normal")
         self.assertEqual(pace_for_settings(7,13,90),"custom")
+
+    def test_active_slots_filter_terminal_records_and_jitter_stays_bounded(self):
+        records={"1":{"guild_id":7,"state":"open"},"2":{"guild_id":7,"state":"won"},"3":{"guild_id":8,"state":"battle"}}
+        self.assertEqual(set(active_guild_encounters(records,7)),{1})
+        now=datetime.now(timezone.utc)
+        self.assertEqual((jittered_spawn_due(now,5,SimpleNamespace(uniform=lambda low,high:.8))-now).total_seconds(),240)
+        self.assertEqual((jittered_spawn_due(now,5,SimpleNamespace(uniform=lambda low,high:1.2))-now).total_seconds(),360)
 
     def test_shiny_roll_uses_modern_one_in_4096_odds(self):
         self.assertTrue(encounter_shiny(SimpleNamespace(randrange=lambda limit:0)))
@@ -219,6 +226,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemonset battleexpiry",admin_names)
         self.assertIn("pokemonset encountertime",admin_names)
         self.assertIn("pokemonset martprice",admin_names)
+        self.assertIn("pokemonset concurrency",admin_names)
         self.assertIn("pokemonset centercooldown",admin_names)
         self.assertIn("pokemonset rarity",admin_names)
         self.assertIn("pokemonset catalogsync",admin_names)
@@ -570,9 +578,10 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         active=StoredValue(None);timeout=StoredValue(1800);next_encounter_value=StoredValue(12)
         cog=Pokemon.__new__(Pokemon)
         cog.battles={};cog.locks={};user_section=StoredSection(conf)
+        guild_section=SimpleNamespace(all=AsyncMock(return_value={"active_encounter":None,"max_active_encounters":1}),active_encounter=active,battle_timeout=timeout)
         cog.config=SimpleNamespace(
             user=lambda user:user_section,
-            guild=lambda guild:SimpleNamespace(active_encounter=active,battle_timeout=timeout),
+            guild=lambda guild:guild_section,
             next_encounter=next_encounter_value,
         )
         cog.rendered_battle=AsyncMock(return_value=(discord.Embed(title="Gym"),[]))
@@ -588,7 +597,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         battle=cog.battles[12]
         self.assertEqual((battle.battle_kind,battle.gym_key,battle.message_id),("gym","boulder",99))
         self.assertEqual(next_encounter_value.value,13)
-        self.assertEqual(active.value,12)
+        self.assertIsNone(active.value)
         raw=cog.put_encounter.await_args.args[1]
         self.assertEqual((raw["kind"],raw["gym_key"],raw["battle"]["battle_kind"]),("gym","boulder","gym"))
 
@@ -648,17 +657,38 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await cog.process_timed_spawns(now)
         cog.spawn.assert_awaited_once_with(channel)
 
+    async def test_timed_spawning_uses_free_channels_and_honors_concurrency(self):
+        now=datetime.now(timezone.utc);channels={10:SimpleNamespace(id=10),20:SimpleNamespace(id=20)}
+        conf={"enabled":True,"spawn_mode":"timed","channels":[10,20],"timer_minutes":5,"next_spawn_at":(now-timedelta(seconds=1)).isoformat(),"max_active_encounters":2}
+        store=StoredEncounters();store.value={"1":{"guild_id":42,"channel_id":10,"state":"battle"}}
+        section=SimpleNamespace(next_spawn_at=StoredValue(conf["next_spawn_at"]))
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.spawn=AsyncMock();cog.bot=SimpleNamespace(get_channel=lambda channel_id:channels.get(channel_id))
+        cog.config=SimpleNamespace(all_guilds=AsyncMock(return_value={42:conf}),guild_from_id=lambda guild_id:section,encounters=store)
+        await cog.process_timed_spawns(now)
+        cog.spawn.assert_awaited_once_with(channels[20])
+        cog.spawn.reset_mock();conf["max_active_encounters"]=1
+        await cog.process_timed_spawns(now)
+        cog.spawn.assert_not_awaited()
+
+    async def test_owner_controls_server_concurrency(self):
+        slots=StoredValue(1);section=SimpleNamespace(max_active_encounters=slots)
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section)
+        ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
+        await Pokemon.spawn_concurrency.callback(cog,ctx,3)
+        self.assertEqual(slots.value,3)
+        ctx.send.assert_awaited_once_with("This server may now have up to 3 simultaneous encounters across different channels.")
+
     async def test_timer_under_one_hour_is_bot_owner_only(self):
         cog=Pokemon.__new__(Pokemon);cog.bot=SimpleNamespace(is_owner=AsyncMock(return_value=False));ctx=SimpleNamespace(author=SimpleNamespace(id=7),send=AsyncMock())
         await Pokemon.spawn_timer.callback(cog,ctx,59)
-        ctx.send.assert_awaited_once_with("Use 60–10080 minutes; only the bot owner may use 10–59.")
+        ctx.send.assert_awaited_once_with("Use 60–10080 minutes; only the bot owner may use 1–59.")
 
         timer=StoredValue(60);next_spawn=StoredValue(None);mode=StoredValue("timed");section=SimpleNamespace(timer_minutes=timer,next_spawn_at=next_spawn,spawn_mode=mode)
         cog.bot.is_owner=AsyncMock(return_value=True);cog.config=SimpleNamespace(guild=lambda guild:section)
         owner_ctx=SimpleNamespace(author=SimpleNamespace(id=1),guild=SimpleNamespace(id=42),send=AsyncMock())
-        await Pokemon.spawn_timer.callback(cog,owner_ctx,10)
-        self.assertEqual(timer.value,10);self.assertIsNotNone(next_spawn.value)
-        self.assertIn("every 10 minutes",owner_ctx.send.await_args.args[0])
+        await Pokemon.spawn_timer.callback(cog,owner_ctx,5)
+        self.assertEqual(timer.value,5);self.assertIsNotNone(next_spawn.value)
+        self.assertIn("every 5 minutes",owner_ctx.send.await_args.args[0])
 
     async def test_bot_owner_can_set_two_minute_encounter_lifetime(self):
         timeout=StoredValue(900);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(encounter_timeout=timeout)
@@ -762,11 +792,11 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         message.delete.assert_not_awaited();message.edit.assert_awaited_once()
 
     async def test_clear_encounter_disables_original_message(self):
-        active=StoredValue(7);raw={"channel_id":55,"message_id":99,"species_id":25,"state":"open"}
+        active=StoredValue(7);raw={"guild_id":1,"channel_id":55,"message_id":99,"species_id":25,"state":"open"}
         store=StoredEncounters();store.value={"7":raw};section=SimpleNamespace(active_encounter=active)
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={7:SimpleNamespace()};cog.bot=SimpleNamespace(get_channel=lambda channel_id:None)
-        cog.config=SimpleNamespace(guild=lambda guild:section,encounters=store);cog.expire_unclaimed_message=AsyncMock()
-        ctx=SimpleNamespace(guild=SimpleNamespace(id=1),send=AsyncMock())
+        cog.config=SimpleNamespace(guild=lambda guild:section,guild_from_id=lambda guild_id:section,encounters=store);cog.expire_unclaimed_message=AsyncMock()
+        ctx=SimpleNamespace(guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=55),send=AsyncMock())
         await Pokemon.clear_encounter.callback(cog,ctx)
         self.assertIsNone(active.value);self.assertEqual(store.value,{});self.assertNotIn(7,cog.battles)
         cog.expire_unclaimed_message.assert_awaited_once_with(raw)
