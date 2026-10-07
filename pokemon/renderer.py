@@ -598,6 +598,11 @@ class BattleRenderer:
             self._gender_mark(draw,(x+92,525),pokemon.gender,ink)
         return self._save(canvas)
 
+    @staticmethod
+    def pokemon_center_message(trainer_name,complete=False):
+        trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer"
+        return f"{trainer}, your Pokemon are fighting fit!" if complete else f"Restoring {trainer}’s party… Please wait."
+
     def _pokemon_center_sync(self,party,data,trainer_name,complete=False):
         canvas=Image.new("RGB",(900,540),(218,228,225));draw=ImageDraw.Draw(canvas);ink=(39,61,66);metal=(105,126,130);glass=(179,225,232);light=(72,196,117) if complete else (244,177,62)
         for y in range(0,430,28):draw.line((0,y,900,y),fill=(197,211,208),width=2)
@@ -612,8 +617,8 @@ class BattleRenderer:
             name=pokemon.nickname or SPECIES[pokemon.species_id].name;font=ImageFont.load_default(size=16);label=f"{name} · Lv.{pokemon.level}";draw.text((x+123-int(draw.textlength(label,font=font))//2,y+118),label,fill=(238,244,240),font=font)
         draw.rounded_rectangle((250,400,650,455),14,fill=(69,85,88),outline=ink,width=4)
         for index in range(7):draw.ellipse((278+index*48,418,292+index*48,432),fill=light if index<6 else (112,159,218),outline=ink,width=2)
-        draw.rectangle((0,466,900,540),fill=(239,247,224),outline=ink,width=5);trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer"
-        message=f"{trainer}, your Pokémon are fighting fit!" if complete else f"Restoring {trainer}’s party… Please wait.";self._dialogue(draw,message,(28,490),width=78,size=21)
+        draw.rectangle((0,466,900,540),fill=(239,247,224),outline=ink,width=5)
+        self._dialogue(draw,self.pokemon_center_message(trainer_name,complete),(28,490),width=78,size=21)
         return self._save(canvas)
 
     def _progression_sync(self,pokemon,current_data,previous_data,evolved_from,move_key,pending):
