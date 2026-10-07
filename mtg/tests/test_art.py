@@ -32,7 +32,7 @@ class ArtTests(unittest.TestCase):
 
     def test_public_battlefield_render_is_bounded_png(self):
         game=Game(1,[10,20],1)
-        creature=next(uid for uid,key in game.cards.items() if key=="goblin")
+        creature=next(uid for uid,key in game.cards.items() if key=="lea:164")
         game.players[10].battlefield=[Permanent(creature,"goblin",sick=False)]
         background=Path(__file__).parents[1]/"assets"/"default_playmat.png"
         output=render_battlefield(game,{10:"First player",20:"Second player"},{},background)

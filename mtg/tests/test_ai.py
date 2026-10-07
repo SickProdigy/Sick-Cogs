@@ -79,7 +79,10 @@ class SoloAITests(unittest.TestCase):
         player.library.remove(land)
         player.hand.insert(0, land)
         game.mulligan(HUMAN, True)
-        advance_solo(game)
+        for _ in range(20):
+            advance_solo(game)
+            game.auto_pass_empty_priority()
+            if game.active_user==HUMAN: break
         self.assertTrue(any(game.card(permanent.uid).land for permanent in player.battlefield))
         self.assertEqual(game.active_user, HUMAN)
         self.assertEqual(game.phase, "precombat_main")
@@ -126,7 +129,7 @@ class SoloAITests(unittest.TestCase):
         advance_solo(attack)
         attack.player(HUMAN).kept = True
         attack.player(AI).kept = True
-        creature = next(uid for uid, key in attack.cards.items() if key == "centaur")
+        creature = next(uid for uid, key in attack.cards.items() if key == "lea:227")
         attack.player(AI).battlefield = [Permanent(creature, "centaur", sick=False)]
         attack.phase = "attackers"
         attack.priority_user = None
@@ -135,8 +138,8 @@ class SoloAITests(unittest.TestCase):
 
         block = solo()
         advance_solo(block)
-        attacker = next(uid for uid, key in block.cards.items() if key == "goblin")
-        blocker = next(uid for uid, key in block.cards.items() if key == "bear")
+        attacker = next(uid for uid, key in block.cards.items() if key == "lea:164")
+        blocker = next(uid for uid, key in block.cards.items() if key == "lea:199")
         block.player(HUMAN).battlefield = [Permanent(attacker, "goblin", sick=False)]
         block.player(AI).battlefield = [Permanent(blocker, "bear", sick=False)]
         block.attackers = [attacker]
@@ -624,7 +627,7 @@ class SoloAITests(unittest.TestCase):
 
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
-        game.player(HUMAN).kept=True; game.player(AI).kept=True
+        game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         forest=self.add(game,AI,"forest"); birds=self.add(game,AI,"lea:186","hand")
         game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
         advance_solo(game)
@@ -833,7 +836,7 @@ class SoloAITests(unittest.TestCase):
 
     def test_ai_completes_word_of_command_with_a_land_choice(self):
         spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
-        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(HUMAN).hand=[]; land=self.add(game,HUMAN,"forest","hand")
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(AI).hand=[]; game.player(HUMAN).hand=[]; land=self.add(game,HUMAN,"forest","hand")
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:136"; game.stack=[spell_type(AI,uid,"lea:136",str(HUMAN),ability_effect="word_choose",decision_pending=True,choice_owner=AI)]; game.priority_user=AI; game.phase="precombat_main"
         advance_solo(game); self.assertIn(land,game.player(HUMAN).hand); self.assertFalse(game.stack); self.assertTrue(any(event["action"]=="ai_word_of_command" for event in game.history))
 

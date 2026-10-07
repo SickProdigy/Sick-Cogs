@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.120.14"
+    __version__="0.121.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -61,12 +61,12 @@ class MTG(commands.Cog):
         for game in self.games.values():
             if not game.finished and any(user in self.human_players(game) for user in users):
                 raise GameError("One player already has an active game.")
-    async def create_game(self,a,b,channel):
+    async def create_game(self,a,b,channel,decks=None):
         async with self.storage_lock:
             self.ensure_players_available(a,b)
             gid=await self.config.next_game_id(); await self.config.next_game_id.set(gid+1)
             users=[a,b]; secrets.SystemRandom().shuffle(users)
-            game=Game(gid,users); game.message_id=0; self.games[gid]=game; self.channels[gid]=channel
+            game=Game(gid,users,decks=decks); game.message_id=0; self.games[gid]=game; self.channels[gid]=channel
             await self._save_unlocked(game)
         return game
     async def create_solo_game(self,human,ai,channel,deck,difficulty):
@@ -522,10 +522,13 @@ class MTG(commands.Cog):
         await ctx.send_help()
     @mtg.command(name="challenge")
     @commands.guild_only()
-    async def challenge(self,ctx,member:discord.Member):
-        """Challenge another member."""
+    async def challenge(self,ctx,member:discord.Member,deck:str="red"):
+        """Challenge another member with your chosen red or green deck."""
         if member.bot or member.id==ctx.author.id: await ctx.send("Challenge another human member."); return
-        await ctx.send(f"{member.mention}, {ctx.author.mention} challenged you to a two-player MTG prototype game.",view=ChallengeView(self,ctx.author.id,member.id),allowed_mentions=discord.AllowedMentions(users=True))
+        deck=deck.casefold()
+        if deck not in ("red","green"):
+            await ctx.send(f"Use `{ctx.clean_prefix}mtg challenge @member [red|green]`."); return
+        await ctx.send(f"{member.mention}, {ctx.author.mention} challenged you with the **{deck.title()}** deck. Choose your deck below to accept.",view=ChallengeView(self,ctx.author.id,member.id,deck),allowed_mentions=discord.AllowedMentions(users=True))
     @mtg.command(name="solo")
     @commands.guild_only()
     async def solo(self,ctx,deck:str="red",difficulty:str="easy"):

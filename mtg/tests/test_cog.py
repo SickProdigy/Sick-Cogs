@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from mtg.engine import Game, GameError, Permanent
 from mtg.mtg import MATCH_TIMEOUT_SECONDS, MTG
-from mtg.views import GameView, HandPaginationView
+from mtg.views import ChallengeView, GameView, HandPaginationView
 
 
 class ConfigValue:
@@ -67,6 +67,10 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         cog.channels = {1: 100, 2: 200}
         await asyncio.gather(cog.save(first), cog.save(second))
         self.assertEqual(set(cog.config.games.value), {"1", "2"})
+
+    async def test_players_can_choose_challenge_decks_independently(self):
+        cog=cog_fixture(); game=await cog.create_game(10,20,100,{10:"green",20:"green"})
+        self.assertEqual((game.player(10).deck,game.player(20).deck),("green","green"))
 
     async def test_starting_player_is_selected_before_game_creation(self):
         cog = cog_fixture()
@@ -938,6 +942,13 @@ class CommandInteractionRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
 
 class CommandLayoutTests(unittest.TestCase):
+    def test_challenge_acceptance_requires_opponent_deck_choice(self):
+        view=ChallengeView(cog_fixture(),10,20,"green")
+        selector=next(item for item in view.children if getattr(item,"placeholder",None)=="Choose your deck and accept")
+        self.assertEqual([option.value for option in selector.options],["red","green"])
+        self.assertEqual(view.challenger_deck,"green")
+
+
     def test_root_help_explains_player_entry_points(self):
         help_text=MTG.mtg.help
         self.assertIn("Browse Alpha cards",help_text)

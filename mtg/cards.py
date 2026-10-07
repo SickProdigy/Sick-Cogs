@@ -861,9 +861,9 @@ PACK_POOLS = {
 
 def starter(color):
     if color == "red":
-        return ["mountain"]*24 + ["goblin"]*12 + ["giant"]*8 + ["shock"]*8 + ["strike"]*8
+        return (["mountain"]*24 + ["lea:164"]*4 + ["lea:153"]*4 + ["lea:159"]*4 + ["lea:156"]*4 + ["lea:143"]*3 + ["lea:180"]*3 + ["lea:157"]*2 + ["lea:141"]*2 + ["lea:161"]*4 + ["lea:149"]*2 + ["lea:140"]*2 + ["lea:146"]*2)
     if color == "green":
-        return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
+        return (["forest"]*24 + ["lea:210"]*4 + ["lea:186"]*4 + ["lea:215"]*4 + ["lea:199"]*4 + ["lea:191"]*4 + ["lea:227"]*3 + ["lea:203"]*2 + ["lea:218"]*2 + ["lea:190"] + ["lea:197"]*4 + ["lea:185"]*2 + ["lea:214"] + ["lea:200"])
     raise ValueError("Unknown deck.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | set(ALPHA_COMBAT_REQUIREMENTS) | set(ALPHA_OPTIONAL_TRIGGERS) | {"lea:51","lea:87"} | set(ALPHA_DAMAGE_COUNTER_CREATURES) | set(ALPHA_DEATH_COUNTER_CREATURES) | set(ALPHA_GRAVEYARD_CREATURES) | {"lea:159"}:

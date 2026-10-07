@@ -5,20 +5,25 @@ from .art import HAND_PAGE_SIZE
 from .ai import TARGETED_EFFECTS, _target
 from .engine import GameError
 
+class ChallengeDeckSelect(discord.ui.Select):
+    def __init__(self,challenge):
+        self.challenge=challenge
+        options=[discord.SelectOption(label="Red · Aggro and burn",value="red"),discord.SelectOption(label="Green · Stompy and ramp",value="green")]
+        super().__init__(placeholder="Choose your deck and accept",min_values=1,max_values=1,options=options)
+    async def callback(self,i):
+        await i.response.defer()
+        try: game=await self.challenge.cog.create_game(self.challenge.challenger,self.challenge.opponent,i.channel_id,{self.challenge.challenger:self.challenge.challenger_deck,self.challenge.opponent:self.values[0]})
+        except GameError as e: await i.followup.send(str(e),ephemeral=True); return
+        self.challenge.stop(); embed,file=await self.challenge.cog.game_message(game)
+        await i.edit_original_response(content=None,embed=embed,attachments=[file] if file else [],view=GameView(self.challenge.cog,game.game_id))
+        game.message_id=i.message.id; await self.challenge.cog.save(game)
+
 class ChallengeView(discord.ui.View):
-    def __init__(self,cog,challenger,opponent):
-        super().__init__(timeout=120); self.cog=cog; self.challenger=challenger; self.opponent=opponent
+    def __init__(self,cog,challenger,opponent,challenger_deck="red"):
+        super().__init__(timeout=120); self.cog=cog; self.challenger=challenger; self.opponent=opponent; self.challenger_deck=challenger_deck; self.add_item(ChallengeDeckSelect(self))
     async def interaction_check(self,i):
         if i.user.id==self.opponent: return True
         await i.response.send_message("Only the challenged player can answer.",ephemeral=True); return False
-    @discord.ui.button(label="Accept MTG game",style=discord.ButtonStyle.success)
-    async def accept(self,i,b):
-        await i.response.defer()
-        try: game=await self.cog.create_game(self.challenger,self.opponent,i.channel_id)
-        except GameError as e: await i.followup.send(str(e),ephemeral=True); return
-        self.stop(); embed,file=await self.cog.game_message(game)
-        await i.edit_original_response(content=None,embed=embed,attachments=[file] if file else [],view=GameView(self.cog,game.game_id))
-        game.message_id=i.message.id; await self.cog.save(game)
     @discord.ui.button(label="Decline",style=discord.ButtonStyle.secondary)
     async def decline(self,i,b): self.stop(); await i.response.edit_message(content="Challenge declined.",view=None)
 
