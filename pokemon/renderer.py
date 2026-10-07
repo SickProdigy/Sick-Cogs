@@ -159,6 +159,12 @@ class BattleRenderer:
                 except (KeyError,TypeError,ValueError):continue
         return result
 
+    async def main_menu(self,user_name,conf,style="retro"):
+        party=self.trainer_party(conf);lead=party[0] if party else None
+        data=await self.get_sprite(lead.species_id,shiny=lead.shiny) if lead else None
+        try:return await self._render(self._main_menu_sync,user_name,conf,lead,data,style)
+        except (OSError,ValueError) as exc:raise RenderError("Main-menu rendering failed.") from exc
+
     async def trainer_card(self,user_name,conf,style="retro"):
         party=self.trainer_party(conf)
         data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in party))
@@ -468,6 +474,44 @@ class BattleRenderer:
         draw.text((370,175),type_text,fill=RETRO[0],font=ImageFont.load_default(size=20))
         self._dialogue(draw,ability_text,(370,211),width=34,max_lines=2,size=18)
         draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,f"{species.name} was registered in {trainer}'s Pokedex.",(25,382),width=84,size=19)
+        return self._save(canvas)
+
+    def _main_menu_sync(self,user_name,conf,lead,data,style):
+        modern=style=="modern";width,height=800,500
+        if modern:
+            canvas=Image.new("RGB",(width,height),(38,45,91));draw=ImageDraw.Draw(canvas)
+            top=(55,83,170);bottom=(185,92,157)
+            for y in range(height):
+                ratio=y/(height-1);color=tuple(round(a+(b-a)*ratio) for a,b in zip(top,bottom));draw.line((0,y,width,y),fill=color)
+            for x,y,r,color in ((90,80,150,(82,214,205)),(700,95,190,(255,184,98)),(615,440,230,(90,112,210))):draw.ellipse((x-r,y-r,x+r,y+r),fill=color)
+            draw.rounded_rectangle((38,32,762,468),28,fill=(240,245,255),outline=(255,255,255),width=5)
+            ink=(28,37,71);accent=(81,67,170);muted=(91,102,134);sprite_box=(418,105,728,382)
+            draw.text((70,62),"POKEMON JOURNEY",fill=accent,font=ImageFont.load_default(size=23));draw.text((70,102),str(user_name)[:24],fill=ink,font=ImageFont.load_default(size=35))
+            draw.rounded_rectangle(sprite_box,26,fill=(218,231,252),outline=accent,width=4)
+            draw.ellipse((455,315,690,370),fill=(129,169,216),outline=accent,width=4)
+            menu=("PARTY","COLLECTION","POKEDEX","BAG","RESEARCH","MORE")
+            for index,label in enumerate(menu):
+                x=72+(index%2)*158;y=180+(index//2)*63
+                draw.rounded_rectangle((x,y,x+140,y+44),12,fill=(225,231,249),outline=(154,159,207),width=2);draw.text((x+15,y+11),label,fill=ink,font=ImageFont.load_default(size=18))
+            draw.text((70,405),"Choose an option below",fill=muted,font=ImageFont.load_default(size=18))
+        else:
+            canvas=Image.new("RGB",(width,height),RETRO[4]);draw=ImageDraw.Draw(canvas);ink=RETRO[0]
+            for y in range(0,height,10):draw.line((0,y,width,y),fill=RETRO[5])
+            draw.rectangle((22,22,778,478),fill=RETRO[5],outline=ink,width=7);draw.rectangle((42,42,758,458),outline=RETRO[1],width=3)
+            draw.text((68,60),"POKEMON",fill=ink,font=ImageFont.load_default(size=42));draw.text((68,112),str(user_name)[:24],fill=RETRO[1],font=ImageFont.load_default(size=25))
+            draw.rounded_rectangle((425,65,720,360),18,fill=RETRO[4],outline=ink,width=5);draw.ellipse((465,295,680,350),fill=RETRO[2],outline=ink,width=4)
+            menu=("PARTY","COLLECTION","POKEDEX","BAG","RESEARCH","MORE")
+            for index,label in enumerate(menu):
+                y=170+index*43;draw.text((82,y),">",fill=RETRO[2],font=ImageFont.load_default(size=23));draw.text((117,y),label,fill=ink,font=ImageFont.load_default(size=23))
+            draw.text((437,390),"SELECT WITH BUTTONS",fill=RETRO[1],font=ImageFont.load_default(size=17))
+        if lead and data:
+            image=self._open(data,(245,225),trim=True,upscale=True)
+            if not modern:image=self._retro(image)
+            center_x=572;bottom_y=330;canvas.paste(image,(center_x-image.width//2,bottom_y-image.height),image)
+            species=SPECIES[lead.species_id];name=lead.nickname or species.name
+            label=f"{name}  Lv.{lead.level}";font=ImageFont.load_default(size=20);tw=int(draw.textlength(label,font=font));draw.text((center_x-tw//2,365),label,fill=ink,font=font)
+        else:
+            draw.text((488,205),"NO PARTY",fill=ink,font=ImageFont.load_default(size=25))
         return self._save(canvas)
 
     def _trainer_card_sync(self,user_name,conf,party,data,style):
