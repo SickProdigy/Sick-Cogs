@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
+from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView, TradeCollectionView, GymChallengeView
@@ -235,8 +235,9 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemon profilestyle",player_names)
         self.assertIn("pokemon menustyle",player_names)
         self.assertIn("pokemonset battleexpiry",admin_names)
-        self.assertNotIn("pokemonset encountertime",admin_names)
+        self.assertIn("pokemonset encountertime",admin_names)
         self.assertIn("pokemonownerset encountertime",owner_names)
+        self.assertIn("pokemonownerset encounterlimits",owner_names)
         self.assertNotIn("pokemonset martprice",admin_names)
         self.assertIn("pokemonownerset martprice",owner_names)
         self.assertIn("pokemonset concurrency",admin_names)
@@ -626,9 +627,11 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(revived.current_hp,max(1,maximum//2))
         self.assertEqual(section.value["items"]["revive"],0)
 
-    async def test_schema_fourteen_adds_configurable_timer_floor(self):
-        schema=AsyncMock(return_value=13);schema.set=AsyncMock();minimum=AsyncMock(return_value=60);minimum.set=AsyncMock();cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,minimum_timer=minimum,all_guilds=AsyncMock(return_value={}))
-        await cog._migrate();minimum.set.assert_awaited_once_with(60);schema.set.assert_awaited_once_with(14)
+    async def test_schema_fifteen_adds_configurable_encounter_lifetimes(self):
+        schema=AsyncMock(return_value=13);schema.set=AsyncMock();timer_minimum=AsyncMock(return_value=60);timer_minimum.set=AsyncMock()
+        encounter_minimum=StoredValue(60);encounter_maximum=StoredValue(900);encounter_default=StoredValue(120)
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,minimum_timer=timer_minimum,minimum_encounter_timeout=encounter_minimum,maximum_encounter_timeout=encounter_maximum,encounter_timeout=encounter_default,all_guilds=AsyncMock(return_value={}))
+        await cog._migrate();timer_minimum.set.assert_awaited_once_with(60);self.assertEqual(schema.set.await_args_list[-1].args,(15,));self.assertEqual((encounter_minimum.value,encounter_maximum.value,encounter_default.value),(60,900,120))
 
     async def test_trade_settlement_is_idempotent_and_recovers_partial_save(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
@@ -861,10 +864,10 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited_once_with("Server administrators may now configure up to 2 simultaneous encounters.")
 
     async def test_global_status_reports_only_complete_bot_wide_policy(self):
-        policy={"encounter_timeout":120,"center_cooldown":1800,"minimum_threshold":8,"minimum_cooldown":120,"maximum_concurrency":3,"minimum_timer":30,"allowed_generations":[1],"rarity_profile":"friendly","allow_special_species":False,"pokedex_default_style":"retro","mart_prices":{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400}}
+        policy={"encounter_timeout":120,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"center_cooldown":1800,"minimum_threshold":8,"minimum_cooldown":120,"maximum_concurrency":3,"minimum_timer":30,"allowed_generations":[1],"rarity_profile":"friendly","allow_special_species":False,"pokedex_default_style":"retro","mart_prices":{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400}}
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(all=AsyncMock(return_value=policy));ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.global_status.callback(cog,ctx);text=ctx.send.await_args.args[0]
-        for expected in ("Pokémon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Global wild encounter lifetime: current **2m**","Global free-Center cooldown: current **30m**","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokédex style: **Retro**","Poké Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
+        for expected in ("Pokémon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Encounter lifetime: bot-wide default **2m** · server range **1–15m**","Global free-Center cooldown: current **30m**","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokédex style: **Retro**","Poké Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
         self.assertNotIn("current server",text.casefold());self.assertNotIn("spawn channels",text.casefold())
 
     async def test_sub_hour_timer_uses_owner_command_group(self):
@@ -881,12 +884,24 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((timer.value,override.value),(5,True));self.assertIsNotNone(next_spawn.value)
         self.assertIn("every 5 minutes",owner_ctx.send.await_args.args[0])
 
-    async def test_bot_owner_can_set_two_minute_encounter_lifetime(self):
-        timeout=StoredValue(900);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(encounter_timeout=timeout)
-        ctx=SimpleNamespace(send=AsyncMock())
-        await Pokemon.encounter_time.callback(cog,ctx,2)
-        self.assertEqual(timeout.value,120)
-        ctx.send.assert_awaited_once_with("Global wild encounter lifetime set to 2 minutes.")
+    def test_effective_encounter_timeout_inherits_and_clamps(self):
+        policy={"encounter_timeout":600,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900}
+        self.assertEqual(effective_encounter_timeout({"encounter_timeout":None},policy),600)
+        self.assertEqual(effective_encounter_timeout({"encounter_timeout":120},policy),120)
+        self.assertEqual(effective_encounter_timeout({"encounter_timeout":30},policy),60)
+        self.assertEqual(effective_encounter_timeout({"encounter_timeout":1200},policy),900)
+
+    async def test_server_encounter_lifetime_can_override_and_inherit(self):
+        timeout=StoredValue(None);section=SimpleNamespace(encounter_timeout=timeout);policy={"encounter_timeout":600,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900}
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(all=AsyncMock(return_value=policy),guild=lambda guild:section);ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
+        await Pokemon.server_encounter_time.callback(cog,ctx,"2");self.assertEqual(timeout.value,120)
+        await Pokemon.server_encounter_time.callback(cog,ctx,"default");self.assertIsNone(timeout.value);self.assertIn("inherits",ctx.send.await_args.args[0])
+
+    async def test_bot_owner_controls_encounter_default_and_server_range(self):
+        timeout=StoredValue(900);minimum=StoredValue(60);maximum=StoredValue(900);policy={"encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900}
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(all=AsyncMock(return_value=policy),encounter_timeout=timeout,minimum_encounter_timeout=minimum,maximum_encounter_timeout=maximum);ctx=SimpleNamespace(send=AsyncMock())
+        await Pokemon.encounter_time.callback(cog,ctx,2);self.assertEqual(timeout.value,120);self.assertIn("Bot-wide default",ctx.send.await_args.args[0])
+        await Pokemon.encounter_limits.callback(cog,ctx,5,10);self.assertEqual((minimum.value,maximum.value,timeout.value),(300,600,300))
 
     async def test_forced_shiny_spawn_is_bot_owner_only(self):
         conf={"active_encounter":None,"last_spawn_at":None}
