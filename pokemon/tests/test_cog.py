@@ -610,6 +610,10 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(revived.current_hp,max(1,maximum//2))
         self.assertEqual(section.value["items"]["revive"],0)
 
+    async def test_schema_thirteen_marker_is_materialized(self):
+        schema=AsyncMock(return_value=13);schema.set=AsyncMock();cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema)
+        await cog._migrate();schema.set.assert_awaited_once_with(13)
+
     async def test_trade_settlement_is_idempotent_and_recovers_partial_save(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
         offered=OwnedPokemon.create("offered",4,5,seed=1).raw();requested=OwnedPokemon.create("requested",7,6,seed=2).raw();offerer=StoredSection({"collection":[offered],"party":["offered"]});recipient=StoredSection({"collection":[requested],"party":["requested"]})

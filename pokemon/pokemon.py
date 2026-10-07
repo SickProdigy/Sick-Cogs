@@ -196,7 +196,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.48.0";__author__="SickProdigy"
+    __version__="0.48.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -347,7 +347,8 @@ class Pokemon(commands.Cog):
                 data.setdefault("menu_style","retro");await self.config.user_from_id(int(user_id)).set(data)
             await self.config.schema.set(12)
         if schema<13:
-            await self.config.trades.set({});await self.config.next_trade.set(1);await self.config.schema.set(13)
+            await self.config.trades.set({});await self.config.next_trade.set(1)
+        if schema<=13:await self.config.schema.set(13)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
