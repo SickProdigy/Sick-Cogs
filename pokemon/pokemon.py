@@ -19,7 +19,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1,"concurrency_owner_override":False}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[]}
 MART_ITEMS={
     "poke_ball":("Poké Ball","balls",50),
@@ -29,7 +29,7 @@ MART_ITEMS={
     "revive":("Revive","revive",400),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
-GLOBAL={"schema":9,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800}
+GLOBAL={"schema":10,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":3}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
@@ -66,6 +66,11 @@ def encounter_shiny(rng):
 
 def active_guild_encounters(encounters,guild_id):
     return {int(key):raw for key,raw in encounters.items() if int(raw.get("guild_id",0))==int(guild_id) and raw.get("state") in {"open","battle"}}
+
+def effective_concurrency(conf,policy):
+    selected=max(1,min(5,int(conf.get("max_active_encounters",1))))
+    if conf.get("concurrency_owner_override"):return selected
+    return min(selected,max(1,min(5,int(policy.get("maximum_concurrency",3)))))
 
 def jittered_spawn_due(now,minutes,rng=None):
     rng=rng or random.SystemRandom()
@@ -155,7 +160,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.43.0";__author__="SickProdigy"
+    __version__="0.44.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -215,7 +220,7 @@ class Pokemon(commands.Cog):
             await self.config.user_from_id(battle.user_id).set(conf)
 
     async def process_timed_spawns(self,now=None):
-        now=now or datetime.now(timezone.utc)
+        now=now or datetime.now(timezone.utc);policy=await self.config.all()
         for guild_id,conf in (await self.config.all_guilds()).items():
             if not conf.get("enabled") or conf.get("spawn_mode","timed")!="timed" or not conf.get("channels"):continue
             section=self.config.guild_from_id(int(guild_id));minutes=max(1,int(conf.get("timer_minutes",60)))
@@ -226,7 +231,7 @@ class Pokemon(commands.Cog):
             if due>now:continue
             async with self.lock(("spawn",int(guild_id))):
                 active=await self.guild_encounters(int(guild_id),conf)
-                if len(active)>=max(1,min(5,int(conf.get("max_active_encounters",1)))):continue
+                if len(active)>=effective_concurrency(conf,policy):continue
                 occupied={int(raw.get("channel_id",0)) for raw in active.values()}
                 channels=[self.bot.get_channel(int(value)) for value in conf["channels"] if int(value) not in occupied]
                 channels=[channel for channel in channels if channel is not None]
@@ -291,6 +296,8 @@ class Pokemon(commands.Cog):
             for guild_id in (await self.config.all_guilds()):
                 await self.config.guild_from_id(int(guild_id)).active_encounter.set(None)
             await self.config.schema.set(9)
+        if schema<10:
+            await self.config.schema.set(10)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
@@ -331,7 +338,7 @@ class Pokemon(commands.Cog):
         if count<max(minimum,conf["threshold"]):return
         async with self.lock(("spawn",message.guild.id)):
             active=await self.guild_encounters(message.guild.id,conf)
-            limit=max(1,min(5,int(conf.get("max_active_encounters",1))))
+            limit=effective_concurrency(conf,policy)
             if len(active)>=limit or message.channel.id in {int(raw.get("channel_id",0)) for raw in active.values()}:return
             await self.spawn(message.channel)
     async def spawn_level(self,guild_id):
@@ -1120,8 +1127,8 @@ class Pokemon(commands.Cog):
         async with self.lock(("user",ctx.author.id)),self.lock(("spawn",ctx.guild.id)):
             if any(b.user_id==ctx.author.id and b.state=="active" for b in self.battles.values()):
                 await ctx.send("Finish your active battle first.");return
-            guild_conf=await self.config.guild(ctx.guild).all();active=await self.guild_encounters(ctx.guild.id,guild_conf)
-            limit=max(1,min(5,int(guild_conf.get("max_active_encounters",1))))
+            guild_conf=await self.config.guild(ctx.guild).all();policy=await self.config.all();active=await self.guild_encounters(ctx.guild.id,guild_conf)
+            limit=effective_concurrency(guild_conf,policy)
             if len(active)>=limit:
                 await ctx.send(f"This server is already using all {limit} active encounter slots.");return
             if ctx.channel.id in {int(raw.get("channel_id",0)) for raw in active.values()}:
@@ -1179,6 +1186,13 @@ class Pokemon(commands.Cog):
             await ctx.send("Unknown style. Choose: retro or gold.");return
         await self.config.user(ctx.author).trainer_card_style.set(style)
         await ctx.send(f"Trainer-card style set to **{style}**.")
+    @commands.group(name="pokemonownerset",aliases=["pokeownerset","pkmnownerset"],invoke_without_command=True)
+    @commands.guild_only()
+    @commands.is_owner()
+    async def pokemon_owner_set(self,ctx):
+        """Configure bot-wide Pokémon policy and owner overrides."""
+        await ctx.send_help()
+
     @commands.group(name="pokemonset",aliases=["pokeset","pkmnset"],invoke_without_command=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
@@ -1218,8 +1232,7 @@ class Pokemon(commands.Cog):
         await self.config.guild(ctx.guild).center_channel.set(None)
         await ctx.send("This server's Pokémon Center was removed.")
 
-    @pokemon_set.command(name="centercooldown")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="centercooldown")
     async def center_cooldown(self,ctx,minutes:int):
         """Set the bot-wide free Pokémon Center cooldown."""
         if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes.");return
@@ -1232,7 +1245,7 @@ class Pokemon(commands.Cog):
         conf=await self.config.guild(ctx.guild).all();policy=await self.config.all();mode=conf.get("spawn_mode","timed")
         minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
         channels=", ".join(f"<#{value}>" for value in conf.get("channels",[])) or "None"
-        center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None";active=await self.guild_encounters(ctx.guild.id,conf);slot_limit=max(1,min(5,int(conf.get("max_active_encounters",1))))
+        center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None";active=await self.guild_encounters(ctx.guild.id,conf);slot_limit=effective_concurrency(conf,policy)
         if mode=="timed":
             minutes=max(1,int(conf.get("timer_minutes",60)));due_text="Scheduling now"
             try:due=datetime.fromisoformat(conf.get("next_spawn_at") or "")
@@ -1273,26 +1286,46 @@ class Pokemon(commands.Cog):
         else:
             await section.next_spawn_at.set(None);await ctx.send("Activity-based encounters enabled. Timed spawning is paused.")
 
-    @pokemon_set.command(name="timer")
-    async def spawn_timer(self,ctx,minutes:int):
-        """Set the jittered timer; only bot owners may use under 60 minutes."""
-        owner=await self.bot.is_owner(ctx.author);minimum=1 if owner else 60
-        if not minimum<=minutes<=10080:
-            limit="1–10080 minutes" if owner else "60–10080 minutes; only the bot owner may use 1–59"
-            await ctx.send(f"Use {limit}.");return
+    async def set_spawn_timer(self,ctx,minutes):
         section=self.config.guild(ctx.guild);await section.timer_minutes.set(minutes)
         if await section.spawn_mode()=="timed":
             due=jittered_spawn_due(datetime.now(timezone.utc),minutes);await section.next_spawn_at.set(due.isoformat())
             await ctx.send(f"Timed encounters set around every {minutes} minutes with jitter. The next encounter is <t:{int(due.timestamp())}:R>.")
         else:await ctx.send(f"Saved a {minutes}-minute jittered timer. It will apply when timed mode is enabled.")
 
+    @pokemon_set.command(name="timer")
+    async def spawn_timer(self,ctx,minutes:int):
+        """Set this server’s jittered timer from 60 minutes to one week."""
+        if not 60<=minutes<=10080:await ctx.send("Use 60–10080 minutes.");return
+        await self.set_spawn_timer(ctx,minutes)
+
+    @pokemon_owner_set.command(name="timer")
+    async def owner_spawn_timer(self,ctx,minutes:int):
+        """Override this server’s jittered timer from 1 minute to one week."""
+        if not 1<=minutes<=10080:await ctx.send("Use 1–10080 minutes.");return
+        await self.set_spawn_timer(ctx,minutes)
+
     @pokemon_set.command(name="concurrency",aliases=["slots"])
-    @commands.is_owner()
     async def spawn_concurrency(self,ctx,limit:int):
-        """Set this server’s maximum simultaneous encounters."""
-        if not 1<=limit<=5:await ctx.send("Use 1–5 active encounters.");return
-        await self.config.guild(ctx.guild).max_active_encounters.set(limit)
+        """Set this server’s simultaneous encounters within the bot limit."""
+        maximum=max(1,min(5,int(await self.config.maximum_concurrency())))
+        if not 1<=limit<=maximum:await ctx.send(f"Use 1–{maximum} active encounters.");return
+        section=self.config.guild(ctx.guild);await section.max_active_encounters.set(limit);await section.concurrency_owner_override.set(False)
         await ctx.send(f"This server may now have up to {limit} simultaneous encounters across different channels.")
+
+    @pokemon_owner_set.command(name="concurrency",aliases=["slots"])
+    async def owner_spawn_concurrency(self,ctx,limit:int):
+        """Override this server’s simultaneous encounter limit."""
+        if not 1<=limit<=5:await ctx.send("Use 1–5 active encounters.");return
+        section=self.config.guild(ctx.guild);await section.max_active_encounters.set(limit);await section.concurrency_owner_override.set(True)
+        await ctx.send(f"This server may now have up to {limit} simultaneous encounters across different channels (bot-owner override).")
+
+    @pokemon_owner_set.command(name="globalconcurrency")
+    async def global_concurrency(self,ctx,limit:int):
+        """Set the concurrency ceiling for ordinary server administrators."""
+        if not 1<=limit<=5:await ctx.send("Use a global concurrency limit from 1–5.");return
+        await self.config.maximum_concurrency.set(limit)
+        await ctx.send(f"Server administrators may now configure up to {limit} simultaneous encounters.")
 
     @pokemon_set.command(name="pace")
     async def pace(self,ctx,setting:str):
@@ -1348,7 +1381,7 @@ class Pokemon(commands.Cog):
         else:channel=ctx.channel
         conf=await self.config.guild(ctx.guild).all()
         async with self.lock(("spawn",ctx.guild.id)):
-            active=await self.guild_encounters(ctx.guild.id,conf);limit=max(1,min(5,int(conf.get("max_active_encounters",1))))
+            policy=await self.config.all();active=await self.guild_encounters(ctx.guild.id,conf);limit=effective_concurrency(conf,policy)
             if len(active)>=limit:await ctx.send(f"This server is already using all {limit} active encounter slots.");return
             if channel.id in {int(raw.get("channel_id",0)) for raw in active.values()}:await ctx.send("This channel already has an active encounter or Gym battle.");return
             if not owner and conf["last_spawn_at"]:
@@ -1363,8 +1396,7 @@ class Pokemon(commands.Cog):
                     remaining=max(0,round((last+timedelta(seconds=cooldown)-datetime.now(timezone.utc)).total_seconds())) if last else 0
                     if remaining:await ctx.send(f"The activity spawn cooldown is active for another {remaining}s.");return
             await self.spawn(channel,force_shiny=force_shiny)
-    @pokemon_set.command(name="martprice")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="martprice")
     async def mart_price(self,ctx,item:str,price:int):
         """Set a bot-wide Poké Mart item price."""
         key=mart_item_key(item)
@@ -1373,8 +1405,7 @@ class Pokemon(commands.Cog):
         prices=mart_prices(await self.config.mart_prices());prices[key]=price;await self.config.mart_prices.set(prices)
         await ctx.send(f"{MART_ITEMS[key][0]} now costs {price:,} credits.")
 
-    @pokemon_set.command(name="pokedexstyle")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="pokedexstyle")
     async def default_pokedex_style(self,ctx,style:str=None):
         """Choose the default Pokédex style for users following the default."""
         current=resolve_style(await self.config.pokedex_default_style()).key
@@ -1388,66 +1419,58 @@ class Pokemon(commands.Cog):
         await self.config.pokedex_default_style.set(style)
         await ctx.send(f"Default Pokédex style set to **{POKEDEX_STYLES[style].label}**.")
 
-    @pokemon_set.command(name="globalstatus")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="globalstatus")
     async def global_status(self,ctx):
         """Show the bot-wide encounter policy."""
         policy=await self.config.all()
-        await ctx.send(f"Encounter lifetime: {policy['encounter_timeout']//60}m\nMinimum threshold/cooldown: {policy['minimum_threshold']} points/{policy['minimum_cooldown']}s\nAllowed generations: {', '.join(map(str,policy['allowed_generations']))}\nRarity: {policy['rarity_profile']}\nSpecial species: {'enabled' if policy['allow_special_species'] else 'event-only'}")
+        await ctx.send(f"Encounter lifetime: {policy['encounter_timeout']//60}m\nMinimum threshold/cooldown: {policy['minimum_threshold']} points/{policy['minimum_cooldown']}s\nAllowed generations: {', '.join(map(str,policy['allowed_generations']))}\nRarity: {policy['rarity_profile']}\nSpecial species: {'enabled' if policy['allow_special_species'] else 'event-only'}\nAdministrator concurrency ceiling: {policy.get('maximum_concurrency',3)}")
 
-    @pokemon_set.command(name="encountertime")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="encountertime")
     async def encounter_time(self,ctx,minutes:int):
         """Set the global wild encounter lifetime."""
         if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes.");return
         await self.config.encounter_timeout.set(minutes*60);await ctx.send(f"Global wild encounter lifetime set to {minutes} minutes.")
 
-    @pokemon_set.command(name="globallimits")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="globallimits")
     async def global_limits(self,ctx,minimum_threshold:int,minimum_cooldown:int):
         """Set global spawn-rate floors."""
         if not 5<=minimum_threshold<=500 or not 60<=minimum_cooldown<=86400:await ctx.send("Threshold: 5–500; cooldown: 60–86400 seconds.");return
         await self.config.minimum_threshold.set(minimum_threshold);await self.config.minimum_cooldown.set(minimum_cooldown);await ctx.send("Global spawn-rate floors updated. Servers may only use slower settings.")
 
-    @pokemon_set.command(name="globalgenerations")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="globalgenerations")
     async def global_generations(self,ctx,*values:int):
         """Set bot-wide available generations."""
         selected=sorted(set(values))
         if not selected or any(value<1 or value>9 for value in selected):await ctx.send("Choose generations 1–9.");return
         await self.config.allowed_generations.set(selected);await ctx.send(f"Bot-wide generations: {', '.join(map(str,selected))}.")
 
-    @pokemon_set.command(name="rarity")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="rarity")
     async def rarity(self,ctx,profile:str):
         """Choose the global rarity profile."""
         profile=profile.casefold()
         if profile not in RARITY_PROFILES:await ctx.send("Choose friendly, standard, or challenging.");return
         await self.config.rarity_profile.set(profile);await ctx.send(f"Global encounter rarity set to {profile}.")
 
-    @pokemon_set.command(name="specials")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="specials")
     async def specials(self,ctx,enabled:bool):
         """Allow or gate special species."""
         await self.config.allow_special_species.set(enabled);await ctx.send("Special species may appear normally." if enabled else "Legendary and mythical species are event-only.")
 
-    @pokemon_set.command(name="catalogsync")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="catalogsync")
     async def catalog_sync(self,ctx,generation:int):
         """Cache catalog data for a generation."""
         async with ctx.typing():
             try:count=await self.catalog.sync_generation(generation)
             except CatalogError as exc:await ctx.send(str(exc));return
         await ctx.send(f"Cached {count} generation {generation} species.")
-    @pokemon_set.command(name="resetplayer")
-    @commands.is_owner()
+    @pokemon_owner_set.command(name="resetplayer")
     async def reset_player(self,ctx,user:discord.Member,confirmation:str):
         """Reset one complete Pokémon profile.
 
         This permanently clears the trainer starter, collection, party, Pokédex, badges, inventory, and active Pokémon battle. The final argument must be `confirm`.
         """
         if confirmation.casefold()!="confirm":
-            await ctx.send(f"This clears all Pokémon progress for {user.mention}. Run `{ctx.clean_prefix}pokemonset resetplayer {user.mention} confirm` to proceed.")
+            await ctx.send(f"This clears all Pokémon progress for {user.mention}. Run `{ctx.clean_prefix}pokemonownerset resetplayer {user.mention} confirm` to proceed.")
             return
         removed=await self.reset_player_data(user.id)
         for raw in removed:
