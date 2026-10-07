@@ -27,9 +27,14 @@ MART_ITEMS={
     "ultra_ball":("Ultra Ball","ultra_ball",300),
     "potion":("Potion","potion",75),
     "revive":("Revive","revive",400),
+    "fire_stone":("Fire Stone","fire_stone",5000),
+    "water_stone":("Water Stone","water_stone",5000),
+    "thunder_stone":("Thunder Stone","thunder_stone",5000),
+    "leaf_stone":("Leaf Stone","leaf_stone",5000),
+    "moon_stone":("Moon Stone","moon_stone",5000),
 }
-MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
-GLOBAL={"schema":16,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
+MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball","firestone":"fire_stone","waterstone":"water_stone","thunderstone":"thunder_stone","leafstone":"leaf_stone","moonstone":"moon_stone","fire":"fire_stone","water":"water_stone","thunder":"thunder_stone","leaf":"leaf_stone","moon":"moon_stone"}
+GLOBAL={"schema":17,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
 BOX_SIZE=30
 MAX_BOXES=8
 PARTY_SIZE=6
@@ -40,6 +45,14 @@ VIP_MAX_COLLECTION=VIP_STORAGE_CAPACITY+PARTY_SIZE
 VIP_CACHE_SECONDS=300
 CENTER_TREATMENT_SECONDS=5
 TRADE_TIMEOUT_SECONDS=900
+TRADE_EVOLUTIONS={64:65,67:68,75:76,93:94}
+STONE_EVOLUTIONS={
+    "fire_stone":{37:38,58:59,133:136},
+    "water_stone":{61:62,90:91,120:121,133:134},
+    "thunder_stone":{25:26,133:135},
+    "leaf_stone":{44:45,70:71,102:103},
+    "moon_stone":{30:31,33:34,35:36,39:40},
+}
 SERVER_TIMER_MINUTES=(1,10080)
 DEFAULT_SERVER_TIMER_MINUTES=60
 OWNER_TIMER_MINUTES=(1,10080)
@@ -136,6 +149,22 @@ def grant_mart_item(conf,key,quantity):
     if storage=="balls":conf["balls"]=int(conf.get("balls",0))+quantity
     else:
         items=conf.setdefault("items",{});items[storage]=int(items.get(storage,0))+quantity;conf["items"]=items
+
+def evolve_owned_raw(raw,target_species):
+    pokemon=OwnedPokemon.from_raw(raw);source=pokemon.species_id;pokemon.species_id=int(target_species)
+    abilities=SPECIES[pokemon.species_id].abilities
+    if abilities:pokemon.ability=abilities[0]
+    return pokemon.raw(),{"instance_id":pokemon.instance_id,"from":source,"to":pokemon.species_id}
+
+def trade_evolve_raw(raw):
+    target=TRADE_EVOLUTIONS.get(int(raw.get("species_id",0)))
+    return evolve_owned_raw(raw,target) if target else (dict(raw),None)
+
+def register_owned_species(conf,raw):
+    species_id=int(raw["species_id"]);conf["pokedex_seen"]=sorted({int(value) for value in conf.get("pokedex_seen",[])}|{species_id});conf["pokedex_caught"]=sorted({int(value) for value in conf.get("pokedex_caught",[])}|{species_id})
+
+def evolution_lines(events):
+    return ["{} evolved into {}!".format(SPECIES[event["from"]].name,SPECIES[event["to"]].name) for event in events or []]
 
 def achievement_totals(conf):
     caught_species={int(value) for value in conf.get("pokedex_caught",[]) if str(value).isdigit()}
@@ -234,7 +263,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.57.0";__author__="SickProdigy"
+    __version__="0.58.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -507,9 +536,19 @@ class Pokemon(commands.Cog):
                         if not offered or not requested:record["state"]="invalid";trades[str(trade_id)]=record;await self.config.trades.set(trades);return record
                         record["offered_pokemon"]=offered;record["requested_pokemon"]=requested
                     record["state"]="settling";trades[str(trade_id)]=record;await self.config.trades.set(trades)
-                if gift:offerer,recipient=self.gift_collections_after(offerer,recipient,[dict(raw) for raw in record["offered_pokemon"]])
+                evolutions=[]
+                if gift:
+                    incoming=[]
+                    for raw in record["offered_pokemon"]:
+                        evolved,event=trade_evolve_raw(raw);incoming.append(evolved)
+                        if event:evolutions.append(event);register_owned_species(recipient,evolved)
+                    offerer,recipient=self.gift_collections_after(offerer,recipient,incoming)
                 else:
-                    offered=dict(record["offered_pokemon"]);requested=dict(record["requested_pokemon"]);offerer=self.trade_collection_after(offerer,record["offered_id"],requested);recipient=self.trade_collection_after(recipient,record["requested_id"],offered)
+                    offered,offered_event=trade_evolve_raw(record["offered_pokemon"]);requested,requested_event=trade_evolve_raw(record["requested_pokemon"])
+                    if requested_event:evolutions.append(requested_event);register_owned_species(offerer,requested)
+                    if offered_event:evolutions.append(offered_event);register_owned_species(recipient,offered)
+                    offerer=self.trade_collection_after(offerer,record["offered_id"],requested);recipient=self.trade_collection_after(recipient,record["requested_id"],offered)
+                record["evolutions"]=evolutions
                 await offerer_section.set(offerer);await recipient_section.set(recipient)
                 record["state"]="completed";record["completed_at"]=datetime.now(timezone.utc).isoformat();trades[str(trade_id)]=record;await self.config.trades.set(trades);return record
 
@@ -778,7 +817,7 @@ class Pokemon(commands.Cog):
             await interaction.response.send_message(embed=render_pokedex(session),view=view,ephemeral=True);view.message=await interaction.original_response();return
         if section=="bag":
             items=conf.get("items",{});counts=(int(conf.get("balls",0)),int(items.get("great_ball",0)),int(items.get("ultra_ball",0)),int(items.get("potion",0)),int(items.get("revive",0)))
-            trainer=getattr(user,"display_name",getattr(user,"name","Trainer"));text=f"**{trainer}’s Poke Bag**\n**Poké Balls**\nPoké Ball: **{{}}** · Great Ball: **{{}}** · Ultra Ball: **{{}}**\n**Medicine**\nPotion: **{{}}** · Revive: **{{}}**".format(*counts);await interaction.response.send_message(text,ephemeral=True);return
+            items=conf.get("items",{});stones=(int(items.get("fire_stone",0)),int(items.get("water_stone",0)),int(items.get("thunder_stone",0)),int(items.get("leaf_stone",0)),int(items.get("moon_stone",0)));trainer=getattr(user,"display_name",getattr(user,"name","Trainer"));text=f"**{trainer}’s Poke Bag**\n**Poké Balls**\nPoké Ball: **{{}}** · Great Ball: **{{}}** · Ultra Ball: **{{}}**\n**Medicine**\nPotion: **{{}}** · Revive: **{{}}**".format(*counts)+"\n**Evolution Stones**\nFire: **{}** · Water: **{}** · Thunder: **{}** · Leaf: **{}** · Moon: **{}**".format(*stones);await interaction.response.send_message(text,ephemeral=True);return
         if section=="research":
             async with self.lock(("user",user.id)):
                 conf=await self.config.user(user).all();self.ensure_daily_research(conf);await self.config.user(user).set(conf)
@@ -1280,12 +1319,16 @@ class Pokemon(commands.Cog):
             for item in record.get("offered_details",[]):lines.append(f"• **{'Shiny ' if item.get('shiny') else ''}{item['name']} · {symbols.get(item.get('gender'),'?')} · Lv.{item['level']}**")
             description=f"**{record['offerer_name']}** is giving {len(lines)} Pokémon to **{record['recipient_name']}**:\n"+"\n".join(lines)
             if not final:description+="\n\nOnly the receiving trainer can accept. Either trainer can cancel. This gift expires in 15 minutes."
-            embed=discord.Embed(title=title,description=description,color=discord.Color.green() if final else discord.Color.gold());embed.set_footer(text=f"Gift #{record['trade_id']}");return embed
+            embed=discord.Embed(title=title,description=description,color=discord.Color.green() if final else discord.Color.gold())
+            if final and record.get("evolutions"):embed.add_field(name="Trade Evolution",value="\n".join(evolution_lines(record["evolutions"])),inline=False)
+            embed.set_footer(text=f"Gift #{record['trade_id']}");return embed
         title="Trade completed!" if final else "Pokémon Trade Offer"
         symbols={"male":"♂","female":"♀","genderless":"—"};offered=("Shiny " if record.get("offered_shiny") else "")+record["offered_name"];requested=("Shiny " if record.get("requested_shiny") else "")+record["requested_name"]
         description=(f"**{record['offerer_name']}** offers **{offered} · {symbols.get(record.get('offered_gender'),'?')} · Lv.{record['offered_level']}**\n" f"for **{record['recipient_name']}’s {requested} · {symbols.get(record.get('requested_gender'),'?')} · Lv.{record['requested_level']}**")
         if not final:description+="\n\nOnly the receiving trainer can accept. Either trainer can cancel. This offer expires in 15 minutes."
-        embed=discord.Embed(title=title,description=description,color=discord.Color.green() if final else discord.Color.gold());embed.set_footer(text=f"Trade #{record['trade_id']}");return embed
+        embed=discord.Embed(title=title,description=description,color=discord.Color.green() if final else discord.Color.gold())
+        if final and record.get("evolutions"):embed.add_field(name="Trade Evolution",value="\n".join(evolution_lines(record["evolutions"])),inline=False)
+        embed.set_footer(text=f"Trade #{record['trade_id']}");return embed
 
     @pokemon.group(name="trade",invoke_without_command=True)
     @commands.guild_only()
@@ -1370,6 +1413,20 @@ class Pokemon(commands.Cog):
             log.exception("Pokémon trade settlement remains pending recovery",extra={"trade_id":trade_id});await interaction.response.send_message("The trade is safely recorded and will finish during recovery. No Pokémon will be rerolled.",ephemeral=True);return
         if not record or record.get("state")!="completed":await interaction.response.edit_message(content="This trade is no longer available.",view=None);return
         await interaction.response.edit_message(content=None,embed=self.trade_embed(record,True),view=None)
+        await self.send_trade_evolution_cards(interaction,record)
+
+    async def send_trade_evolution_cards(self,interaction,record):
+        events=record.get("evolutions",[])
+        if not events:return
+        collections=[]
+        for user_id in (record["offerer_id"],record["recipient_id"]):collections.extend((await self.config.user_from_id(int(user_id)).all()).get("collection",[]))
+        owned={raw.get("instance_id"):raw for raw in collections}
+        for event in events:
+            raw=owned.get(event.get("instance_id"))
+            if not raw:continue
+            pokemon=OwnedPokemon.from_raw(raw);embed,files=await self.rendered_progression(pokemon,evolved_from=int(event["from"]))
+            try:await interaction.followup.send(embed=embed,files=files)
+            except discord.HTTPException:log.exception("Trade evolution card could not be delivered",extra={"trade_id":record.get("trade_id")})
 
     async def cancel_trade(self,interaction,trade_id):
         async with self.lock("trades"):
@@ -1443,7 +1500,7 @@ class Pokemon(commands.Cog):
         """View your available medicine and items."""
         conf=await self.config.user(ctx.author).all();items=conf.get("items",{})
         trainer=getattr(ctx.author,"display_name",getattr(ctx.author,"name","Trainer"))
-        await ctx.send(f"**{trainer}’s Poke Bag**\n**Poké Balls**\nPoké Ball: **{int(conf.get('balls',0))}** · Great Ball: **{int(items.get('great_ball',0))}** · Ultra Ball: **{int(items.get('ultra_ball',0))}**\n**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**")
+        await ctx.send(f"**{trainer}’s Poke Bag**\n**Poké Balls**\nPoké Ball: **{int(conf.get('balls',0))}** · Great Ball: **{int(items.get('great_ball',0))}** · Ultra Ball: **{int(items.get('ultra_ball',0))}**\n**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**\n**Evolution Stones**\nFire: **{int(items.get('fire_stone',0))}** · Water: **{int(items.get('water_stone',0))}** · Thunder: **{int(items.get('thunder_stone',0))}** · Leaf: **{int(items.get('leaf_stone',0))}** · Moon: **{int(items.get('moon_stone',0))}**")
 
     @pokemon.command(name="achievements",aliases=["goals"])
     async def achievements(self,ctx):
@@ -1471,7 +1528,7 @@ class Pokemon(commands.Cog):
     async def pokemon_buy(self,ctx,item:str,quantity:int=1):
         """Buy Poké Mart supplies with Red bank credits."""
         key=mart_item_key(item)
-        if not key:await ctx.send("Choose pokeball, greatball, ultraball, potion, or revive.");return
+        if not key:await ctx.send("Choose a ball, medicine, or Kanto evolution stone shown in the Poké Mart.");return
         if not 1<=quantity<=100:await ctx.send("Choose a quantity from 1 to 100.");return
         prices=mart_prices(await self.config.mart_prices());cost=prices[key]*quantity;currency=await bank.get_currency_name(ctx.guild);label=MART_ITEMS[key][0]
         async with self.lock(("user",ctx.author.id)):
@@ -1496,6 +1553,23 @@ class Pokemon(commands.Cog):
     async def pokemon_use(self,ctx):
         """Use an item on one of your Pokémon."""
         await ctx.send_help()
+
+    @pokemon_use.command(name="stone")
+    async def use_stone(self,ctx,stone:str,identifier:str):
+        """Use a Kanto evolution stone on an eligible Pokémon."""
+        key=mart_item_key(stone)
+        if key not in STONE_EVOLUTIONS:await ctx.send("Choose fire, water, thunder, leaf, or moon stone.");return
+        if self.trainer_in_active_battle(ctx.author.id):await ctx.send("Finish your active battle before evolving a Pokémon.");return
+        async with self.lock(("user",ctx.author.id)):
+            conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
+            if not raw:await ctx.send("Choose a party slot or unique Pokémon name.");return
+            target=STONE_EVOLUTIONS[key].get(int(raw.get("species_id",0)));name=raw.get("nickname") or SPECIES[raw["species_id"]].name
+            if not target:await ctx.send(f"{name} cannot evolve with a {MART_ITEMS[key][0]}.");return
+            if self.trade_reserved(await self.config.trades(),raw["instance_id"]):await ctx.send("That Pokémon is reserved in a pending trade or gift.");return
+            items=conf.setdefault("items",{})
+            if int(items.get(key,0))<1:await ctx.send(f"You have no {MART_ITEMS[key][0]}s.");return
+            items[key]=int(items.get(key,0))-1;evolved,event=evolve_owned_raw(raw,target);raw.update(evolved);register_owned_species(conf,evolved);conf["items"]=items;await self.config.user(ctx.author).set(conf)
+        pokemon=OwnedPokemon.from_raw(evolved);embed,files=await self.rendered_progression(pokemon,evolved_from=event["from"]);embed.description+=f" The {MART_ITEMS[key][0]} was consumed.";await ctx.send(embed=embed,files=files)
 
     @pokemon_use.command(name="potion")
     async def use_potion(self,ctx,identifier:str):
