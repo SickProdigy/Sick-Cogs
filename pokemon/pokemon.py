@@ -29,7 +29,7 @@ MART_ITEMS={
     "revive":("Revive","revive",400),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
-GLOBAL={"schema":14,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":60,"next_trade":1,"trades":{}}
+GLOBAL={"schema":14,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{}}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
@@ -85,7 +85,7 @@ def effective_concurrency(conf,policy):
 def effective_timer_minutes(conf,policy):
     requested=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(conf.get("timer_minutes",DEFAULT_SERVER_TIMER_MINUTES))))
     if conf.get("timer_owner_override",False):return requested
-    floor=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(policy.get("minimum_timer",DEFAULT_SERVER_TIMER_MINUTES))))
+    floor=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(policy.get("minimum_timer",GLOBAL["minimum_timer"]))))
     return max(requested,floor)
 
 def jittered_spawn_due(now,minutes,rng=None):
@@ -205,7 +205,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.52.0";__author__="SickProdigy"
+    __version__="0.52.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1780,7 +1780,7 @@ class Pokemon(commands.Cog):
     @pokemon_owner_set.command(name="globalstatus",aliases=["settings","status"])
     async def global_status(self,ctx):
         """Show all bot-wide Pokémon policies and owner limits."""
-        policy=await self.config.all();minimum_timer=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(policy.get("minimum_timer",DEFAULT_SERVER_TIMER_MINUTES))));prices=mart_prices(policy.get("mart_prices",{}));generations=", ".join(map(str,policy.get("allowed_generations",[1])))
+        policy=await self.config.all();minimum_timer=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(policy.get("minimum_timer",GLOBAL["minimum_timer"]))));prices=mart_prices(policy.get("mart_prices",{}));generations=", ".join(map(str,policy.get("allowed_generations",[1])))
         price_text=" · ".join(f"{MART_ITEMS[key][0]}: **{prices[key]:,}**" for key in MART_ITEMS)
         await ctx.send(
             f"**Pokémon bot-wide policy**\n"
