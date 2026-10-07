@@ -1,5 +1,7 @@
 import unittest
 
+from icarus.icarus import IcarusAnnouncements
+
 from icarus.client import (
     classify_news,
     extract_image,
@@ -15,6 +17,9 @@ from icarus.client import (
 
 
 class IcarusClientTests(unittest.TestCase):
+    def test_public_help_points_administrators_to_settings(self):
+        self.assertIn("[p]icarusset", IcarusAnnouncements.icarus.help)
+
     def test_classifies_devblog_before_embedded_update_words(self):
         item = {"title": "Icarus Developer Blog: Update Preview", "contents": "A patch is coming."}
         self.assertEqual(classify_news(item), "devblogs")

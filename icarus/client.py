@@ -11,7 +11,7 @@ from PIL import Image, UnidentifiedImageError
 APP_ID = 1149460
 API_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
 ANNOUNCEMENTS_URL = f"https://steamcommunity.com/app/{APP_ID}/announcements/"
-USER_AGENT = "Sick-Cogs-IcarusAnnouncements/0.1.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-IcarusAnnouncements/0.1.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 OFFICIAL_FEED_NAME = "steam_community_announcements"
 STEAM_CLAN_IMAGE_ROOT = "https://clan.steamstatic.com/images"
 

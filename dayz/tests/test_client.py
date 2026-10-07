@@ -1,5 +1,7 @@
 import unittest
 
+from dayz.dayz import DayZAnnouncements
+
 from dayz.client import (
     classify_news,
     extract_image,
@@ -15,6 +17,9 @@ from dayz.client import (
 
 
 class DayZClientTests(unittest.TestCase):
+    def test_public_help_points_administrators_to_settings(self):
+        self.assertIn("[p]dayzset", DayZAnnouncements.dayz.help)
+
     def test_classifies_devblog_before_embedded_update_words(self):
         item = {"title": "DayZ Dev Blog: Update Preview", "contents": "A patch is coming."}
         self.assertEqual(classify_news(item), "devblogs")
