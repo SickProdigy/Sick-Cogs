@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import COMPLETED_GYMS,KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
+from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView, TradeCollectionView, GymChallengeView
@@ -248,6 +248,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemon buy",player_names)
         self.assertIn("pokemon use potion",player_names)
         self.assertIn("pokemon use revive",player_names)
+        self.assertIn("pokemon use stone",player_names)
         self.assertIn("pokemon pokedex",player_names)
         self.assertIn("pokemon gym challenge",player_names)
         self.assertIn("pokemon party add",player_names)
@@ -585,8 +586,9 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((conf["balls"],conf["items"]["great_ball"],conf["items"]["ultra_ball"]),(9,2,0))
 
     async def test_mart_defaults_and_aliases_match_payday_scale(self):
-        self.assertEqual(mart_prices(),{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400})
-        self.assertEqual((mart_item_key("pokeball"),mart_item_key("great-ball"),mart_item_key("missing")),("poke_ball","great_ball",None))
+        self.assertEqual({key:mart_prices()[key] for key in ("poke_ball","great_ball","ultra_ball","potion","revive")},{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400})
+        self.assertTrue(all(mart_prices()[key]==5000 for key in STONE_EVOLUTIONS))
+        self.assertEqual((mart_item_key("pokeball"),mart_item_key("great-ball"),mart_item_key("thunder"),mart_item_key("missing")),("poke_ball","great_ball","thunder_stone",None))
         conf={"balls":1,"items":{"potion":2}};grant_mart_item(conf,"poke_ball",3);grant_mart_item(conf,"potion",2)
         self.assertEqual((conf["balls"],conf["items"]["potion"]),(4,4))
 
@@ -599,6 +601,13 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         withdraw.assert_awaited_once_with(ctx.author,300)
         self.assertEqual(section.value["items"]["great_ball"],5)
         self.assertIn("2 Great Balls",ctx.send.await_args.args[0])
+
+    async def test_stone_purchase_and_use_preserve_level_and_moves(self):
+        pikachu=OwnedPokemon.create("pikachu",25,10,seed=3);before_moves=pikachu.moves;section=StoredSection({"collection":[pikachu.raw()],"party":["pikachu"],"items":{"thunder_stone":1},"pokedex_seen":[25],"pokedex_caught":[25]})
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(user=lambda user:section,trades=StoredValue({}));cog.rendered_progression=AsyncMock(return_value=(discord.Embed(title="Pikachu evolved!",description="Evolution complete."),[]))
+        ctx=SimpleNamespace(author=SimpleNamespace(id=7),send=AsyncMock())
+        await Pokemon.use_stone.callback(cog,ctx,"thunder","1")
+        evolved=OwnedPokemon.from_raw(section.value["collection"][0]);self.assertEqual((evolved.species_id,evolved.level,evolved.moves),(26,10,before_moves));self.assertEqual(section.value["items"]["thunder_stone"],0);self.assertIn(26,section.value["pokedex_caught"]);cog.rendered_progression.assert_awaited_once()
 
     async def test_mart_refunds_when_inventory_persistence_fails(self):
         section=SimpleNamespace(all=AsyncMock(return_value={"balls":10,"items":{}}),set=AsyncMock(side_effect=RuntimeError("storage failed")));prices=StoredValue({key:value[2] for key,value in MART_ITEMS.items()})
@@ -711,6 +720,11 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         settled=await cog.settle_trade(4);self.assertEqual(settled["state"],"completed");self.assertEqual([raw["instance_id"] for raw in offerer.value["collection"]],["keeper"]);self.assertEqual(len(recipient.value["collection"]),3);self.assertEqual(recipient.value["party"],["gift-1"])
         self.assertIsNone(await cog.settle_trade(4));self.assertEqual(len(recipient.value["collection"]),3)
 
+    async def test_gift_triggers_trade_evolution_for_recipient(self):
+        kadabra=OwnedPokemon.create("gift-kadabra",64,16,seed=2);keeper=OwnedPokemon.create("keeper",4,5,seed=3);offerer=StoredSection({"collection":[kadabra.raw(),keeper.raw()],"party":["gift-kadabra"]});recipient=StoredSection({"collection":[],"party":[],"pokedex_seen":[],"pokedex_caught":[]})
+        record={"trade_id":9,"kind":"gift","state":"offered","offerer_id":10,"recipient_id":20,"offerer_name":"Red","recipient_name":"Blue","offered_ids":["gift-kadabra"],"offered_details":[{"name":"Kadabra","level":16,"gender":"male","shiny":False}]};trades=StoredValue({"9":record});sections={10:offerer,20:recipient};cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.vip_capacity=AsyncMock(return_value=246);cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:sections[uid])
+        settled=await cog.settle_trade(9);received=OwnedPokemon.from_raw(recipient.value["collection"][0]);self.assertEqual((received.species_id,received.level,received.moves),(65,16,kadabra.moves));self.assertEqual(settled["evolutions"][0]["to"],65);self.assertIn("Kadabra evolved into Alakazam",Pokemon.trade_embed(settled,True).fields[0].value)
+
     async def test_gift_acceptance_rechecks_recipient_capacity(self):
         gift=OwnedPokemon.create("gift",1,5,seed=1).raw();held=OwnedPokemon.create("held",4,5,seed=2).raw();offerer=StoredSection({"collection":[gift,held],"party":["gift"]});recipient=StoredSection({"collection":[held],"party":["held"]});record={"trade_id":5,"kind":"gift","state":"offered","offerer_id":10,"recipient_id":20,"offered_ids":["gift"]};trades=StoredValue({"5":record});sections={10:offerer,20:recipient};cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.vip_capacity=AsyncMock(return_value=1);cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:sections[uid])
         with self.assertRaisesRegex(ValueError,"free collection slot"):await cog.settle_trade(5)
@@ -727,6 +741,19 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await cog.settle_trade(1));self.assertEqual(len(offerer.value["collection"]),1)
         partial={**record,"trade_id":2,"state":"settling","offered_pokemon":offered,"requested_pokemon":requested};trades.value={"2":partial};offerer.value=Pokemon.trade_collection_after({"collection":[offered],"party":["offered"]},"offered",requested);recipient.value={"collection":[requested],"party":["requested"]}
         recovered=await cog.settle_trade(2,recovering=True);self.assertEqual(recovered["state"],"completed");self.assertEqual([raw["instance_id"] for raw in recipient.value["collection"]],["offered"])
+
+    async def test_trade_and_gift_trigger_kanto_trade_evolution_idempotently(self):
+        kadabra=OwnedPokemon.create("kadabra",64,16,seed=1);machoke=OwnedPokemon.create("machoke",67,28,seed=2);kadabra_moves=kadabra.moves;machoke_moves=machoke.moves
+        offerer=StoredSection({"collection":[kadabra.raw()],"party":["kadabra"],"pokedex_seen":[],"pokedex_caught":[]});recipient=StoredSection({"collection":[machoke.raw()],"party":["machoke"],"pokedex_seen":[],"pokedex_caught":[]})
+        record={"trade_id":8,"state":"offered","offerer_id":10,"recipient_id":20,"offered_id":"kadabra","requested_id":"machoke"};trades=StoredValue({"8":record});sections={10:offerer,20:recipient};cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:sections[uid])
+        settled=await cog.settle_trade(8);received_offer=OwnedPokemon.from_raw(recipient.value["collection"][0]);received_request=OwnedPokemon.from_raw(offerer.value["collection"][0])
+        self.assertEqual((received_offer.species_id,received_offer.level,received_offer.moves),(65,16,kadabra_moves));self.assertEqual((received_request.species_id,received_request.level,received_request.moves),(68,28,machoke_moves));self.assertEqual(len(settled["evolutions"]),2);self.assertIn(65,recipient.value["pokedex_caught"]);self.assertIn(68,offerer.value["pokedex_caught"]);self.assertIsNone(await cog.settle_trade(8))
+        self.assertEqual(TRADE_EVOLUTIONS,{64:65,67:68,75:76,93:94})
+
+    async def test_trade_evolution_sends_generated_reveal_card(self):
+        evolved=OwnedPokemon.create("kadabra",65,16,seed=2).raw();sections={10:StoredSection({"collection":[]}),20:StoredSection({"collection":[evolved]})};cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user_from_id=lambda uid:sections[uid]);cog.rendered_progression=AsyncMock(return_value=(discord.Embed(title="Kadabra evolved!"),[]))
+        interaction=SimpleNamespace(followup=SimpleNamespace(send=AsyncMock()));record={"trade_id":9,"offerer_id":10,"recipient_id":20,"evolutions":[{"instance_id":"kadabra","from":64,"to":65}]}
+        await cog.send_trade_evolution_cards(interaction,record);cog.rendered_progression.assert_awaited_once();interaction.followup.send.assert_awaited_once()
 
     async def test_trade_view_limits_acceptance_to_recipient(self):
         view=TradeView(SimpleNamespace(),7,10,20);outsider=SimpleNamespace(user=SimpleNamespace(id=30),response=SimpleNamespace(send_message=AsyncMock()))
