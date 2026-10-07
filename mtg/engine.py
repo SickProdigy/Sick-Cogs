@@ -1,6 +1,7 @@
 import random
 import re
 import time
+from collections import Counter
 from itertools import combinations
 from dataclasses import asdict, dataclass, field, replace
 from typing import Dict, List, Optional
@@ -170,8 +171,24 @@ class Game:
     def active_user(self): return self.order[self.active_index]
     @property
     def finished(self): return self.phase=="finished"
+    def _combat_names(self,uids):
+        counts=Counter(self.card(uid).name for uid in uids)
+        return ", ".join(f"{name} ×{count}" if count>1 else name for name,count in counts.items())
+
+    def _history_detail(self,action):
+        if action in ("attack","ai_attack"):
+            return "Attacked with "+self._combat_names(self.attackers)+"." if self.attackers else "Declared no attackers."
+        if action in ("block","ai_block","auto_no_blocks"):
+            assignments=[]
+            for attacker_uid in self.attackers:
+                blockers=self.blockers_for(attacker_uid)
+                if blockers: assignments.append(f"{self._combat_names(blockers)} blocked {self.card(attacker_uid).name}")
+            return "; ".join(assignments)+"." if assignments else "Declared no blockers."
+        return ""
+
     def record(self,user,action,detail=""):
         self.updated_at=int(time.time())
+        detail=detail or self._history_detail(action)
         event={"seq":len(self.history)+1,"at":self.updated_at,"user":user,"action":action,"turn":self.turn,"phase":self.phase}
         if detail: event["detail"]=detail
         self.history.append(event)
@@ -2655,13 +2672,19 @@ class Game:
 
     def _combat_damage(self,first_strike):
         atk=self.players[self.active_user]; dfn=self.players[self.opponent(self.active_user)]
+        life_before={user:self.player(user).life for user in self.order}
+        permanents_before={permanent.uid:(self.card(permanent.uid).name,permanent.damage) for player in self.players.values() for permanent in player.battlefield}
         mask_assigners=set()
         if not first_strike:
             mask_assigners={uid for uid in self.attackers+list(self.all_blocker_uids()) if (self.find_permanent(uid)[1] is not None and (self.find_permanent(uid)[1].face_down or self.find_permanent(uid)[1].mask_normal_damage))}
             for uid in mask_assigners: self._turn_face_up(self.find_permanent(uid)[1],"assigning combat damage")
         if self.prevent_combat_damage:
-            self.log.append("Combat damage was prevented."); self._sba(); self._life(); return
-        damage_batch=self.next_uid
+            self.log.append("Combat damage was prevented."); self.record(None,"combat_damage","All combat damage was prevented."); self._sba(); self._life(); return
+        damage_batch=self.next_uid; player_hits=[]
+        def damage_defender(amount,source):
+            before=dfn.life; dealt=self._damage_player(dfn.user_id,amount,source,atk.user_id,combat=True)
+            if dealt: player_hits.append((self.card(source.uid).name,dealt,before,dfn.life))
+            return dealt
         for uid in self.attackers:
             a=next((x for x in atk.battlefield if x.uid==uid),None)
             if a is None: continue
@@ -2674,15 +2697,15 @@ class Game:
                     if uid not in self.blocked_attackers or trample:
                         bodyguard=self._bodyguard_for(dfn.user_id) if uid not in self.blocked_attackers else None
                         if bodyguard is not None: self._damage_permanent(bodyguard,power,self.card(a.uid),self.current_colors(a),damage_batch,a.uid)
-                        else: self._damage_player(dfn.user_id,power,a,atk.user_id,combat=True)
+                        else: damage_defender(power,a)
                 elif len(blockers)==1:
                     blocker=blockers[0]; lethal=max(0,self.current_stats(blocker)[1]-blocker.damage); chosen=self.trample_assignments.get(uid,lethal); assigned=min(power,max(lethal,chosen)) if trample else power
                     self._damage_permanent(blocker,assigned,self.card(a.uid),self.current_colors(a),damage_batch,a.uid)
-                    if trample: self._damage_player(dfn.user_id,max(0,power-assigned),a,atk.user_id,combat=True)
+                    if trample: damage_defender(max(0,power-assigned),a)
                 else:
                     assignment={item.get("blocker"):item.get("damage",0) for item in self.attacker_damage_assignments.get(uid,[])}
                     for blocker in blockers: self._damage_permanent(blocker,assignment.get(blocker.uid,0),self.card(a.uid),self.current_colors(a),damage_batch,a.uid)
-                    if trample: self._damage_player(dfn.user_id,max(0,power-sum(assignment.values())),a,atk.user_id,combat=True)
+                    if trample: damage_defender(max(0,power-sum(assignment.values())),a)
             for blocker in blockers:
                 blocker_strikes=blocker.uid in mask_assigners or ("first_strike" in self.current_keywords(blocker))==first_strike
                 if blocker_strikes:
@@ -2690,6 +2713,23 @@ class Game:
                     self._damage_permanent(a,assigned,self.card(blocker.uid),self.current_colors(blocker),damage_batch,blocker.uid)
         self.attacker_damage_assignments={}; self.blocker_damage_assignments={}
         self._sba(); self._life()
+        parts=[f"{name} dealt {dealt} to the defender ({before} → {after})" for name,dealt,before,after in player_hits]
+        attributed=sum(hit[1] for hit in player_hits)
+        for user in self.order:
+            lost=max(0,life_before[user]-self.player(user).life)
+            unexplained=lost-attributed if user==dfn.user_id else lost
+            if unexplained>0: parts.append(f"{'Attacker' if user==self.active_user else 'Defender'} lost {unexplained} additional life")
+        current={permanent.uid:permanent for player in self.players.values() for permanent in player.battlefield}
+        damaged=[]; died=[]
+        for uid,(name,prior_damage) in permanents_before.items():
+            permanent=current.get(uid)
+            if permanent is None: died.append(name)
+            elif permanent.damage>prior_damage: damaged.append(f"{name} took {permanent.damage-prior_damage}")
+        if damaged: parts.append("; ".join(damaged))
+        if died: parts.append("Died: "+self._combat_names(uid for uid in permanents_before if uid not in current))
+        if not parts: parts.append("No player damage or creature deaths.")
+        step="First-strike damage" if first_strike else "Combat damage"
+        self.record(None,"combat_damage",step+": "+". ".join(parts)+".")
         if not first_strike:
             for player in self.players.values():
                 for permanent in player.battlefield: permanent.mask_normal_damage=False

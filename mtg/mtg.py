@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.121.4"
+    __version__="0.121.5"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -330,7 +330,7 @@ class MTG(commands.Cog):
         events=list(reversed(game.history)); pages=max(1,math.ceil(len(events)/HistoryPaginationView.page_size)); page=max(0,min(page,pages-1))
         start=page*HistoryPaginationView.page_size; visible=events[start:start+HistoryPaginationView.page_size]
         names={user:str(self.bot.get_user(user).display_name if self.bot.get_user(user) else user).replace("\n"," ")[:32] for user in game.order}
-        labels={"game_created":"Game created","keep":"Kept hand","mulligan":"Mulligan","play":"Played or cast a card","pass":"Passed priority","auto_pass":"Auto-passed empty priority","attack":"Declared attackers","attack_none":"Declared no attacks","block":"Declared blockers","block_none":"Declared no blocks","concede":"Conceded"}
+        labels={"game_created":"Game created","keep":"Kept hand","mulligan":"Mulligan","play":"Played or cast a card","pass":"Passed priority","auto_pass":"Auto-passed empty priority","attack":"Declared attackers","ai_attack":"Declared attackers","attack_none":"Declared no attacks","block":"Declared blockers","ai_block":"Declared blockers","auto_no_blocks":"Declared no blocks","block_none":"Declared no blocks","combat_damage":"Combat resolved","concede":"Conceded"}
         lines=[]
         for event in visible:
             actor=names.get(event.get("user"),"Game")

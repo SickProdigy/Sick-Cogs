@@ -47,6 +47,28 @@ class TurnTests(unittest.TestCase):
         g.pass_priority(10); g.pass_priority(20)
         g.pass_priority(10); g.pass_priority(20)
         self.assertEqual(g.active_user,20); self.assertEqual(g.turn,2)
+    def test_combat_history_names_attackers_blocks_and_damage(self):
+        game=ready(); attacker=game.player(10); defender=game.player(20)
+        goblin=next(uid for uid in game.cards if game.cards[uid]=="lea:164")
+        bear=next(uid for uid in game.cards if game.cards[uid]=="lea:199")
+        attacker.battlefield=[Permanent(goblin,game.cards[goblin],sick=False)]
+        defender.battlefield=[Permanent(bear,game.cards[bear],sick=False)]
+        game.phase="attackers"; game.priority_user=None; game.declare_attackers(10,[1]); game.record(10,"attack")
+        self.assertIn("Mons's Goblin Raiders",game.history[-1]["detail"])
+        game.phase="blockers"; game.priority_user=None; game.declare_blockers(20,{1:1}); game.record(20,"ai_block")
+        self.assertIn("Grizzly Bears blocked Mons's Goblin Raiders",game.history[-1]["detail"])
+        game._combat_damage(False)
+        event=game.history[-1]
+        self.assertEqual(event["action"],"combat_damage")
+        self.assertIn("Grizzly Bears took 1",event["detail"])
+        self.assertIn("Died: Mons's Goblin Raiders",event["detail"])
+
+        unblocked=ready(); goblin=next(uid for uid in unblocked.cards if unblocked.cards[uid]=="lea:164")
+        unblocked.player(10).battlefield=[Permanent(goblin,unblocked.cards[goblin],sick=False)]
+        unblocked.attackers=[goblin]; unblocked.phase="after_blockers"; before=unblocked.player(20).life
+        unblocked._combat_damage(False)
+        self.assertIn(f"Mons's Goblin Raiders dealt 1 to the defender ({before} → {before-1})",unblocked.history[-1]["detail"])
+
     def test_smart_priority_skips_only_empty_action_windows(self):
         game=ready(); game.phase="precombat_main"; game.priority_user=10
         game.player(10).hand=[]; game.player(20).hand=[]; game.player(10).battlefield=[]; game.player(20).battlefield=[]
