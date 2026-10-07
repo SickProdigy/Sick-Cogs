@@ -95,6 +95,26 @@ class CenterCollectView(discord.ui.View):
         await interaction.response.edit_message(content=f"**{name}** collected their fully restored party.",view=None)
 
 
+class TradeCollectionView(discord.ui.View):
+    def __init__(self,cog,user_id,trainer,page,pages):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;self.trainer=trainer;self.page=page;self.pages=pages
+        self.previous.disabled=page<=1;self.next.disabled=page>=pages
+
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This trade browser belongs to another trainer.",ephemeral=True);return False
+
+    async def show(self,interaction,page):
+        embed,files,page,pages,items=await self.cog.rendered_collection(self.trainer,page,manage=False)
+        await interaction.response.edit_message(embed=embed,attachments=files,view=TradeCollectionView(self.cog,self.user_id,self.trainer,page,pages))
+
+    @discord.ui.button(label="Previous",emoji="◀️",style=discord.ButtonStyle.secondary)
+    async def previous(self,interaction,button):await self.show(interaction,self.page-1)
+
+    @discord.ui.button(label="Next",emoji="▶️",style=discord.ButtonStyle.secondary)
+    async def next(self,interaction,button):await self.show(interaction,self.page+1)
+
+
 class TradeView(discord.ui.View):
     def __init__(self,cog,trade_id,offerer_id,recipient_id):
         super().__init__(timeout=None);self.cog=cog;self.trade_id=trade_id;self.offerer_id=offerer_id;self.recipient_id=recipient_id

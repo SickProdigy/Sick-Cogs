@@ -16,7 +16,7 @@ from pokemon.models import Battle,OwnedPokemon
 from pokemon.pokemon import GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView, GymChallengeView
+from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView, TradeCollectionView, GymChallengeView
 
 
 class StoredValue:
@@ -220,6 +220,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemon center",player_names)
         self.assertIn("pokemon trade",player_names)
         self.assertIn("pokemon trade cancel",player_names)
+        self.assertIn("pokemon trade collection",player_names)
         self.assertIn("pokemon mart",player_names)
         self.assertIn("pokemon achievements",player_names)
         self.assertIn("pokemon research",player_names)
@@ -653,6 +654,11 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((record["offered_id"],record["requested_id"],record["message_id"]),("offered","requested",99));self.assertIsInstance(ctx.send.await_args.kwargs["view"],TradeView)
         edited=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=edited));cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel)
         await cog.expire_trades(datetime.fromisoformat(record["expires_at"])+timedelta(seconds=1));self.assertEqual(trades.value["1"]["state"],"expired");edited.edit.assert_awaited_once_with(content="This Pokémon trade offer expired.",view=None)
+
+    async def test_trade_collection_browser_is_read_only_and_trainer_scoped(self):
+        member=SimpleNamespace(id=20,display_name="Blue");section=StoredSection({"collection":[{"instance_id":"one"}]});cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section);cog.rendered_collection=AsyncMock(return_value=(discord.Embed(title="Collection"),[],1,2,[]));ctx=SimpleNamespace(author=SimpleNamespace(id=10),send=AsyncMock())
+        await Pokemon.trade_collection.callback(cog,ctx,member,1);sent=ctx.send.await_args.kwargs;view=sent["view"];self.assertIsInstance(view,TradeCollectionView);self.assertTrue(view.previous.disabled);self.assertFalse(view.next.disabled);cog.rendered_collection.assert_awaited_once_with(member,1,manage=False)
+        outsider=SimpleNamespace(user=SimpleNamespace(id=30),response=SimpleNamespace(send_message=AsyncMock()));self.assertFalse(await view.interaction_check(outsider));outsider.response.send_message.assert_awaited_once_with("This trade browser belongs to another trainer.",ephemeral=True)
 
     async def test_trade_command_cancel_retires_original_controls(self):
         record={"state":"offered","trade_id":1,"offerer_id":10,"recipient_id":20,"channel_id":2,"message_id":99};trades=StoredValue({"1":record});edited=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=edited))
