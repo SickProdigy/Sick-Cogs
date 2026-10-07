@@ -15,7 +15,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,CenterCollectView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,CenterCollectView,TradeView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -29,11 +29,12 @@ MART_ITEMS={
     "revive":("Revive","revive",400),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
-GLOBAL={"schema":12,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":3}
+GLOBAL={"schema":13,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":3,"next_trade":1,"trades":{}}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
 CENTER_TREATMENT_SECONDS=5
+TRADE_TIMEOUT_SECONDS=900
 COLLECTION_PAGE_SIZE=9
 PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
 SPECIAL_SPECIES={144,145,146,150,151}
@@ -195,7 +196,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.47.0";__author__="SickProdigy"
+    __version__="0.48.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -204,6 +205,7 @@ class Pokemon(commands.Cog):
         try:self.catalog.load()
         except CatalogError:log.exception("Pokémon catalog cache could not be loaded")
         await self._migrate()
+        await self.recover_trades()
         for key,raw in (await self.config.encounters()).items():
             if raw.get("battle"):
                 battle=Battle.from_raw(raw["battle"]);self.battles[battle.encounter_id]=battle
@@ -211,11 +213,14 @@ class Pokemon(commands.Cog):
                     for view in (BattleView,FightView,PartyView,BagView):self.bot.add_view(view(self,battle.encounter_id),message_id=battle.message_id)
                     for item_key in ("potion","revive"):self.bot.add_view(MedicineView(self,battle.encounter_id,item_key),message_id=battle.message_id)
             elif raw.get("state")=="open":self.bot.add_view(EncounterView(self,int(key)),message_id=raw.get("message_id"))
+        for key,raw in (await self.config.trades()).items():
+            if raw.get("state")=="offered" and raw.get("message_id"):
+                self.bot.add_view(TradeView(self,int(key),int(raw["offerer_id"]),int(raw["recipient_id"])),message_id=int(raw["message_id"]))
     def cog_unload(self):
         self.cleanup_loop.cancel();self.bot.loop.create_task(self.renderer.close())
     @tasks.loop(seconds=60)
     async def cleanup_loop(self):
-        now=datetime.now(timezone.utc);expired=[];returned=[]
+        now=datetime.now(timezone.utc);await self.expire_trades(now);expired=[];returned=[]
         async with self.lock("encounters"):
             encounters=await self.config.encounters()
             for key,raw in encounters.items():
@@ -341,9 +346,69 @@ class Pokemon(commands.Cog):
             for user_id,data in (await self.config.all_users()).items():
                 data.setdefault("menu_style","retro");await self.config.user_from_id(int(user_id)).set(data)
             await self.config.schema.set(12)
+        if schema<13:
+            await self.config.trades.set({});await self.config.next_trade.set(1);await self.config.schema.set(13)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
+    @staticmethod
+    def trade_collection_after(conf,outgoing_id,incoming_raw):
+        incoming_id=incoming_raw["instance_id"];updated=dict(conf)
+        collection=[dict(raw) for raw in conf.get("collection",[]) if raw.get("instance_id") not in {outgoing_id,incoming_id}]
+        collection.append(dict(incoming_raw));updated["collection"]=collection
+        owned={raw["instance_id"] for raw in collection};party=[identity for identity in conf.get("party",[]) if identity!=outgoing_id and identity in owned]
+        if not party:party=[incoming_id]
+        updated["party"]=party[:6];return updated
+
+    def trainer_in_active_battle(self,user_id):
+        return any(battle.user_id==user_id and battle.state=="active" for battle in self.battles.values())
+
+    @staticmethod
+    def trade_reserved(trades,instance_id,exclude=None):
+        return any(str(key)!=str(exclude) and raw.get("state") in {"offered","settling"} and instance_id in {raw.get("offered_id"),raw.get("requested_id")} for key,raw in trades.items())
+
+    async def recover_trades(self):
+        trades=await self.config.trades()
+        for key,raw in list(trades.items()):
+            if raw.get("state")!="settling":continue
+            try:await self.settle_trade(int(key),recovering=True)
+            except Exception:log.exception("Pokémon trade recovery remains pending",extra={"trade_id":key})
+
+    async def settle_trade(self,trade_id,recovering=False):
+        async with self.lock("trades"):
+            trades=await self.config.trades();record=trades.get(str(trade_id))
+            if not record or record.get("state") not in ({"settling"} if recovering else {"offered","settling"}):return None
+            first=min(int(record["offerer_id"]),int(record["recipient_id"]));second=max(int(record["offerer_id"]),int(record["recipient_id"]))
+            async with self.lock(("user",first)),self.lock(("user",second)):
+                offerer_section=self.config.user_from_id(int(record["offerer_id"]));recipient_section=self.config.user_from_id(int(record["recipient_id"]))
+                offerer=await offerer_section.all();recipient=await recipient_section.all()
+                if record.get("state")=="offered":
+                    offered=next((dict(raw) for raw in offerer.get("collection",[]) if raw.get("instance_id")==record["offered_id"]),None)
+                    requested=next((dict(raw) for raw in recipient.get("collection",[]) if raw.get("instance_id")==record["requested_id"]),None)
+                    if not offered or not requested:record["state"]="invalid";trades[str(trade_id)]=record;await self.config.trades.set(trades);return record
+                    if self.trainer_in_active_battle(int(record["offerer_id"])) or self.trainer_in_active_battle(int(record["recipient_id"])):raise ValueError("Finish both trainers’ active battles before accepting the trade.")
+                    record["offered_pokemon"]=offered;record["requested_pokemon"]=requested;record["state"]="settling";trades[str(trade_id)]=record;await self.config.trades.set(trades)
+                offered=dict(record["offered_pokemon"]);requested=dict(record["requested_pokemon"])
+                offerer=self.trade_collection_after(offerer,record["offered_id"],requested);recipient=self.trade_collection_after(recipient,record["requested_id"],offered)
+                await offerer_section.set(offerer);await recipient_section.set(recipient)
+                record["state"]="completed";record["completed_at"]=datetime.now(timezone.utc).isoformat();trades[str(trade_id)]=record;await self.config.trades.set(trades);return record
+
+    async def expire_trades(self,now=None):
+        now=now or datetime.now(timezone.utc);expired=[]
+        async with self.lock("trades"):
+            trades=await self.config.trades()
+            for key,raw in trades.items():
+                if raw.get("state")!="offered":continue
+                try:due=datetime.fromisoformat(raw["expires_at"])
+                except (KeyError,TypeError,ValueError):due=now
+                if due<=now:raw["state"]="expired";expired.append(dict(raw))
+            if expired:await self.config.trades.set(trades)
+        for raw in expired:
+            channel=self.bot.get_channel(int(raw.get("channel_id",0)))
+            if channel and raw.get("message_id"):
+                try:message=await channel.fetch_message(int(raw["message_id"]));await message.edit(content="This Pokémon trade offer expired.",view=None)
+                except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
+
     async def guild_encounters(self,guild_id,conf=None):
         try:return active_guild_encounters(await self.config.encounters(),guild_id)
         except AttributeError:
@@ -594,6 +659,8 @@ class Pokemon(commands.Cog):
             embed,files=await self.rendered_trainer_card(user,conf);await interaction.response.send_message(embed=embed,files=files,ephemeral=True);return
         if section=="achievements":await interaction.response.send_message(embed=self.accomplishments_embed(user,conf),ephemeral=True);return
         if section=="gym":await interaction.response.send_message(embed=gym_status_embed(user,conf),ephemeral=True);return
+        if section=="trade":
+            await interaction.response.send_message("Start an exact trade with `poke trade  <your collection number> <their collection number>`. The other trainer must confirm before anything moves.",ephemeral=True);return
         if section=="mart":
             if interaction.guild is None:await interaction.response.send_message("The Poké Mart is available inside a server.",ephemeral=True);return
             prices=mart_prices(await self.config.mart_prices());currency=await bank.get_currency_name(interaction.guild);balance=await bank.get_balance(user);lines=[f"**{label}** — {prices[key]:,} {currency}" for key,(label,_,_) in MART_ITEMS.items()]
@@ -1030,6 +1097,65 @@ class Pokemon(commands.Cog):
             else:await interaction.response.edit_message(content="That party slot is no longer available.",view=None);return
             conf["party"]=party;await self.config.user(interaction.user).set(conf)
         await interaction.response.edit_message(content=message,view=None)
+
+    @staticmethod
+    def trade_embed(record,final=False):
+        title="Trade completed!" if final else "Pokémon Trade Offer"
+        symbols={"male":"♂","female":"♀","genderless":"—"};offered=("Shiny " if record.get("offered_shiny") else "")+record["offered_name"];requested=("Shiny " if record.get("requested_shiny") else "")+record["requested_name"]
+        description=(f"**{record['offerer_name']}** offers **{offered} · {symbols.get(record.get('offered_gender'),'?')} · Lv.{record['offered_level']}**\n" f"for **{record['recipient_name']}’s {requested} · {symbols.get(record.get('requested_gender'),'?')} · Lv.{record['requested_level']}**")
+        if not final:description+="\n\nOnly the receiving trainer can accept. Either trainer can cancel. This offer expires in 15 minutes."
+        embed=discord.Embed(title=title,description=description,color=discord.Color.green() if final else discord.Color.gold());embed.set_footer(text=f"Trade #{record['trade_id']}");return embed
+
+    @pokemon.group(name="trade",invoke_without_command=True)
+    @commands.guild_only()
+    async def trade(self,ctx,member:discord.Member=None,your_slot:int=None,their_slot:int=None):
+        """Offer an exact Pokémon-for-Pokémon trade."""
+        if member is None or your_slot is None or their_slot is None:
+            await ctx.send("Use `pokemon trade @trainer <your collection number> <their collection number>`. Both Pokémon are shown for confirmation.");return
+        if member.id==ctx.author.id:await ctx.send("Choose another trainer to trade with.");return
+        if member.bot:await ctx.send("Bots cannot own or trade Pokémon.");return
+        first=min(ctx.author.id,member.id);second=max(ctx.author.id,member.id)
+        async with self.lock("trades"),self.lock(("user",first)),self.lock(("user",second)):
+            if self.trainer_in_active_battle(ctx.author.id) or self.trainer_in_active_battle(member.id):await ctx.send("Finish both trainers’ active battles before creating a trade.");return
+            offerer=await self.config.user(ctx.author).all();recipient=await self.config.user(member).all();offered_list=self.sorted_collection(offerer);requested_list=self.sorted_collection(recipient)
+            if not 1<=your_slot<=len(offered_list):await ctx.send("Your collection number is unavailable. Check `pokemon collection`.");return
+            if not 1<=their_slot<=len(requested_list):await ctx.send(f"{member.display_name}’s collection number is unavailable.");return
+            offered=offered_list[your_slot-1];requested=requested_list[their_slot-1];trades=await self.config.trades()
+            if self.trade_reserved(trades,offered["instance_id"]):await ctx.send("Your selected Pokémon is already reserved in another trade.");return
+            if self.trade_reserved(trades,requested["instance_id"]):await ctx.send("Their selected Pokémon is already reserved in another trade.");return
+            trade_id=int(await self.config.next_trade());await self.config.next_trade.set(trade_id+1);now=datetime.now(timezone.utc)
+            record={"trade_id":trade_id,"state":"offered","offerer_id":ctx.author.id,"recipient_id":member.id,"offerer_name":ctx.author.display_name,"recipient_name":member.display_name,"offered_id":offered["instance_id"],"requested_id":requested["instance_id"],"offered_name":offered.get("nickname") or SPECIES[offered["species_id"]].name,"requested_name":requested.get("nickname") or SPECIES[requested["species_id"]].name,"offered_level":int(offered["level"]),"requested_level":int(requested["level"]),"offered_gender":offered.get("gender","unknown"),"requested_gender":requested.get("gender","unknown"),"offered_shiny":bool(offered.get("shiny",False)),"requested_shiny":bool(requested.get("shiny",False)),"created_at":now.isoformat(),"expires_at":(now+timedelta(seconds=TRADE_TIMEOUT_SECONDS)).isoformat(),"guild_id":ctx.guild.id,"channel_id":ctx.channel.id,"message_id":None}
+            trades[str(trade_id)]=record;await self.config.trades.set(trades)
+        view=TradeView(self,trade_id,ctx.author.id,member.id);message=await ctx.send(content=member.mention,embed=self.trade_embed(record),view=view,allowed_mentions=discord.AllowedMentions(users=True,roles=False,everyone=False))
+        async with self.lock("trades"):
+            trades=await self.config.trades();current=trades.get(str(trade_id))
+            if current and current.get("state")=="offered":current["message_id"]=message.id;trades[str(trade_id)]=current;await self.config.trades.set(trades)
+
+    @trade.command(name="cancel")
+    async def trade_cancel(self,ctx,trade_id:int):
+        """Cancel one of your pending trade offers."""
+        async with self.lock("trades"):
+            trades=await self.config.trades();record=trades.get(str(trade_id))
+            if not record or record.get("state")!="offered":await ctx.send("That trade is no longer pending.");return
+            if ctx.author.id not in {int(record["offerer_id"]),int(record["recipient_id"])}:await ctx.send("That trade belongs to other trainers.");return
+            record["state"]="cancelled";trades[str(trade_id)]=record;await self.config.trades.set(trades)
+        await ctx.send(f"Trade #{trade_id} cancelled.")
+
+    async def accept_trade(self,interaction,trade_id):
+        try:record=await self.settle_trade(trade_id)
+        except ValueError as exc:await interaction.response.send_message(str(exc),ephemeral=True);return
+        except Exception:
+            log.exception("Pokémon trade settlement remains pending recovery",extra={"trade_id":trade_id});await interaction.response.send_message("The trade is safely recorded and will finish during recovery. No Pokémon will be rerolled.",ephemeral=True);return
+        if not record or record.get("state")!="completed":await interaction.response.edit_message(content="This trade is no longer available.",view=None);return
+        await interaction.response.edit_message(content=None,embed=self.trade_embed(record,True),view=None)
+
+    async def cancel_trade(self,interaction,trade_id):
+        async with self.lock("trades"):
+            trades=await self.config.trades();record=trades.get(str(trade_id))
+            if not record or record.get("state")!="offered":await interaction.response.edit_message(content="This trade is no longer available.",view=None);return
+            if interaction.user.id not in {int(record["offerer_id"]),int(record["recipient_id"])}:await interaction.response.send_message("This trade belongs to other trainers.",ephemeral=True);return
+            record["state"]="declined" if interaction.user.id==int(record["recipient_id"]) else "cancelled";trades[str(trade_id)]=record;await self.config.trades.set(trades)
+        action="declined" if record["state"]=="declined" else "cancelled";await interaction.response.edit_message(content=f"Trade #{trade_id} was {action}.",view=None)
 
     @pokemon.group(name="party",invoke_without_command=True)
     async def party(self,ctx):
@@ -1663,9 +1789,12 @@ class Pokemon(commands.Cog):
         """Disable wild encounters in this server."""
         await self.config.guild(ctx.guild).enabled.set(False);await ctx.send("Wild encounters disabled.")
     async def reset_player_data(self,user_id):
-        removed=[]
-        async with self.lock(("user",user_id)),self.lock("encounters"):
-            await self.config.user_from_id(user_id).clear()
+        await self.recover_trades();removed=[]
+        async with self.lock("trades"),self.lock(("user",user_id)),self.lock("encounters"):
+            trades=await self.config.trades()
+            for raw in trades.values():
+                if raw.get("state")=="offered" and user_id in {int(raw.get("offerer_id",0)),int(raw.get("recipient_id",0))}:raw["state"]="cancelled_deleted_user"
+            await self.config.trades.set(trades);await self.config.user_from_id(user_id).clear()
             encounters=await self.config.encounters()
             for key in list(encounters):
                 raw=encounters[key]
