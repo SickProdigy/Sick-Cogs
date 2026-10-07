@@ -31,9 +31,12 @@ MART_ITEMS={
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
 GLOBAL={"schema":16,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
 BOX_SIZE=30
-MAX_BOXES=10
-MAX_COLLECTION=BOX_SIZE*MAX_BOXES
-VIP_MAX_COLLECTION=500
+MAX_BOXES=8
+PARTY_SIZE=6
+STORAGE_CAPACITY=BOX_SIZE*MAX_BOXES
+VIP_STORAGE_CAPACITY=STORAGE_CAPACITY*2
+MAX_COLLECTION=STORAGE_CAPACITY+PARTY_SIZE
+VIP_MAX_COLLECTION=VIP_STORAGE_CAPACITY+PARTY_SIZE
 VIP_CACHE_SECONDS=300
 CENTER_TREATMENT_SECONDS=5
 TRADE_TIMEOUT_SECONDS=900
@@ -223,7 +226,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.54.1";__author__="SickProdigy"
+    __version__="0.54.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1884,7 +1887,7 @@ class Pokemon(commands.Cog):
             f"Activity-mode floors: **{policy.get('minimum_threshold',8)} points** · **{policy.get('minimum_cooldown',120)}s cooldown**\n"
             f"Concurrency limits: server-admin ceiling **{max(1,min(5,int(policy.get('maximum_concurrency',5))))}** (owner-set range **1–5**) · per-server owner override **1–5**\n"
             f"Allowed generations: **{generations}** · Rarity: **{policy.get('rarity_profile','friendly')}** · Special species: **{'enabled' if policy.get('allow_special_species') else 'event-only'}**\n"
-            f"VIP benefits: guild **{policy.get('vip_guild_id') or 'not set'}** · role **{policy.get('vip_role_id') or 'not set'}** · capacity **{MAX_COLLECTION}/{VIP_MAX_COLLECTION}** · monthly {reward_summary(vip_pack_values(policy.get('vip_monthly_pack')))}\n"
+            f"VIP benefits: guild **{policy.get('vip_guild_id') or 'not set'}** · role **{policy.get('vip_role_id') or 'not set'}** · storage **{STORAGE_CAPACITY}/{VIP_STORAGE_CAPACITY}** + **{PARTY_SIZE}** party · monthly {reward_summary(vip_pack_values(policy.get('vip_monthly_pack')))}\n"
             f"Default Pokédex style: **{resolve_style(policy.get('pokedex_default_style','retro')).label}**\n"
             f"Poké Mart prices: {price_text}"
         )

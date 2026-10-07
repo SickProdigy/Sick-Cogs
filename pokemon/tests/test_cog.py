@@ -92,11 +92,11 @@ class CogPolicyTests(unittest.TestCase):
         self.assertFalse(first_pokedex_registration({"pokedex_caught":[25]},25))
 
     def test_collection_capacity_grandfathers_excess_without_storing_more(self):
-        existing=[OwnedPokemon.create(f"p{index}",1,1,seed=index).raw() for index in range(301)]
+        existing=[OwnedPokemon.create(f"p{index}",1,1,seed=index).raw() for index in range(247)]
         conf={"collection":existing};caught=OwnedPokemon.create("new",4,1,seed=999)
-        self.assertFalse(store_caught_pokemon(conf,caught,300));self.assertEqual(len(conf["collection"]),301)
-        conf["collection"].pop();self.assertFalse(store_caught_pokemon(conf,caught,300));self.assertEqual(len(conf["collection"]),300)
-        conf["collection"].pop();self.assertTrue(store_caught_pokemon(conf,caught,300));self.assertEqual(len(conf["collection"]),300)
+        self.assertFalse(store_caught_pokemon(conf,caught,246));self.assertEqual(len(conf["collection"]),247)
+        conf["collection"].pop();self.assertFalse(store_caught_pokemon(conf,caught,246));self.assertEqual(len(conf["collection"]),246)
+        conf["collection"].pop();self.assertTrue(store_caught_pokemon(conf,caught,246));self.assertEqual(len(conf["collection"]),246)
 
     def test_missing_persisted_vip_pack_uses_complete_defaults(self):
         self.assertEqual(vip_pack_values(None),{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3})
@@ -888,7 +888,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         policy={"encounter_timeout":120,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"center_cooldown":1800,"minimum_threshold":8,"minimum_cooldown":120,"maximum_concurrency":3,"minimum_timer":30,"allowed_generations":[1],"rarity_profile":"friendly","allow_special_species":False,"pokedex_default_style":"retro","mart_prices":{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400}}
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(all=AsyncMock(return_value=policy));ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.global_status.callback(cog,ctx);text=ctx.send.await_args.args[0]
-        for expected in ("Pokémon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Encounter lifetime: bot-wide default **2m** · server range **1–15m**","Global free-Center cooldown: current **30m**","VIP benefits: guild **not set** · role **not set** · capacity **300/500**","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokédex style: **Retro**","Poké Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
+        for expected in ("Pokémon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Encounter lifetime: bot-wide default **2m** · server range **1–15m**","Global free-Center cooldown: current **30m**","VIP benefits: guild **not set** · role **not set** · storage **240/480** + **6** party","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokédex style: **Retro**","Poké Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
         self.assertNotIn("current server",text.casefold());self.assertNotIn("spawn channels",text.casefold())
 
     async def test_sub_hour_timer_uses_owner_command_group(self):
