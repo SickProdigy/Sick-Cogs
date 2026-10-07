@@ -50,6 +50,8 @@ Current develop experiments include:
 - `gameroom` — unified free-play games and Red native-game discovery.
 - `gitforge` — Gitea, GitHub, and GitLab issue and repository monitoring.
 - `ark` — official ARK: Survival Ascended Steam announcements.
+- `dayz` — official DayZ Steam announcements.
+- `icarus` — official Icarus Steam announcements.
 - `imagine` — private provider-neutral AI image generation with explicit allowlisting.
 - `mybb` — per-server SickProdigy MyBB browsing and publishing.
 - `tickets` — private text-channel support with persistent staff controls.

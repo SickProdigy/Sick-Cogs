@@ -1,0 +1,16 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Publish official DayZ Steam announcements as cards or article-style posts with configurable categories and role notifications.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores guild announcement settings and bounded Steam announcement IDs. It does not persistently store user data or metadata.",
+    "hidden": false,
+    "install_msg": "Set an announcement channel with `[p]dayzset channel #channel`, choose `[p]dayzset mode card` or `[p]dayzset mode article`, optionally set a notification role, then start automatic posting with `[p]dayzset autopost start`. Existing Steam posts are seeded during setup and will not flood the channel.",
+    "min_bot_version": "3.5.0",
+    "permissions": ["embed_links", "attach_files"],
+    "name": "DayZAnnouncements",
+    "requirements": ["Pillow>=12.0,<13"],
+    "short": "Official DayZ Steam announcements",
+    "tags": ["dayz", "steam", "updates", "notifications", "games"],
+    "type": "COG",
+    "version": "0.1.0"
+}
