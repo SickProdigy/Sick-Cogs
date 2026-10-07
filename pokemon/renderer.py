@@ -194,12 +194,12 @@ class BattleRenderer:
                 except (KeyError,TypeError,ValueError):continue
         return result
 
-    async def main_menu(self,user_name,conf,style="retro"):
+    async def main_menu(self,user_name,conf,style="retro",avatar_data=None):
         party=self.trainer_party(conf);lead=party[0] if party else None;data=None;cover_label=None
         if style=="modern":
             entry=random.SystemRandom().choice(KANTO_COVERS);cover_label=entry[0];data=await self.get_cover(entry)
         elif lead:data=await self.get_sprite(lead.species_id,shiny=lead.shiny)
-        try:return await self._render(self._main_menu_sync,user_name,conf,lead,data,style,cover_label)
+        try:return await self._render(self._main_menu_sync,user_name,conf,lead,data,style,cover_label,avatar_data)
         except (OSError,ValueError) as exc:raise RenderError("Main-menu rendering failed.") from exc
 
     async def trainer_card(self,user_name,conf,style="retro"):
@@ -518,14 +518,14 @@ class BattleRenderer:
         draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,f"{species.name} was registered in {trainer}'s Pokedex.",(25,382),width=84,size=19)
         return self._save(canvas)
 
-    def _main_menu_sync(self,user_name,conf,lead,data,style,cover_label=None):
+    def _main_menu_sync(self,user_name,conf,lead,data,style,cover_label=None,avatar_data=None):
         modern=style=="modern";width,height=800,500
         if modern:
             canvas=Image.new("RGBA",(width,height),(15,20,34,255));cover=Image.open(io.BytesIO(data)).convert("RGB")
             cover=ImageOps.pad(cover,(500,500),method=Image.Resampling.LANCZOS,color=(8,12,22),centering=(0.5,0.5));canvas.paste(cover,(0,0))
             shade=Image.new("RGBA",canvas.size,(0,0,0,0));shade_draw=ImageDraw.Draw(shade);shade_draw.rectangle((0,395,500,500),fill=(7,12,24,218));shade_draw.rectangle((455,0,800,500),fill=(12,18,34,244));canvas=Image.alpha_composite(canvas,shade);draw=ImageDraw.Draw(canvas)
             ink=(244,247,255);accent=(255,204,72);muted=(173,187,216)
-            draw.text((485,34),"KANTO ARCHIVE",fill=accent,font=ImageFont.load_default(size=21));draw.text((485,70),str(user_name)[:20],fill=ink,font=ImageFont.load_default(size=29))
+            draw.text((485,34),"KANTO ARCHIVE",fill=accent,font=ImageFont.load_default(size=21));draw.text((485,70),str(user_name)[:14],fill=ink,font=ImageFont.load_default(size=29));self._trainer_portrait(canvas,draw,avatar_data,center=(742,70),diameter=58)
             menu=("PARTY","COLLECTION","POKEDEX","BAG","RESEARCH","MORE")
             for index,label in enumerate(menu):
                 y=130+index*49;draw.rounded_rectangle((480,y,770,y+38),10,fill=(38,50,78),outline=(91,111,151),width=2);draw.text((500,y+9),label,fill=ink,font=ImageFont.load_default(size=18))
@@ -536,7 +536,7 @@ class BattleRenderer:
         canvas=Image.new("RGB",(width,height),RETRO[4]);draw=ImageDraw.Draw(canvas);ink=RETRO[0]
         for y in range(0,height,10):draw.line((0,y,width,y),fill=RETRO[5])
         draw.rectangle((22,22,778,478),fill=RETRO[5],outline=ink,width=7);draw.rectangle((42,42,758,458),outline=RETRO[1],width=3)
-        draw.text((68,60),"POKEMON",fill=ink,font=ImageFont.load_default(size=42));draw.text((68,112),str(user_name)[:24],fill=RETRO[1],font=ImageFont.load_default(size=25))
+        draw.text((68,60),"POKEMON",fill=ink,font=ImageFont.load_default(size=42));draw.text((68,112),str(user_name)[:18],fill=RETRO[1],font=ImageFont.load_default(size=25));self._trainer_portrait(canvas,draw,avatar_data,center=(360,105),diameter=64)
         draw.rounded_rectangle((425,65,720,360),18,fill=RETRO[4],outline=ink,width=5);draw.ellipse((465,295,680,350),fill=RETRO[2],outline=ink,width=4)
         menu=("PARTY","COLLECTION","POKEDEX","BAG","RESEARCH","MORE")
         for index,label in enumerate(menu):

@@ -139,10 +139,13 @@ class PartyPlacementButton(discord.ui.Button):
 class PartyPlacementView(discord.ui.View):
     def __init__(self,cog,user_id,identity,party,owned):
         super().__init__(timeout=120);self.user_id=user_id
-        if len(party)<6:self.add_item(PartyPlacementButton(cog,user_id,identity,None,"Add to open slot",0))
+        moving=identity in party
+        if not moving and len(party)<6:self.add_item(PartyPlacementButton(cog,user_id,identity,None,"Add to open slot",0))
         for index,target in enumerate(party):
             raw=owned.get(target);name=SPECIES[raw["species_id"]].name if raw else "Empty"
-            self.add_item(PartyPlacementButton(cog,user_id,identity,target,f"Replace {index+1}: {name}",1+index//3))
+            if target==identity:continue
+            action="Move to" if moving else "Replace"
+            self.add_item(PartyPlacementButton(cog,user_id,identity,target,f"{action} {index+1}: {name}",1+index//3))
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This party choice belongs to another trainer.",ephemeral=True);return False
