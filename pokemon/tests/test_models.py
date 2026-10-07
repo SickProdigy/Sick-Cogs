@@ -359,6 +359,10 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[39]),("Type: Normal / Fairy","Abilities: Cute Charm, Competitive"))
         self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[25]),("Type: Electric","Abilities: Static"))
 
+    def test_pokemon_center_dialogue_is_ascii_safe(self):
+        self.assertEqual(BattleRenderer.pokemon_center_message("SickProdigy",True),"SickProdigy, your Pokemon are fighting fit!")
+        self.assertNotIn("Pokémon",BattleRenderer.pokemon_center_message("SickProdigy",True))
+
     def test_renderer_builds_expected_pngs(self):
         source=io.BytesIO()
         Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
