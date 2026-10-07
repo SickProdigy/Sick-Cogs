@@ -1208,6 +1208,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("PP" in item.label for item in fight.children))
         self.assertTrue(any(item.label=="Back" for item in fight.children))
         self.assertTrue(any(item.label=="Back" for item in party.children))
+        self.assertTrue(all(f"Lv. {pokemon.level}" in item.label for pokemon,item in zip(current.party,[child for child in party.children if child.label!="Back"])))
         self.assertEqual([item.label for item in bag.children],["Poké Ball x10","Great Ball x3","Ultra Ball x0","Potion x5","Revive x2","Back"])
         self.assertTrue(next(item for item in bag.children if item.label=="Ultra Ball x0").disabled)
         allowed = SimpleNamespace(
