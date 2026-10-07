@@ -16,7 +16,7 @@ from pokemon.models import Battle,OwnedPokemon
 from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView, TradeCollectionView, GymChallengeView
+from pokemon.views import BagView, BattleView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeCollectionView, GymChallengeView
 
 
 class StoredValue:
@@ -816,7 +816,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         sleep.assert_awaited_once_with(5);self.assertEqual(cog.rendered_center.await_count,2)
         before=cog.rendered_center.await_args_list[0].args[1][0];after=cog.rendered_center.await_args_list[1].args[1][0]
         self.assertEqual(before.current_hp,0);self.assertEqual(after.current_hp,Battle.stat(after,"hp"))
-        self.assertIsInstance(message.edit.await_args.kwargs["view"],CenterCollectView)
+        self.assertNotIn("view",message.edit.await_args.kwargs)
         healed=OwnedPokemon.from_raw(section.value["collection"][0]);still_boxed=OwnedPokemon.from_raw(section.value["collection"][1])
         self.assertEqual(healed.current_hp,Battle.stat(healed,"hp"))
         self.assertEqual(healed.status,"")
