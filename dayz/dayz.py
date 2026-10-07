@@ -73,7 +73,7 @@ class DayZAnnouncements(commands.Cog):
     """Publish official DayZ Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.1"
+    __version__ = "0.1.2"
 
     default_guild = {
         "enabled": False,
@@ -366,8 +366,10 @@ class DayZAnnouncements(commands.Cog):
     async def dayz(self, ctx: commands.Context):
         """Browse official DayZ Steam announcements.
 
-        Server administrators and owners can configure a destination channel, card or
-        article delivery, filters, and automatic posting with `[p]dayzset`.
+        Quick setup for server administrators and owners:
+        `[p]dayzset channel #updates`
+        `[p]dayzset mode card` (or `article`)
+        `[p]dayzset autopost start`
         """
         await ctx.invoke(self.dayz_latest)
 
