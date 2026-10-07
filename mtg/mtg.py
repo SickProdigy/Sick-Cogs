@@ -2,6 +2,7 @@ import asyncio
 import logging
 import secrets
 import math
+import copy
 from collections import Counter
 import aiohttp
 from typing import Dict
@@ -14,18 +15,18 @@ from .cards import BASE_CARDS, CARDS, starter
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
 from .collection import build_pack, resolve_deck
 from .engine import Game, GameError
-from .views import CatalogDetailView, CatalogView, ChallengeView, CollectionDetailView, CollectionView, GameView, HandPaginationView, HistoryPaginationView, LibrarySearchView, NaturalSelectionView, PrivateHandDecisionView
+from .views import CatalogDetailView, CatalogView, ChallengeView, CollectionDetailView, CollectionView, GameView, HandPaginationView, HistoryPaginationView, LibrarySearchView, NaturalSelectionView, PrivateHandDecisionView, TradeView
 
 log=logging.getLogger("red.sick-cogs.MTG")
 CONFIG_IDENTIFIER=813604927115
-DEFAULTS={"schema":1,"next_game_id":1,"games":{}}
+DEFAULTS={"schema":2,"next_game_id":1,"games":{},"next_trade_id":1,"trades":{},"trade_ledger":[]}
 DEFAULT_PROFILE={"schema":2,"starter":"","collection":{},"decks":{},"active_deck":"","unopened_packs":0,"rewarded_solo_games":[],"pack_history":[]}
 MATCH_TIMEOUT_SECONDS=7*24*60*60
 
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.124.0"
+    __version__="0.125.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.config.register_user(**DEFAULT_PROFILE)
@@ -53,6 +54,8 @@ class MTG(commands.Cog):
         resumed=await self.resume_solo_games()
         for game in self.games.values():
             if not game.finished: self.bot.add_view(GameView(self,game.game_id),message_id=game.message_id or None)
+        for key,trade in (await self.config.trades()).items():
+            if trade.get("message_id"): self.bot.add_view(TradeView(self,int(key)),message_id=int(trade["message_id"]))
         for game in resumed: asyncio.create_task(self.refresh_message(game))
         self.cleanup_task=asyncio.create_task(self._cleanup_loop())
     def cog_unload(self):
@@ -72,7 +75,7 @@ class MTG(commands.Cog):
             scope=self.config.user_from_id(int(user_id)); profile=await scope.all()
             if profile.get("starter"): raise GameError(f"You already chose the {profile['starter'].title()} starter.")
             owned=dict(Counter(starter(color))); deck_id=f"starter-{color}"
-            profile={**DEFAULT_PROFILE,"starter":color,"collection":owned,"decks":{deck_id:{"name":f"{color.title()} Starter","cards":owned,"starter":True}},"active_deck":deck_id}
+            profile={**DEFAULT_PROFILE,"starter":color,"collection":owned,"decks":{deck_id:{"name":f"{color.title()} Starter","cards":dict(owned),"starter":True}},"active_deck":deck_id}
             await scope.set(profile)
         return profile
     def collection_card(self,key):
@@ -154,6 +157,108 @@ class MTG(commands.Cog):
             profile["collection"]=collection; profile["unopened_packs"]=int(profile.get("unopened_packs",0))-1
             history=list(profile.get("pack_history",[])); history.append({"at":int(__import__("time").time()),"cards":cards}); profile["pack_history"]=history[-100:]; profile["schema"]=2
             await scope.set(profile); return cards,profile
+
+    async def get_trade(self,trade_id):
+        trade=(await self.config.trades()).get(str(int(trade_id)))
+        if not trade: raise GameError("That pending trade does not exist.")
+        return trade
+    def trade_impacts(self,profile,outgoing,incoming=None):
+        remaining={key:int(count) for key,count in profile.get("collection",{}).items()}
+        for key,count in outgoing.items(): remaining[key]=remaining.get(key,0)-int(count)
+        for key,count in (incoming or {}).items(): remaining[key]=remaining.get(key,0)+int(count)
+        impacts=[]
+        for deck_id,deck in profile.get("decks",{}).items():
+            resolved,errors=resolve_deck(deck.get("cards",{}),remaining,CARDS)
+            if errors: impacts.append(f"{deck.get('name',deck_id)} becomes invalid")
+            elif any(int(deck.get("cards",{}).get(key,0))>max(0,remaining.get(key,0)) for key in outgoing): impacts.append(f"{deck.get('name',deck_id)} substitutes another printing")
+        return impacts
+    async def create_trade(self,first,second):
+        if int(first)==int(second): raise GameError("Trade with another player.")
+        async with self.storage_lock:
+            for user in (first,second):
+                if not (await self.config.user_from_id(int(user)).all()).get("starter"): raise GameError("Both players must choose a starter collection first.")
+            trades=await self.config.trades()
+            if any(set(map(int,item["users"]))=={int(first),int(second)} for item in trades.values()): raise GameError("You already have a pending trade together.")
+            trade_id=int(await self.config.next_trade_id()); await self.config.next_trade_id.set(trade_id+1); now=int(__import__("time").time())
+            trade={"trade_id":trade_id,"users":[int(first),int(second)],"offers":{str(first):{},str(second):{}},"confirmations":[],"created_at":now,"updated_at":now,"channel_id":0,"message_id":0}
+            trades[str(trade_id)]=trade; await self.config.trades.set(trades); return trade
+    async def bind_trade_message(self,trade_id,channel_id,message_id):
+        async with self.storage_lock:
+            trades=await self.config.trades(); trade=trades.get(str(int(trade_id)))
+            if trade: trade["channel_id"]=int(channel_id); trade["message_id"]=int(message_id); trades[str(trade_id)]=trade; await self.config.trades.set(trades)
+    async def modify_trade(self,trade_id,user,key,count,adding):
+        if key not in CARDS: raise GameError("Use an exact printing key from your collection.")
+        count=int(count)
+        if count<1: raise GameError("Quantity must be at least 1.")
+        async with self.storage_lock:
+            trades=await self.config.trades(); trade=trades.get(str(int(trade_id)))
+            if not trade: raise GameError("That pending trade does not exist.")
+            if int(user) not in map(int,trade["users"]): raise GameError("You are not part of that trade.")
+            profile=await self.config.user_from_id(int(user)).all(); offer=dict(trade["offers"].get(str(user),{})); current=int(offer.get(key,0))
+            if adding:
+                owned=int(profile.get("collection",{}).get(key,0))
+                if current+count>owned: raise GameError(f"You own only {owned} of that exact printing.")
+                offer[key]=current+count
+            else:
+                if count>current: raise GameError(f"Your offer contains only {current} of that printing.")
+                if count==current: offer.pop(key,None)
+                else: offer[key]=current-count
+            trade["offers"][str(user)]=offer; trade["confirmations"]=[]; trade["updated_at"]=int(__import__("time").time()); trades[str(trade_id)]=trade; await self.config.trades.set(trades); return trade
+    async def confirm_trade(self,trade_id,user):
+        async with self.storage_lock:
+            trades=await self.config.trades(); key=str(int(trade_id)); trade=trades.get(key)
+            if not trade: raise GameError("That pending trade does not exist.")
+            users=[int(item) for item in trade["users"]]
+            if int(user) not in users: raise GameError("You are not part of that trade.")
+            if any(not trade["offers"].get(str(participant)) for participant in users): raise GameError("Both players must offer at least one card.")
+            confirmations={int(item) for item in trade.get("confirmations",[])}; confirmations.add(int(user)); trade["confirmations"]=sorted(confirmations); trade["updated_at"]=int(__import__("time").time())
+            if confirmations!=set(users): trades[key]=trade; await self.config.trades.set(trades); return trade,False
+            scopes={participant:self.config.user_from_id(participant) for participant in users}; profiles={participant:await scopes[participant].all() for participant in users}; originals=copy.deepcopy(profiles)
+            for participant in users:
+                for printing,amount in trade["offers"][str(participant)].items():
+                    if int(profiles[participant].get("collection",{}).get(printing,0))<int(amount): raise GameError(f"Player {participant} no longer owns the full offered quantity of {CARDS[printing].name}.")
+            for participant in users:
+                receiver=users[1] if participant==users[0] else users[0]
+                for printing,amount in trade["offers"][str(participant)].items():
+                    source=profiles[participant].setdefault("collection",{}); source[printing]=int(source.get(printing,0))-int(amount)
+                    if source[printing]<=0: source.pop(printing,None)
+                    target=profiles[receiver].setdefault("collection",{}); target[printing]=int(target.get(printing,0))+int(amount)
+            original_ledger=await self.config.trade_ledger(); completed={**trade,"status":"completed","completed_at":int(__import__("time").time()),"confirmations":users}; updated_ledger=[*original_ledger,completed]; updated_trades=dict(trades); updated_trades.pop(key,None)
+            try:
+                for participant in users: await scopes[participant].set(profiles[participant])
+                await self.config.trade_ledger.set(updated_ledger); await self.config.trades.set(updated_trades)
+            except Exception:
+                for participant in users: await scopes[participant].set(originals[participant])
+                await self.config.trade_ledger.set(original_ledger); await self.config.trades.set(trades)
+                raise
+            return completed,True
+    async def cancel_trade(self,trade_id,user):
+        async with self.storage_lock:
+            trades=await self.config.trades(); key=str(int(trade_id)); trade=trades.get(key)
+            if not trade: raise GameError("That pending trade does not exist.")
+            if int(user) not in map(int,trade["users"]): raise GameError("You are not part of that trade.")
+            trade={**trade,"status":"cancelled","cancelled_by":int(user),"cancelled_at":int(__import__("time").time())}; ledger=await self.config.trade_ledger(); ledger.append(trade); await self.config.trade_ledger.set(ledger); trades.pop(key,None); await self.config.trades.set(trades); return trade
+    async def trade_embed(self,trade):
+        users=[int(item) for item in trade["users"]]; names={user:str(self.bot.get_user(user).display_name if self.bot.get_user(user) else user) for user in users}; embed=discord.Embed(title=f"MTG trade #{trade['trade_id']}",color=discord.Color.dark_green())
+        for user in users:
+            offer=trade.get("offers",{}).get(str(user),{}); lines=[f"{CARDS[key].name} ×{count} · `{key}`" for key,count in offer.items()] or ["Nothing offered"]
+            if trade.get("status") not in ("completed","cancelled"):
+                profile=await self.player_profile(user); other=users[1] if user==users[0] else users[0]; incoming=trade.get("offers",{}).get(str(other),{}); impacts=self.trade_impacts(profile,offer,incoming)
+                if impacts: lines.append("**Deck impact:** "+"; ".join(impacts))
+            confirmed=" · Confirmed" if user in [int(item) for item in trade.get("confirmations",[])] else " · Not confirmed"
+            embed.add_field(name=names[user]+confirmed,value="\n".join(lines),inline=False)
+        embed.set_footer(text="Any offer edit clears both confirmations. Transfers occur only after both players confirm." if not trade.get("status") else trade["status"].title())
+        return embed
+    async def refresh_trade(self,trade):
+        try:
+            channel=self.bot.get_channel(int(trade.get("channel_id",0))); message=await channel.fetch_message(int(trade.get("message_id",0))); await message.edit(embed=await self.trade_embed(trade),view=None if trade.get("status") else TradeView(self,trade["trade_id"]))
+        except (discord.HTTPException,AttributeError): pass
+    async def trade_interaction(self,interaction,trade_id,confirming):
+        try:
+            if confirming: trade,done=await self.confirm_trade(trade_id,interaction.user.id)
+            else: trade=await self.cancel_trade(trade_id,interaction.user.id); done=True
+        except GameError as error: await interaction.response.send_message(str(error),ephemeral=True); return
+        await interaction.response.edit_message(embed=await self.trade_embed(trade),view=None if done else TradeView(self,trade_id))
 
     async def collection_records(self,user_id):
         profile=await self.player_profile(user_id)
@@ -775,6 +880,54 @@ class MTG(commands.Cog):
         except GameError as error: await ctx.send(str(error)); return
         counts=Counter(cards); lines=[f"**{CARDS[key].name}** ×{count} · {CARDS[key].rarity.title()} · `{key}`" for key,count in counts.items()]
         await ctx.send("**Pack opened**\n"+"\n".join(lines)+f"\n\nUnopened packs remaining: **{profile['unopened_packs']}**")
+    @mtg.group(name="trade",invoke_without_command=True)
+    async def trade(self,ctx):
+        """Create and manage exact-quantity card trades."""
+        trades=await self.config.trades(); own=[item for item in trades.values() if ctx.author.id in [int(user) for user in item["users"]]]
+        if not own: await ctx.send(f"No pending trades. Start one with `{ctx.clean_prefix}mtg trade create @member`."); return
+        await ctx.send("**Pending MTG trades**\n"+"\n".join(f"`#{item['trade_id']}` with <@{next(int(user) for user in item['users'] if int(user)!=ctx.author.id)}>" for item in own),allowed_mentions=discord.AllowedMentions.none())
+    @trade.command(name="create")
+    @commands.guild_only()
+    async def trade_create(self,ctx,member:discord.Member):
+        """Start a trade with another collection owner."""
+        if member.bot or member.id==ctx.author.id: await ctx.send("Trade with another human member."); return
+        try: trade=await self.create_trade(ctx.author.id,member.id)
+        except GameError as error: await ctx.send(str(error)); return
+        message=await ctx.send(content=f"{member.mention}, build this trade together with `mtg trade add {trade['trade_id']} PRINTING_KEY QUANTITY`.",embed=await self.trade_embed(trade),view=TradeView(self,trade["trade_id"]),allowed_mentions=discord.AllowedMentions(users=True))
+        await self.bind_trade_message(trade["trade_id"],ctx.channel.id,message.id)
+    @trade.command(name="add")
+    async def trade_add(self,ctx,trade_id:int,printing_key:str,count:int=1):
+        """Add an exact printing and quantity to your offer."""
+        try: trade=await self.modify_trade(trade_id,ctx.author.id,printing_key,count,True)
+        except GameError as error: await ctx.send(str(error)); return
+        await self.refresh_trade(trade); await ctx.send(f"Updated trade #{trade_id}; both confirmations were cleared.")
+    @trade.command(name="remove")
+    async def trade_remove(self,ctx,trade_id:int,printing_key:str,count:int=1):
+        """Remove an exact printing quantity from your offer."""
+        try: trade=await self.modify_trade(trade_id,ctx.author.id,printing_key,count,False)
+        except GameError as error: await ctx.send(str(error)); return
+        await self.refresh_trade(trade); await ctx.send(f"Updated trade #{trade_id}; both confirmations were cleared.")
+    @trade.command(name="show")
+    async def trade_show(self,ctx,trade_id:int):
+        """Show a pending trade and deck-impact warnings."""
+        try: trade=await self.get_trade(trade_id)
+        except GameError as error: await ctx.send(str(error)); return
+        if ctx.author.id not in [int(user) for user in trade["users"]]: await ctx.send("You are not part of that trade."); return
+        await ctx.send(embed=await self.trade_embed(trade),view=TradeView(self,trade_id))
+    @trade.command(name="confirm")
+    async def trade_confirm(self,ctx,trade_id:int):
+        """Confirm the current exact trade offer."""
+        try: trade,done=await self.confirm_trade(trade_id,ctx.author.id)
+        except GameError as error: await ctx.send(str(error)); return
+        await self.refresh_trade(trade)
+        if done: await ctx.send(f"Trade #{trade_id} completed. Ownership transferred and the audit record was saved.",embed=await self.trade_embed(trade))
+        else: await ctx.send(f"Confirmed trade #{trade_id}; waiting for the other player.")
+    @trade.command(name="cancel")
+    async def trade_cancel(self,ctx,trade_id:int):
+        """Cancel a pending trade."""
+        try: trade=await self.cancel_trade(trade_id,ctx.author.id)
+        except GameError as error: await ctx.send(str(error)); return
+        await self.refresh_trade(trade); await ctx.send(f"Trade #{trade_id} cancelled.",embed=await self.trade_embed(trade))
     @mtg.command(name="challenge")
     @commands.guild_only()
     async def challenge(self,ctx,member:discord.Member,*,deck_name:str=None):
@@ -1138,4 +1291,6 @@ class MTG(commands.Cog):
                 if user_id in [int(x) for x in games[key].get("order",[])]:
                     games.pop(key); gid=int(key); self.games.pop(gid,None); self.channels.pop(gid,None); self.locks.pop(gid,None); changed=True
             if changed: await self.config.games.set(games)
+            trades=await self.config.trades(); trades={key:value for key,value in trades.items() if user_id not in [int(item) for item in value.get("users",[])]}; await self.config.trades.set(trades)
+            ledger=await self.config.trade_ledger(); await self.config.trade_ledger.set([item for item in ledger if user_id not in [int(value) for value in item.get("users",[])]])
             await self.config.user_from_id(user_id).clear()

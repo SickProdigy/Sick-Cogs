@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from mtg.engine import Game, GameError, Permanent
 from mtg.mtg import MATCH_TIMEOUT_SECONDS, MTG
-from mtg.views import ChallengeView, GameView, HandPaginationView, HistoryPaginationView
+from mtg.views import ChallengeView, GameView, HandPaginationView, HistoryPaginationView, TradeView
 
 
 class ConfigValue:
@@ -31,7 +31,7 @@ class UserConfig:
 
 class TestConfig(SimpleNamespace):
     def __init__(self):
-        super().__init__(next_game_id=ConfigValue(1),games=ConfigValue({})); self.users={}
+        super().__init__(next_game_id=ConfigValue(1),games=ConfigValue({}),next_trade_id=ConfigValue(1),trades=ConfigValue({}),trade_ledger=ConfigValue([])); self.users={}
     def user_from_id(self,user_id): return UserConfig(self.users,int(user_id))
 
 def cog_fixture():
@@ -104,6 +104,35 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         versus=Game(1,[10,20],1); versus.winner=10; versus.finished_reason="zero life"; versus.phase="finished"; cog.games={1:versus}; cog.channels={1:1}; await cog.save(versus)
         loss=Game(2,[10,999],1,ai_user=999,ai_difficulty="easy"); loss.winner=999; loss.finished_reason="zero life"; loss.phase="finished"; cog.games[2]=loss; cog.channels[2]=1; await cog.save(loss)
         self.assertEqual((await cog.player_profile(10))["unopened_packs"],0)
+
+    async def test_trade_requires_both_confirmations_and_transfers_exact_quantities(self):
+        cog=cog_fixture(); red=await cog.claim_starter(10,"red"); green=await cog.claim_starter(20,"green")
+        mountain=next(key for key in red["collection"] if cog.collection_card(key).name=="Mountain")
+        forest=next(key for key in green["collection"] if cog.collection_card(key).name=="Forest")
+        mountain_before=red["collection"][mountain]; forest_before=green["collection"][forest]
+        trade=await cog.create_trade(10,20); await cog.modify_trade(trade["trade_id"],10,mountain,2,True); await cog.modify_trade(trade["trade_id"],20,forest,3,True)
+        pending,done=await cog.confirm_trade(trade["trade_id"],10); self.assertFalse(done); self.assertEqual(pending["confirmations"],[10])
+        completed,done=await cog.confirm_trade(trade["trade_id"],20); self.assertTrue(done); self.assertEqual(completed["status"],"completed")
+        first,second=await cog.player_profile(10),await cog.player_profile(20)
+        self.assertEqual(first["collection"][mountain],mountain_before-2); self.assertEqual(first["collection"][forest],3)
+        self.assertEqual(second["collection"][forest],forest_before-3); self.assertEqual(second["collection"][mountain],2)
+        self.assertNotIn(str(trade["trade_id"]),await cog.config.trades()); self.assertEqual(len(await cog.config.trade_ledger()),1)
+
+    async def test_trade_edit_resets_confirmations_and_reports_deck_impact(self):
+        cog=cog_fixture(); red=await cog.claim_starter(10,"red"); await cog.claim_starter(20,"green")
+        mountain=next(key for key in red["collection"] if cog.collection_card(key).name=="Mountain")
+        trade=await cog.create_trade(10,20); await cog.modify_trade(trade["trade_id"],10,mountain,1,True)
+        profile=await cog.player_profile(10); self.assertTrue(any("invalid" in item for item in cog.trade_impacts(profile,{mountain:1})))
+        profile["collection"]["mountain"]=1; await cog.config.user_from_id(10).set(profile)
+        self.assertTrue(any("substitutes" in item for item in cog.trade_impacts(profile,{mountain:1})))
+        trade["offers"]["20"]={next(key for key in (await cog.player_profile(20))["collection"] if cog.collection_card(key).name=="Forest"):1}; trades=await cog.config.trades(); trades[str(trade["trade_id"])]=trade; await cog.config.trades.set(trades)
+        await cog.confirm_trade(trade["trade_id"],10); edited=await cog.modify_trade(trade["trade_id"],10,mountain,1,True); self.assertEqual(edited["confirmations"],[])
+
+    async def test_trade_rejects_quantity_not_owned_and_can_be_cancelled(self):
+        cog=cog_fixture(); red=await cog.claim_starter(10,"red"); await cog.claim_starter(20,"green"); key=next(iter(red["collection"])); trade=await cog.create_trade(10,20)
+        with self.assertRaisesRegex(GameError,"own only"):
+            await cog.modify_trade(trade["trade_id"],10,key,999,True)
+        cancelled=await cog.cancel_trade(trade["trade_id"],20); self.assertEqual(cancelled["status"],"cancelled"); self.assertEqual(len(await cog.config.trade_ledger()),1)
 
     async def test_concurrent_creates_allow_only_one_game_per_player(self):
         cog = cog_fixture()
@@ -1058,7 +1087,20 @@ class CommandInteractionRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(game.hand(10)[0].name,content)
         self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
 
+    async def test_trade_revalidates_ownership_at_final_confirmation(self):
+        cog=cog_fixture(); red=await cog.claim_starter(10,"red"); green=await cog.claim_starter(20,"green")
+        mountain=next(key for key in red["collection"] if cog.collection_card(key).name=="Mountain"); forest=next(key for key in green["collection"] if cog.collection_card(key).name=="Forest")
+        trade=await cog.create_trade(10,20); await cog.modify_trade(trade["trade_id"],10,mountain,1,True); await cog.modify_trade(trade["trade_id"],20,forest,1,True); await cog.confirm_trade(trade["trade_id"],10)
+        profile=await cog.config.user_from_id(10).all(); profile["collection"].pop(mountain,None); await cog.config.user_from_id(10).set(profile)
+        with self.assertRaises(GameError): await cog.confirm_trade(trade["trade_id"],20)
+        self.assertIn(str(trade["trade_id"]),await cog.config.trades()); self.assertEqual(await cog.config.trade_ledger(),[])
+
 class CommandLayoutTests(unittest.TestCase):
+    def test_trade_controls_are_persistent_and_trade_specific(self):
+        view=TradeView(cog_fixture(),17)
+        self.assertIsNone(view.timeout)
+        self.assertEqual({item.custom_id for item in view.children},{"mtg:trade:17:confirm","mtg:trade:17:cancel"})
+
     def test_challenge_acceptance_requires_opponent_deck_choice(self):
         view=ChallengeView(cog_fixture(),10,20,"starter-green",[("starter-red","Red Starter"),("deck-1","Dragons")])
         selector=next(item for item in view.children if getattr(item,"placeholder",None)=="Choose your deck and accept")
@@ -1075,7 +1117,7 @@ class CommandLayoutTests(unittest.TestCase):
         self.assertIn("buttons",help_text)
 
     def test_player_help_keeps_match_controls_and_special_fallbacks_nested(self):
-        public={"action","card","catalog","challenge","collection","deck","packs","solo","starter","status"}
+        public={"action","card","catalog","challenge","collection","deck","packs","solo","starter","status","trade"}
         match={"attack","block","concede","graveyard","mana","pass","play","special"}
         fallback={"vault","sanctuary","channel","angel","incarnation","hydra","hydraorder","mask","maskpick","activate","forktarget","bodyguard","trample","attackdamage","blockdamage","untap","trigger","wording","orders","kudzu","balance","leak","selection","copy","doppelganger"}
         self.assertEqual(set(MTG.mtg.all_commands),public)

@@ -5,6 +5,22 @@ from .art import HAND_PAGE_SIZE
 from .ai import TARGETED_EFFECTS, _target
 from .engine import GameError
 
+class TradeView(discord.ui.View):
+    def __init__(self,cog,trade_id):
+        super().__init__(timeout=None); self.cog,self.trade_id=cog,int(trade_id)
+        for item in self.children: item.custom_id=f"mtg:trade:{trade_id}:{item.custom_id}"
+    async def interaction_check(self,interaction):
+        try: trade=await self.cog.get_trade(self.trade_id)
+        except GameError as error: await interaction.response.send_message(str(error),ephemeral=True); return False
+        if interaction.user.id in [int(user) for user in trade["users"]]: return True
+        await interaction.response.send_message("Only the two trade participants can use these controls.",ephemeral=True); return False
+    @discord.ui.button(label="Confirm trade",style=discord.ButtonStyle.success,custom_id="confirm")
+    async def confirm(self,interaction,button):
+        await self.cog.trade_interaction(interaction,self.trade_id,True)
+    @discord.ui.button(label="Cancel trade",style=discord.ButtonStyle.danger,custom_id="cancel")
+    async def cancel(self,interaction,button):
+        await self.cog.trade_interaction(interaction,self.trade_id,False)
+
 class CollectionSelect(discord.ui.Select):
     def __init__(self,browser):
         self.browser=browser; start=browser.page*browser.page_size
