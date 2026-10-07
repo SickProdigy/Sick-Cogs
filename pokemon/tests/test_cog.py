@@ -273,6 +273,7 @@ class GymProgressionTests(unittest.TestCase):
     def test_kanto_gyms_are_ordered_and_complete(self):
         self.assertEqual([gym.key for gym in KANTO_GYMS],["boulder","cascade","thunder","rainbow","soul","marsh","volcano","earth"])
         self.assertEqual(next_gym([]).leader,"Brock")
+        self.assertEqual(next_gym([]).team,((74,12),(95,14)))
         self.assertEqual(next_gym(["boulder"]).leader,"Misty")
         self.assertIsNone(next_gym([gym.key for gym in KANTO_GYMS]))
 
@@ -724,10 +725,12 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await Pokemon.gym_challenge.callback(cog,ctx)
         battle=cog.battles[12]
         self.assertEqual((battle.battle_kind,battle.gym_key,battle.message_id),("gym","boulder",99))
+        self.assertEqual((battle.wild_species_id,battle.wild_level,battle.opponent_total,battle.opponent_index),(74,12,2,0))
         self.assertEqual(next_encounter_value.value,13)
         self.assertIsNone(active.value)
         raw=cog.put_encounter.await_args.args[1]
         self.assertEqual((raw["kind"],raw["gym_key"],raw["battle"]["battle_kind"]),("gym","boulder","gym"))
+        self.assertEqual([item["species_id"] for item in raw["battle"]["opponent_party"]],[74,95])
 
     async def test_gym_badge_settlement_is_idempotent(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
@@ -745,6 +748,8 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await cog.sync_battle_player(battle)
         self.assertEqual(stored["badges"],["boulder"])
         self.assertEqual(battle.result.count("Boulder Badge"),1)
+        stored["badges"]=[];lost=Battle(10,42,1,2,3,player,74,12,50,1,battle_kind="gym",gym_key="boulder");lost.state="lost";lost.result="Gym challenge lost."
+        await cog.sync_battle_player(lost);self.assertEqual(stored["badges"],[])
 
     async def test_gym_view_removes_bag_and_rejects_poke_balls(self):
         current=battle();current.battle_kind="gym";current.gym_key="boulder"

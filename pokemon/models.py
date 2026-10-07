@@ -190,6 +190,9 @@ class Battle:
     wild_confusion_turns: int = 0
     last_ball: str = ""
     catch_shakes: int = 0
+    opponent_party: list = field(default_factory=list)
+    opponent_index: int = 0
+    opponents_defeated: list = field(default_factory=list)
 
     def __post_init__(self):
         if not self.party:
@@ -305,11 +308,34 @@ class Battle:
         base = SPECIES[self.wild_species_id].hp
         return ((2 * base) * self.wild_level) // 100 + self.wild_level + 10
 
+    def initialize_opponents(self,team):
+        self.opponent_party=[]
+        for species_id,level in team:
+            maximum=((2*SPECIES[int(species_id)].hp)*int(level))//100+int(level)+10
+            self.opponent_party.append({"species_id":int(species_id),"level":int(level),"hp":maximum,"max_hp":maximum,"status":"","status_turns":0,"pp":{},"confusion_turns":0})
+        self.opponent_index=0;self.opponents_defeated=[]
+        if self.opponent_party:self._load_opponent(0)
+
+    def _save_current_opponent(self):
+        if not self.opponent_party or not 0<=self.opponent_index<len(self.opponent_party):return
+        current=self.opponent_party[self.opponent_index]
+        current.update({"hp":self.wild_hp,"status":self.wild_status,"status_turns":self.wild_status_turns,"pp":dict(self.wild_pp),"confusion_turns":self.wild_confusion_turns})
+
+    def _load_opponent(self,index):
+        current=self.opponent_party[index];self.opponent_index=index
+        self.wild_species_id=int(current["species_id"]);self.wild_level=int(current["level"]);self.wild_hp=max(0,int(current.get("hp",current.get("max_hp",1))))
+        self.wild_status=str(current.get("status",""));self.wild_status_turns=max(0,int(current.get("status_turns",0)));self.wild_pp=dict(current.get("pp",{}));self.wild_confusion_turns=max(0,int(current.get("confusion_turns",0)))
+        self.wild_stages.clear();self.wild_gender="unknown";self.wild_shiny=False
+
+    @property
+    def opponent_total(self):return len(self.opponent_party) or 1
+
     def use_move(self, index):
         if self.state != "active":
             raise BattleError("This encounter is over.")
         if self.needs_switch:
             raise BattleError("Switch to another party Pokémon first.")
+        self.result=None
         move_keys = self.player.moves or SPECIES[self.player.species_id].moves
         if not 0 <= index < len(move_keys):
             raise BattleError("That move is unavailable.")
@@ -533,15 +559,17 @@ class Battle:
         if self.wild_status in {"poison","burn"} and self.wild_hp>0:
             divisor=self.rules().residual_divisor(self.wild_status);self.wild_hp=max(0,self.wild_hp-max(1,self.wild_max_hp//divisor))
 
-    def _award_experience(self,amount):
-        self.experience_award=max(0,int(amount));self.experience_awards={};self.progression_events=[]
+    def _award_experience(self,amount,accumulate=False):
+        amount=max(0,int(amount))
+        if accumulate:self.experience_award+=amount
+        else:self.experience_award=amount;self.experience_awards={};self.progression_events=[]
         eligible=[item for item in self.party if item.instance_id in self.participants and self.party_hp.get(item.instance_id,0)>0]
-        if not eligible or not self.experience_award:return ""
-        share=max(1,self.experience_award//len(eligible));details=[]
+        if not eligible or not amount:return ""
+        share=max(1,amount//len(eligible));details=[]
         for pokemon in eligible:
             previous_name=SPECIES[pokemon.species_id].name;previous_pending=set(pokemon.pending_moves)
             levels,evolved,learned=pokemon.gain_experience(share);current_name=SPECIES[pokemon.species_id].name
-            self.experience_awards[pokemon.instance_id]=share
+            self.experience_awards[pokemon.instance_id]=self.experience_awards.get(pokemon.instance_id,0)+share
             event={"instance_id":pokemon.instance_id,"levels":levels,"evolved_from":evolved,"learned_moves":list(learned),"pending_moves":[move for move in pokemon.pending_moves if move not in previous_pending]}
             self.progression_events.append(event)
             detail=f" {current_name} gained {share} XP."
@@ -556,16 +584,23 @@ class Battle:
 
     def _finish_if_needed(self):
         if self.wild_hp == 0:
+            defeated_id=self.wild_species_id;defeated_name=SPECIES[defeated_id].name
+            detail=self._award_experience(self.rules().experience_reward(SPECIES[defeated_id],self.wild_level,trainer=self.battle_kind=="gym"),accumulate=self.battle_kind=="gym")
+            if self.battle_kind=="gym" and self.opponent_party:
+                self._save_current_opponent();self.opponents_defeated.append(defeated_id)
+                if self.opponent_index+1<len(self.opponent_party):
+                    self._load_opponent(self.opponent_index+1);self.state="active"
+                    self.result=f"{defeated_name} fainted."+detail+f" Gym Leader sent out {SPECIES[self.wild_species_id].name}!"
+                    return
             self.state = "won"
-            detail=self._award_experience(self.rules().experience_reward(SPECIES[self.wild_species_id],self.wild_level,trainer=self.battle_kind=="gym"))
-            self.result="The wild Pokémon fainted."+detail
+            self.result=f"{defeated_name} fainted."+detail
         elif self.player_hp == 0:
             self.party_hp[self.player.instance_id]=0
             if self.needs_switch:
                 self.result = f"{SPECIES[self.player.species_id].name} fainted. Switch Pokémon."
             else:
                 self.state = "lost"
-                self.result = f"{SPECIES[self.wild_species_id].name} escaped! Your party has no conscious Pokémon. Go to a Pokémon Center to heal."
+                self.result = "Gym challenge lost! Your party has no conscious Pokémon. Go to a Pokémon Center to heal." if self.battle_kind=="gym" else f"{SPECIES[self.wild_species_id].name} escaped! Your party has no conscious Pokémon. Go to a Pokémon Center to heal."
 
     def _damage(self, attack, target_id, level, move, rng, critical=False, target_hp=None, attacker_types=(), defense=None):
         if move.effect.startswith("fixed-"):return int(move.effect.split("-",1)[1])
@@ -640,6 +675,7 @@ class Battle:
             "player_hp": self.player_hp,
             "wild_hp": self.wild_hp,
             "state": self.state,
+            "opponent_index": self.opponent_index,
         })
         self.action_history = self.action_history[-100:]
 
@@ -690,6 +726,9 @@ class Battle:
         data.setdefault("wild_confusion_turns",0)
         data.setdefault("last_ball","")
         data.setdefault("catch_shakes",0)
+        data.setdefault("opponent_party",[])
+        data.setdefault("opponent_index",0)
+        data.setdefault("opponents_defeated",[])
         battle=cls(**data)
         if not battle.party:battle.party=[battle.player]
         return battle

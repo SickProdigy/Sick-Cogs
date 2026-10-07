@@ -13,19 +13,24 @@ class Gym:
     symbol: str
     leader: str
     city: str
-    species_id: int
-    level: int
+    team: tuple
+
+    @property
+    def species_id(self):return self.team[-1][0]
+
+    @property
+    def level(self):return self.team[-1][1]
 
 
 KANTO_GYMS=(
-    Gym("boulder","Boulder Badge","🪨","Brock","Pewter City",95,14),
-    Gym("cascade","Cascade Badge","💧","Misty","Cerulean City",121,21),
-    Gym("thunder","Thunder Badge","⚡","Lt. Surge","Vermilion City",26,24),
-    Gym("rainbow","Rainbow Badge","🌈","Erika","Celadon City",45,29),
-    Gym("soul","Soul Badge","☠️","Koga","Fuchsia City",110,43),
-    Gym("marsh","Marsh Badge","🔮","Sabrina","Saffron City",65,43),
-    Gym("volcano","Volcano Badge","🔥","Blaine","Cinnabar Island",59,47),
-    Gym("earth","Earth Badge","🌍","Giovanni","Viridian City",112,50),
+    Gym("boulder","Boulder Badge","🪨","Brock","Pewter City",((74,12),(95,14))),
+    Gym("cascade","Cascade Badge","💧","Misty","Cerulean City",((121,21),)),
+    Gym("thunder","Thunder Badge","⚡","Lt. Surge","Vermilion City",((26,24),)),
+    Gym("rainbow","Rainbow Badge","🌈","Erika","Celadon City",((45,29),)),
+    Gym("soul","Soul Badge","☠️","Koga","Fuchsia City",((110,43),)),
+    Gym("marsh","Marsh Badge","🔮","Sabrina","Saffron City",((65,43),)),
+    Gym("volcano","Volcano Badge","🔥","Blaine","Cinnabar Island",((59,47),)),
+    Gym("earth","Earth Badge","🌍","Giovanni","Viridian City",((112,50),)),
 )
 GYMS={gym.key:gym for gym in KANTO_GYMS}
 
@@ -60,8 +65,8 @@ def gym_status_embed(user,conf):
     embed.description=badge_case(badges)+"\n"+names
     embed.add_field(name="Badges",value=f"{len(badges)}/{len(KANTO_GYMS)}",inline=True)
     if upcoming:
-        ace=SPECIES[upcoming.species_id]
-        embed.add_field(name="Next challenge",value=f"{upcoming.leader} · {upcoming.city}\n{ace.name} · Lv. {upcoming.level}",inline=True)
+        team=" · ".join(f"{SPECIES[species_id].name} Lv. {level}" for species_id,level in upcoming.team)
+        embed.add_field(name="Next challenge",value=f"{upcoming.leader} · {upcoming.city}\n{team}",inline=True)
         embed.set_footer(text="Use the Pokémon gym challenge command when your party is ready.")
     else:
         embed.add_field(name="Journey",value="All eight Kanto badges earned.",inline=True)
