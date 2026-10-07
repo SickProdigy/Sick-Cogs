@@ -458,7 +458,14 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         message=response.edit_message.await_args.kwargs["content"]
         self.assertIn("Tentacool",message);self.assertIn("Charmander",message);self.assertNotIn("catch-22",message)
         moving=PartyPlacementView(cog,42,"catch-22",section.value["party"],{"catch-22":tentacool.raw(),"377af4fb":charmander.raw()})
-        self.assertEqual([item.label for item in moving.children],["Move to 2: Charmander"])
+        self.assertEqual([item.label for item in moving.children],["Move to 2: Charmander · Lv.1"])
+        source_message=SimpleNamespace(delete=AsyncMock());choice_response=SimpleNamespace(send_message=AsyncMock());choice=SimpleNamespace(user=SimpleNamespace(id=42),message=source_message,response=choice_response)
+        await cog.collection_party_choice(choice,"catch-22")
+        self.assertEqual(choice_response.send_message.await_args.args[0],"Where should **Tentacool · Lv.5** go?")
+        self.assertEqual([item.label for item in choice_response.send_message.await_args.kwargs["view"].children],["Move to 2: Charmander · Lv.1"])
+        cleanup_response=SimpleNamespace(defer=AsyncMock(),edit_message=AsyncMock());cleanup=SimpleNamespace(user=SimpleNamespace(id=42),response=cleanup_response,delete_original_response=AsyncMock())
+        await cog.place_collection_pokemon(cleanup,"catch-22","377af4fb",source_message)
+        cleanup_response.defer.assert_awaited_once();source_message.delete.assert_awaited_once();cleanup.delete_original_response.assert_awaited_once();cleanup_response.edit_message.assert_not_awaited()
 
     async def test_move_choice_replaces_a_move_and_clears_persisted_prompt(self):
         pokemon=OwnedPokemon.create("full",19,23,seed=4)
