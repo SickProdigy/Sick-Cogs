@@ -65,6 +65,26 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(records,sorted(records,key=lambda item:(cog.collection_card(item[0]).name.casefold(),item[0])))
         self.assertTrue(all(key.startswith("lea:") for key,_ in records))
 
+    async def test_custom_deck_clone_edit_and_select_respects_owned_cards(self):
+        cog=cog_fixture(); await cog.claim_starter(10,"red")
+        deck_id,profile=await cog.create_custom_deck(10,"Burn Copy")
+        self.assertEqual(sum(profile["decks"][deck_id]["cards"].values()),60)
+        mountain=next(key for key in profile["collection"] if cog.collection_card(key).name=="Mountain")
+        deck_id,profile=await cog.edit_saved_deck(10,deck_id,mountain,1,False)
+        with self.assertRaisesRegex(GameError,"required 60"):
+            await cog.select_saved_deck(10,deck_id)
+        deck_id,profile=await cog.edit_saved_deck(10,deck_id,mountain,1,True)
+        selected,profile=await cog.select_saved_deck(10,"Burn Copy")
+        self.assertEqual((selected,profile["active_deck"]),(deck_id,deck_id))
+
+    async def test_solo_game_uses_resolved_custom_printing_list(self):
+        cog=cog_fixture(); profile=await cog.claim_starter(10,"red"); cards=cog.resolve_saved_deck(profile)
+        cards[0]="mountain"
+        game=await cog.create_solo_game(10,999,100,"My Deck","easy",cards,"red")
+        player_keys=[game.cards[uid] for uid in game.player(10).hand+game.player(10).library]
+        self.assertEqual(game.player(10).deck,"My Deck")
+        self.assertIn("mountain",player_keys)
+
     async def test_concurrent_creates_allow_only_one_game_per_player(self):
         cog = cog_fixture()
         results = await asyncio.gather(
@@ -88,6 +108,13 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cog.human_players(second), [20])
         with self.assertRaises(GameError):
             await cog.create_solo_game(10, 999, 100, "red", "easy")
+
+    async def test_collection_challenge_uses_each_players_owned_selected_deck(self):
+        cog=cog_fixture(); first=await cog.claim_starter(10,"red"); second=await cog.claim_starter(20,"green")
+        game=await cog.create_collection_game(10,20,100,first["active_deck"],second["active_deck"])
+        self.assertEqual({game.player(10).deck,game.player(20).deck},{"Red Starter","Green Starter"})
+        self.assertEqual(len(game.player(10).hand)+len(game.player(10).library),60)
+        self.assertEqual(len(game.player(20).hand)+len(game.player(20).library),60)
 
     async def test_concurrent_cross_game_saves_preserve_both_games(self):
         cog = cog_fixture()
@@ -1013,10 +1040,10 @@ class CommandInteractionRegressionTests(unittest.IsolatedAsyncioTestCase):
 
 class CommandLayoutTests(unittest.TestCase):
     def test_challenge_acceptance_requires_opponent_deck_choice(self):
-        view=ChallengeView(cog_fixture(),10,20,"green")
+        view=ChallengeView(cog_fixture(),10,20,"starter-green",[("starter-red","Red Starter"),("deck-1","Dragons")])
         selector=next(item for item in view.children if getattr(item,"placeholder",None)=="Choose your deck and accept")
-        self.assertEqual([option.value for option in selector.options],["red","green"])
-        self.assertEqual(view.challenger_deck,"green")
+        self.assertEqual([option.value for option in selector.options],["starter-red","deck-1"])
+        self.assertEqual(view.challenger_deck,"starter-green")
 
 
     def test_root_help_explains_player_entry_points(self):
@@ -1028,7 +1055,7 @@ class CommandLayoutTests(unittest.TestCase):
         self.assertIn("buttons",help_text)
 
     def test_player_help_keeps_match_controls_and_special_fallbacks_nested(self):
-        public={"action","card","catalog","challenge","collection","solo","starter","status"}
+        public={"action","card","catalog","challenge","collection","deck","solo","starter","status"}
         match={"attack","block","concede","graveyard","mana","pass","play","special"}
         fallback={"vault","sanctuary","channel","angel","incarnation","hydra","hydraorder","mask","maskpick","activate","forktarget","bodyguard","trample","attackdamage","blockdamage","untap","trigger","wording","orders","kudzu","balance","leak","selection","copy","doppelganger"}
         self.assertEqual(set(MTG.mtg.all_commands),public)

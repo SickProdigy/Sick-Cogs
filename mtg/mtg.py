@@ -25,7 +25,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.122.1"
+    __version__="0.123.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.config.register_user(**DEFAULT_PROFILE)
@@ -81,6 +81,59 @@ class MTG(commands.Cog):
         resolved,errors=resolve_deck(deck.get("cards",{}),profile.get("collection",{}),CARDS)
         if errors: raise GameError("Deck is invalid: "+"; ".join(errors))
         return resolved
+    def find_saved_deck(self,profile,query=None):
+        decks=profile.get("decks",{}); query=(query or profile.get("active_deck","")).strip()
+        if query in decks: return query,decks[query]
+        matches=[(key,deck) for key,deck in decks.items() if deck.get("name","").casefold()==query.casefold()]
+        if len(matches)==1: return matches[0]
+        raise GameError("No saved deck matched that name or ID.")
+    def deck_embed(self,profile,deck_id):
+        deck=profile.get("decks",{}).get(deck_id); resolved,errors=resolve_deck(deck.get("cards",{}),profile.get("collection",{}),CARDS)
+        counts=Counter(CARDS[key].name for key in deck.get("cards",{}) for _ in range(int(deck["cards"][key])))
+        lines=[f"{name} ×{count}" for name,count in sorted(counts.items())]
+        embed=discord.Embed(title=deck.get("name",deck_id),description="\n".join(lines) or "Empty deck",color=discord.Color.dark_green() if not errors else discord.Color.dark_red())
+        embed.add_field(name="Status",value="Valid · 60+ owned cards" if not errors else "Invalid · "+"; ".join(errors),inline=False)
+        embed.set_footer(text=f"Deck ID: {deck_id} · Preferred printings resolve automatically")
+        return embed
+    async def create_custom_deck(self,user_id,name):
+        name=name.strip()[:60]
+        if not name: raise GameError("Give the deck a name.")
+        async with self.storage_lock:
+            scope=self.config.user_from_id(int(user_id)); profile=await scope.all()
+            if not profile.get("starter"): raise GameError("Choose a starter before creating decks.")
+            if any(deck.get("name","").casefold()==name.casefold() for deck in profile.get("decks",{}).values()): raise GameError("You already have a deck with that name.")
+            source_id,source=self.find_saved_deck(profile); number=1
+            while f"deck-{number}" in profile["decks"]: number+=1
+            deck_id=f"deck-{number}"; profile["decks"][deck_id]={"name":name,"cards":dict(source.get("cards",{})),"starter":False}
+            await scope.set(profile); return deck_id,profile
+    async def edit_saved_deck(self,user_id,deck_query,printing,count,adding):
+        if printing not in CARDS: raise GameError("Use an exact owned printing key from your collection.")
+        count=int(count)
+        if count<1: raise GameError("Quantity must be at least 1.")
+        async with self.storage_lock:
+            scope=self.config.user_from_id(int(user_id)); profile=await scope.all(); deck_id,deck=self.find_saved_deck(profile,deck_query)
+            if deck.get("starter"): raise GameError("Clone the starter deck before editing it.")
+            cards=dict(deck.get("cards",{})); current=int(cards.get(printing,0))
+            if adding:
+                owned=Counter()
+                for key,amount in profile.get("collection",{}).items():
+                    if key in CARDS: owned[CARDS[key].oracle_id or key]+=int(amount)
+                desired=Counter()
+                for key,amount in cards.items(): desired[CARDS[key].oracle_id or key]+=int(amount)
+                identity=CARDS[printing].oracle_id or printing
+                if desired[identity]+count>owned[identity]: raise GameError(f"You own only {owned[identity]} total {CARDS[printing].name} copies across all printings.")
+                if not CARDS[printing].land and desired[identity]+count>4: raise GameError("Nonland cards are limited to four copies per deck.")
+                cards[printing]=current+count
+            else:
+                if current<count: raise GameError(f"That deck prefers only {current} of that printing.")
+                if current==count: cards.pop(printing,None)
+                else: cards[printing]=current-count
+            deck["cards"]=cards; profile["decks"][deck_id]=deck; await scope.set(profile); return deck_id,profile
+    async def select_saved_deck(self,user_id,query):
+        async with self.storage_lock:
+            scope=self.config.user_from_id(int(user_id)); profile=await scope.all(); deck_id,_=self.find_saved_deck(profile,query)
+            self.resolve_saved_deck(profile,deck_id); profile["active_deck"]=deck_id; await scope.set(profile); return deck_id,profile
+
     async def collection_records(self,user_id):
         profile=await self.player_profile(user_id)
         records=[(key,int(count)) for key,count in profile.get("collection",{}).items() if key in CARDS and int(count)>0]
@@ -116,13 +169,26 @@ class MTG(commands.Cog):
             game=Game(gid,users,decks=decks); game.message_id=0; self.games[gid]=game; self.channels[gid]=channel
             await self._save_unlocked(game)
         return game
-    async def create_solo_game(self,human,ai,channel,deck,difficulty):
+    async def create_collection_game(self,a,b,channel,a_deck_id,b_deck_id):
+        profiles={a:await self.player_profile(a),b:await self.player_profile(b)}
+        chosen={}; lists={}
+        for user,deck_id in ((a,a_deck_id),(b,b_deck_id)):
+            resolved=self.resolve_saved_deck(profiles[user],deck_id); deck=profiles[user]["decks"][deck_id]
+            chosen[user]=deck.get("name",deck_id); lists[user]=resolved
+        async with self.storage_lock:
+            self.ensure_players_available(a,b); gid=await self.config.next_game_id(); await self.config.next_game_id.set(gid+1)
+            users=[a,b]; secrets.SystemRandom().shuffle(users)
+            game=Game(gid,users,decks=chosen,decklists=lists); game.message_id=0; self.games[gid]=game; self.channels[gid]=channel; await self._save_unlocked(game)
+        return game
+    async def create_solo_game(self,human,ai,channel,deck,difficulty,deck_cards=None,starter_color=None):
         async with self.storage_lock:
             self.ensure_players_available(human)
             gid=await self.config.next_game_id(); await self.config.next_game_id.set(gid+1)
             users=[human,ai]; secrets.SystemRandom().shuffle(users)
-            other="green" if deck=="red" else "red"
-            game=Game(gid,users,decks={human:deck,ai:other},ai_user=ai,ai_difficulty=difficulty)
+            base_color=starter_color or (deck if deck in ("red","green") else "red")
+            other="green" if base_color=="red" else "red"
+            lists={human:deck_cards} if deck_cards is not None else None
+            game=Game(gid,users,decks={human:deck,ai:other},ai_user=ai,ai_difficulty=difficulty,decklists=lists)
             game.message_id=0; self.games[gid]=game; self.channels[gid]=channel
             self.advance_automatic(game)
             await self._save_unlocked(game)
@@ -633,26 +699,77 @@ class MTG(commands.Cog):
         records=await self.collection_records(ctx.author.id); pages=max(1,math.ceil(len(records)/CollectionView.page_size))
         if not 1<=page<=pages: await ctx.send(f"Choose a page from 1 to {pages}."); return
         view=CollectionView(self,ctx.author.id,records,page-1); await ctx.send(embed=self.collection_embed(profile,records,page-1),view=view)
+    @mtg.group(name="deck",invoke_without_command=True)
+    async def deck(self,ctx):
+        """Create, inspect, edit, and select saved decks."""
+        profile=await self.player_profile(ctx.author.id)
+        if not profile.get("starter"): await ctx.send(f"Choose a starter with `{ctx.clean_prefix}mtg starter red` or `green`."); return
+        lines=[]
+        for deck_id,item in profile.get("decks",{}).items():
+            _,errors=resolve_deck(item.get("cards",{}),profile.get("collection",{}),CARDS)
+            flags=(" · active" if deck_id==profile.get("active_deck") else "")+(" · valid" if not errors else " · invalid")
+            lines.append(f"`{deck_id}` — **{item.get('name',deck_id)}**{flags}")
+        await ctx.send("**Your MTG decks**\n"+"\n".join(lines))
+    @deck.command(name="create")
+    async def deck_create(self,ctx,*,name:str):
+        """Clone your active deck under a new editable name."""
+        try: deck_id,profile=await self.create_custom_deck(ctx.author.id,name)
+        except GameError as error: await ctx.send(str(error)); return
+        await ctx.send(f"Created `{deck_id}` by cloning your active deck. Use the exact printing keys shown in `mtg collection` to edit it.",embed=self.deck_embed(profile,deck_id))
+    @deck.command(name="show")
+    async def deck_show(self,ctx,*,deck_name:str=None):
+        """Show a saved deck and its current validity."""
+        try: profile=await self.player_profile(ctx.author.id); deck_id,_=self.find_saved_deck(profile,deck_name)
+        except GameError as error: await ctx.send(str(error)); return
+        await ctx.send(embed=self.deck_embed(profile,deck_id))
+    @deck.command(name="add")
+    async def deck_add(self,ctx,deck_id:str,printing_key:str,count:int=1):
+        """Add owned printing copies to an editable deck."""
+        try: deck_id,profile=await self.edit_saved_deck(ctx.author.id,deck_id,printing_key,count,True)
+        except GameError as error: await ctx.send(str(error)); return
+        await ctx.send(embed=self.deck_embed(profile,deck_id))
+    @deck.command(name="remove")
+    async def deck_remove(self,ctx,deck_id:str,printing_key:str,count:int=1):
+        """Remove preferred printing copies from an editable deck."""
+        try: deck_id,profile=await self.edit_saved_deck(ctx.author.id,deck_id,printing_key,count,False)
+        except GameError as error: await ctx.send(str(error)); return
+        await ctx.send(embed=self.deck_embed(profile,deck_id))
+    @deck.command(name="select")
+    async def deck_select(self,ctx,*,deck_name:str):
+        """Select a valid saved deck for future matches."""
+        try: deck_id,profile=await self.select_saved_deck(ctx.author.id,deck_name)
+        except GameError as error: await ctx.send(str(error)); return
+        await ctx.send(f"Selected **{profile['decks'][deck_id]['name']}** for future matches.")
     @mtg.command(name="challenge")
     @commands.guild_only()
-    async def challenge(self,ctx,member:discord.Member,deck:str="red"):
-        """Challenge another member with your chosen red or green deck."""
+    async def challenge(self,ctx,member:discord.Member,*,deck_name:str=None):
+        """Challenge another member using owned saved decks."""
         if member.bot or member.id==ctx.author.id: await ctx.send("Challenge another human member."); return
-        deck=deck.casefold()
-        if deck not in ("red","green"):
-            await ctx.send(f"Use `{ctx.clean_prefix}mtg challenge @member [red|green]`."); return
-        await ctx.send(f"{member.mention}, {ctx.author.mention} challenged you with the **{deck.title()}** deck. Choose your deck below to accept.",view=ChallengeView(self,ctx.author.id,member.id,deck),allowed_mentions=discord.AllowedMentions(users=True))
+        try:
+            challenger=await self.player_profile(ctx.author.id); opponent=await self.player_profile(member.id)
+            if not challenger.get("starter") or not opponent.get("starter"): raise GameError("Both players must choose a starter collection first.")
+            challenger_id,challenger_deck=self.find_saved_deck(challenger,deck_name); self.resolve_saved_deck(challenger,challenger_id)
+            opponent_decks=[]
+            for deck_id,deck in opponent.get("decks",{}).items():
+                try: self.resolve_saved_deck(opponent,deck_id)
+                except GameError: continue
+                opponent_decks.append((deck_id,deck.get("name",deck_id)))
+            if not opponent_decks: raise GameError("The challenged player has no valid deck.")
+        except GameError as error: await ctx.send(str(error)); return
+        await ctx.send(f"{member.mention}, {ctx.author.mention} challenged you with **{challenger_deck['name']}**. Choose one of your valid decks below.",view=ChallengeView(self,ctx.author.id,member.id,challenger_id,opponent_decks),allowed_mentions=discord.AllowedMentions(users=True))
     @mtg.command(name="solo")
     @commands.guild_only()
-    async def solo(self,ctx,deck:str="red",difficulty:str="easy"):
-        """Start a reward-free solo match. Deck: red/green; difficulty: easy/normal."""
-        deck=deck.casefold(); difficulty=difficulty.casefold()
-        if deck in DIFFICULTIES and difficulty=="easy": difficulty,deck=deck,"red"
-        if deck not in ("red","green") or difficulty not in DIFFICULTIES:
-            await ctx.send(f"Use `{ctx.clean_prefix}mtg solo [red|green] [easy|normal]`."); return
-        if not self.bot.user:
-            await ctx.send("The solo opponent is not ready yet."); return
-        try: game=await self.create_solo_game(ctx.author.id,self.bot.user.id,ctx.channel.id,deck,difficulty)
+    async def solo(self,ctx,deck_name:str=None,difficulty:str="easy"):
+        """Start solo with your selected saved deck. Difficulty: easy/normal."""
+        if deck_name and deck_name.casefold() in DIFFICULTIES and difficulty=="easy": difficulty,deck_name=deck_name.casefold(),None
+        difficulty=difficulty.casefold()
+        if difficulty not in DIFFICULTIES: await ctx.send(f"Use `{ctx.clean_prefix}mtg solo [deck ID] [easy|normal]`."); return
+        if not self.bot.user: await ctx.send("The solo opponent is not ready yet."); return
+        try:
+            profile=await self.player_profile(ctx.author.id)
+            if not profile.get("starter"): raise GameError(f"Choose a starter first with `{ctx.clean_prefix}mtg starter red` or `green`.")
+            deck_id,deck=self.find_saved_deck(profile,deck_name); cards=self.resolve_saved_deck(profile,deck_id)
+            game=await self.create_solo_game(ctx.author.id,self.bot.user.id,ctx.channel.id,deck.get("name",deck_id),difficulty,cards,profile["starter"])
         except GameError as e: await ctx.send(str(e)); return
         embed,file=await self.game_message(game)
         message=await ctx.send(embed=embed,file=file,view=GameView(self,game.game_id)) if file else await ctx.send(embed=embed,view=GameView(self,game.game_id))
