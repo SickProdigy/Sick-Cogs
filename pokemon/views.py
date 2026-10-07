@@ -56,6 +56,7 @@ class MainMenuView(discord.ui.View):
     ITEMS=(
         ("party","Party","👥",0),("collection","Collection","📦",0),("pokedex","Pokedex","📕",0),("bag","Bag","🎒",0),("research","Research","📋",0),
         ("profile","Profile","🪪",1),("achievements","Goals","🏆",1),("gym","Gyms","🎖️",1),("mart","Mart","🛒",1),("style","Switch Style","🎨",1),
+        ("trade","Trade","🔄",2),
     )
     def __init__(self,cog,user_id):
         super().__init__(timeout=180);self.cog=cog;self.user_id=user_id
@@ -80,6 +81,25 @@ class CenterCollectView(discord.ui.View):
     async def collect(self,interaction,button):
         name=getattr(interaction.user,"display_name","Trainer")
         await interaction.response.edit_message(content=f"**{name}** collected their fully restored party.",view=None)
+
+
+class TradeView(discord.ui.View):
+    def __init__(self,cog,trade_id,offerer_id,recipient_id):
+        super().__init__(timeout=None);self.cog=cog;self.trade_id=trade_id;self.offerer_id=offerer_id;self.recipient_id=recipient_id
+        self.accept.custom_id=f"pokemon:trade:{trade_id}:accept";self.decline.custom_id=f"pokemon:trade:{trade_id}:decline"
+
+    async def interaction_check(self,interaction):
+        if interaction.user.id in {self.offerer_id,self.recipient_id}:return True
+        await interaction.response.send_message("This trade belongs to two other trainers.",ephemeral=True);return False
+
+    @discord.ui.button(label="Accept Trade",emoji="✅",style=discord.ButtonStyle.success,custom_id="pokemon:trade:accept")
+    async def accept(self,interaction,button):
+        if interaction.user.id!=self.recipient_id:
+            await interaction.response.send_message("Only the receiving trainer can accept this trade.",ephemeral=True);return
+        await self.cog.accept_trade(interaction,self.trade_id)
+
+    @discord.ui.button(label="Decline / Cancel",emoji="✖️",style=discord.ButtonStyle.danger,custom_id="pokemon:trade:decline")
+    async def decline(self,interaction,button):await self.cog.cancel_trade(interaction,self.trade_id)
 
 
 class CollectionPokemonSelect(discord.ui.Select):

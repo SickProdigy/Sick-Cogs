@@ -16,7 +16,7 @@ from pokemon.models import Battle,OwnedPokemon
 from pokemon.pokemon import GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView
+from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView
 
 
 class StoredValue:
@@ -218,6 +218,8 @@ class CogPolicyTests(unittest.TestCase):
         self.assertNotIn("pokemon heal",player_names)
         self.assertFalse(any(name.startswith("pokemon set") for name in player_names))
         self.assertIn("pokemon center",player_names)
+        self.assertIn("pokemon trade",player_names)
+        self.assertIn("pokemon trade cancel",player_names)
         self.assertIn("pokemon mart",player_names)
         self.assertIn("pokemon achievements",player_names)
         self.assertIn("pokemon research",player_names)
@@ -338,6 +340,15 @@ class PokedexTests(unittest.TestCase):
         self.assertIn("Pikachu",render_pokedex(session).title)
 
 
+    def test_trade_transfer_repairs_party_and_reservations_are_exact(self):
+        outgoing=OwnedPokemon.create("outgoing",4,5,seed=1).raw();incoming=OwnedPokemon.create("incoming",7,6,seed=2).raw();spare=OwnedPokemon.create("spare",1,4,seed=3).raw()
+        updated=Pokemon.trade_collection_after({"collection":[outgoing,spare],"party":["outgoing"]},"outgoing",incoming)
+        self.assertEqual({raw["instance_id"] for raw in updated["collection"]},{"incoming","spare"});self.assertEqual(updated["party"],["incoming"])
+        updated=Pokemon.trade_collection_after({"collection":[outgoing,spare],"party":["spare","outgoing"]},"outgoing",incoming)
+        self.assertEqual(updated["party"],["spare"])
+        trades={"1":{"state":"offered","offered_id":"outgoing","requested_id":"incoming"},"2":{"state":"completed","offered_id":"spare","requested_id":"done"}}
+        self.assertTrue(Pokemon.trade_reserved(trades,"outgoing"));self.assertFalse(Pokemon.trade_reserved(trades,"spare"));self.assertFalse(Pokemon.trade_reserved(trades,"outgoing",1))
+
 class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_pokedex_registration_names_the_trainer(self):
         pokemon=OwnedPokemon.create("registration",39,3,seed=2)
@@ -386,7 +397,8 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         returning=ctx.send.await_args.kwargs
         self.assertEqual(returning["embed"].title,"Trainer’s Pokémon Menu")
         self.assertIsInstance(returning["view"],MainMenuView)
-        self.assertEqual(len(returning["view"].children),10)
+        self.assertEqual(len(returning["view"].children),11)
+        self.assertIn("Trade",[item.label for item in returning["view"].children])
         ctx.send_help.assert_not_awaited()
 
     async def test_main_menu_is_owner_scoped_and_toggles_style(self):
@@ -473,7 +485,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         encounters=StoredEncounters();encounters.value={"9":{"guild_id":1,"channel_id":55,"message_id":99,"battle":{"user_id":42,"encounter_id":9}}}
         active=StoredValue(9);message=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=message))
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={9:SimpleNamespace()};cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel)
-        cog.config=SimpleNamespace(user_from_id=lambda user_id:section,encounters=encounters,guild_from_id=lambda guild_id:SimpleNamespace(active_encounter=active))
+        trades=StoredValue({});cog.config=SimpleNamespace(user_from_id=lambda user_id:section,encounters=encounters,trades=trades,guild_from_id=lambda guild_id:SimpleNamespace(active_encounter=active))
         user=SimpleNamespace(id=42,mention="<@42>");ctx=SimpleNamespace(author=SimpleNamespace(id=1),clean_prefix="!",send=AsyncMock())
         await Pokemon.reset_player.callback(cog,ctx,user,"no")
         self.assertTrue(section.value["starter_chosen"]);self.assertIn("9",encounters.value)
@@ -597,6 +609,36 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         revived=OwnedPokemon.from_raw(section.value["collection"][0])
         self.assertEqual(revived.current_hp,max(1,maximum//2))
         self.assertEqual(section.value["items"]["revive"],0)
+
+    async def test_trade_settlement_is_idempotent_and_recovers_partial_save(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        offered=OwnedPokemon.create("offered",4,5,seed=1).raw();requested=OwnedPokemon.create("requested",7,6,seed=2).raw();offerer=StoredSection({"collection":[offered],"party":["offered"]});recipient=StoredSection({"collection":[requested],"party":["requested"]})
+        record={"trade_id":1,"state":"offered","offerer_id":10,"recipient_id":20,"offered_id":"offered","requested_id":"requested","offerer_name":"Red","recipient_name":"Blue","offered_name":"Charmander","requested_name":"Squirtle","offered_level":5,"requested_level":6}
+        trades=StoredValue({"1":record});sections={10:offerer,20:recipient};cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:sections[uid])
+        settled=await cog.settle_trade(1);self.assertEqual(settled["state"],"completed")
+        self.assertEqual([raw["instance_id"] for raw in offerer.value["collection"]],["requested"]);self.assertEqual(offerer.value["party"],["requested"])
+        self.assertEqual([raw["instance_id"] for raw in recipient.value["collection"]],["offered"]);self.assertEqual(recipient.value["party"],["offered"])
+        self.assertIsNone(await cog.settle_trade(1));self.assertEqual(len(offerer.value["collection"]),1)
+        partial={**record,"trade_id":2,"state":"settling","offered_pokemon":offered,"requested_pokemon":requested};trades.value={"2":partial};offerer.value=Pokemon.trade_collection_after({"collection":[offered],"party":["offered"]},"offered",requested);recipient.value={"collection":[requested],"party":["requested"]}
+        recovered=await cog.settle_trade(2,recovering=True);self.assertEqual(recovered["state"],"completed");self.assertEqual([raw["instance_id"] for raw in recipient.value["collection"]],["offered"])
+
+    async def test_trade_view_limits_acceptance_to_recipient(self):
+        view=TradeView(SimpleNamespace(),7,10,20);outsider=SimpleNamespace(user=SimpleNamespace(id=30),response=SimpleNamespace(send_message=AsyncMock()))
+        self.assertFalse(await view.interaction_check(outsider));outsider.response.send_message.assert_awaited_once()
+        recipient=SimpleNamespace(user=SimpleNamespace(id=20));self.assertTrue(await view.interaction_check(recipient))
+
+    async def test_trade_command_persists_exact_offer_and_expiry_removes_controls(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        offered=OwnedPokemon.create("offered",4,5,seed=1).raw();requested=OwnedPokemon.create("requested",7,6,seed=2).raw();sections={10:StoredSection({"collection":[offered],"party":["offered"]}),20:StoredSection({"collection":[requested],"party":["requested"]})};trades=StoredValue({});next_trade=StoredValue(1)
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades,next_trade=next_trade,user=lambda user:sections[user.id]);message=SimpleNamespace(id=99);author=SimpleNamespace(id=10,display_name="Red",mention="<@10>",bot=False);member=SimpleNamespace(id=20,display_name="Blue",mention="<@20>",bot=False);ctx=SimpleNamespace(author=author,guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=2),send=AsyncMock(return_value=message))
+        await Pokemon.trade.callback(cog,ctx,member,1,1);record=trades.value["1"]
+        self.assertEqual((record["offered_id"],record["requested_id"],record["message_id"]),("offered","requested",99));self.assertIsInstance(ctx.send.await_args.kwargs["view"],TradeView)
+        edited=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=edited));cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel)
+        await cog.expire_trades(datetime.fromisoformat(record["expires_at"])+timedelta(seconds=1));self.assertEqual(trades.value["1"]["state"],"expired");edited.edit.assert_awaited_once_with(content="This Pokémon trade offer expired.",view=None)
+
+    async def test_player_deletion_cancels_pending_trades(self):
+        trades=StoredValue({"1":{"state":"offered","offerer_id":10,"recipient_id":20}});section=StoredSection({"collection":[]});encounters=StoredValue({});cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:section,encounters=encounters)
+        await cog.reset_player_data(10);self.assertEqual(trades.value["1"]["state"],"cancelled_deleted_user");self.assertEqual(section.value,{})
 
     async def test_configured_center_restores_party_only(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
