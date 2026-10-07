@@ -61,7 +61,7 @@ class GMod(commands.Cog):
     """Monitor Garry's Mod servers and publish official Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.0.1"
 
     guild_defaults = {
         "servers": {},
@@ -439,6 +439,7 @@ class GMod(commands.Cog):
 
     @gmodset.command(name="info", aliases=["status"])
     async def gmodset_info(self, ctx):
+        """Show current GMod server-monitoring and Steam-update settings."""
         settings = await self.config.guild(ctx.guild).all()
         status_channel = ctx.guild.get_channel_or_thread(settings["status_channel_id"]) if settings["status_channel_id"] else None
         updates_channel = ctx.guild.get_channel_or_thread(settings["updates_channel_id"]) if settings["updates_channel_id"] else None
@@ -481,6 +482,7 @@ class GMod(commands.Cog):
 
     @gmodset.command(name="remove")
     async def gmodset_remove(self, ctx, name: str):
+        """Remove a configured GMod server."""
         name = name.casefold().strip()
         group = self.config.guild(ctx.guild)
         removed = False
@@ -495,6 +497,7 @@ class GMod(commands.Cog):
 
     @gmodset.command(name="default")
     async def gmodset_default(self, ctx, name: str):
+        """Choose the default server used by public GMod commands."""
         name = name.casefold().strip()
         if name not in await self.config.guild(ctx.guild).servers():
             await ctx.send("That server is not configured.")
@@ -504,6 +507,7 @@ class GMod(commands.Cog):
 
     @gmodset.command(name="statuschannel")
     async def gmodset_statuschannel(self, ctx, channel: Optional[discord.TextChannel] = None):
+        """Set the outage/recovery channel; omit it to stop monitoring and clear it."""
         if channel and not can_user_send_messages_in(ctx.guild.me, channel):
             await ctx.send("I cannot send messages in that channel.")
             return
@@ -519,6 +523,7 @@ class GMod(commands.Cog):
 
     @gmodset.command(name="monitoring")
     async def gmodset_monitoring(self, ctx, enabled: bool):
+        """Start or stop server outage/recovery monitoring."""
         group = self.config.guild(ctx.guild)
         if enabled and not await group.status_channel_id():
             await ctx.send("Set a status channel first.")
@@ -533,6 +538,7 @@ class GMod(commands.Cog):
 
     @gmodset.command(name="statusinterval")
     async def gmodset_statusinterval(self, ctx, minutes: int):
+        """Set the server-status polling interval from 5 to 1,440 minutes."""
         if not MIN_INTERVAL_MINUTES <= minutes <= MAX_INTERVAL_MINUTES:
             await ctx.send(f"Choose {MIN_INTERVAL_MINUTES} to {MAX_INTERVAL_MINUTES} minutes.")
             return
@@ -541,11 +547,13 @@ class GMod(commands.Cog):
 
     @gmodset.command(name="statusrole")
     async def gmodset_statusrole(self, ctx, role: Optional[discord.Role] = None):
+        """Set the optional role mentioned for status changes; omit it to clear."""
         await self.config.guild(ctx.guild).status_role_id.set(role.id if role else None)
         await ctx.send(f"Status changes will mention {role.mention}." if role else "Status role cleared.")
 
     @gmodset.command(name="updateschannel")
     async def gmodset_updateschannel(self, ctx, channel: Optional[discord.TextChannel] = None):
+        """Set the Steam-news channel; omit it to stop posting and clear it."""
         group = self.config.guild(ctx.guild)
         if channel is None:
             await group.updates_enabled.set(False)
@@ -567,13 +575,26 @@ class GMod(commands.Cog):
 
     @gmodset.group(name="updates", invoke_without_command=True)
     async def gmodset_updates(self, ctx):
+        """Show whether automatic official Steam-news posting is running."""
         running = await self.config.guild(ctx.guild).updates_enabled()
         await ctx.send(f"Automatic GMod Steam updates are {'running' if running else 'stopped'}.")
 
     @gmodset_updates.command(name="start")
-    async def gmodset_updates_start(self, ctx):
+    async def gmodset_updates_start(self, ctx, recent_posts: int = 0):
+        """Start automatic posting, optionally backfilling 2 to 10 recent posts."""
         group = self.config.guild(ctx.guild)
-        if not await group.updates_channel_id():
+        if recent_posts and not 2 <= recent_posts <= 10:
+            await ctx.send("Choose between 2 and 10 recent posts, or omit the number for no backfill.")
+            return
+        if await group.updates_enabled():
+            await ctx.send(
+                "Automatic GMod Steam posting is already running. Stop it before starting with a backfill."
+                if recent_posts
+                else "Automatic GMod Steam posting is already running."
+            )
+            return
+        channel_id = await group.updates_channel_id()
+        if not channel_id:
             await ctx.send("Set an updates channel first.")
             return
         if not await group.updates_posted_ids():
@@ -582,21 +603,51 @@ class GMod(commands.Cog):
             except SteamNewsError as error:
                 await ctx.send(f"Automatic posting was not started: {error}")
                 return
+        published = 0
+        if recent_posts:
+            channel = await self.get_channel(ctx.guild, channel_id)
+            if channel is None:
+                await ctx.send("Automatic posting was not started because the updates channel is unavailable.")
+                return
+            try:
+                selected = recent_items(
+                    await (await self.steam_client()).fetch(count=100), recent_posts
+                )
+                for index, item in enumerate(selected):
+                    await channel.send(
+                        embed=self.news_embed(item),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    published += 1
+                    if index < len(selected) - 1:
+                        await asyncio.sleep(1)
+            except SteamNewsError as error:
+                await ctx.send(f"Automatic posting was not started: {error}")
+                return
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                await ctx.send("Automatic posting was not started because recent posts could not be published.")
+                return
         await group.updates_enabled.set(True)
-        await ctx.send("Automatic GMod Steam update posting is now running.")
+        message = "Automatic GMod Steam update posting is now running."
+        if published:
+            message += f" Published {published} recent post(s), oldest to newest, without role mentions."
+        await ctx.send(message)
 
     @gmodset_updates.command(name="stop")
     async def gmodset_updates_stop(self, ctx):
+        """Stop automatic official Steam-news posting."""
         await self.config.guild(ctx.guild).updates_enabled.set(False)
         await ctx.send("Automatic GMod Steam update posting is now stopped.")
 
     @gmodset.command(name="updatesrole")
     async def gmodset_updatesrole(self, ctx, role: Optional[discord.Role] = None):
+        """Set the optional role mentioned for new Steam posts; omit it to clear."""
         await self.config.guild(ctx.guild).updates_role_id.set(role.id if role else None)
         await ctx.send(f"GMod updates will mention {role.mention}." if role else "Updates role cleared.")
 
     @gmodset.command(name="updatesinterval")
     async def gmodset_updatesinterval(self, ctx, minutes: int):
+        """Set the Steam-news polling interval from 5 to 1,440 minutes."""
         if not MIN_INTERVAL_MINUTES <= minutes <= MAX_INTERVAL_MINUTES:
             await ctx.send(f"Choose {MIN_INTERVAL_MINUTES} to {MAX_INTERVAL_MINUTES} minutes.")
             return
@@ -605,6 +656,7 @@ class GMod(commands.Cog):
 
     @gmodset.command(name="updatescheck")
     async def gmodset_updatescheck(self, ctx):
+        """Check Steam now and publish any unseen official announcements."""
         try:
             sent = await self.poll_updates(ctx.guild, force=True)
         except SteamNewsError as error:

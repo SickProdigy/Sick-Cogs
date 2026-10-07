@@ -1,7 +1,7 @@
 # GMod
 
 GMod provides safe Garry's Mod server status cards and optional announcement channels for server
-state changes and official Garry's Mod Steam news. Version 1.0.0 intentionally has no RCON, console,
+state changes and official Garry's Mod Steam news. Version 1.0.1 intentionally has no RCON, console,
 ban, kick, file, or Workshop-management surface.
 
 ## Add a public server
@@ -45,11 +45,13 @@ channel. Last-good server information is retained and clearly marked stale durin
 [p]gmodset updateschannel #gmod-updates
 [p]gmodset updatesrole @GMod
 [p]gmodset updatesinterval 10
-[p]gmodset updates start
+[p]gmodset updates start [recent-posts]
 ```
 
 Choosing the channel seeds the current official Steam items so setup does not flood old posts.
 Future Garry's Mod Steam announcements are posted once, oldest to newest, across reloads and restarts.
+
+Pass a number from 2 to 10 to `updates start` to backfill that many recent official posts, oldest to newest, without role mentions. Stop automatic posting before requesting a backfill.
 
 Use `[p]gmod updates [count]` to browse recent official posts and
 `[p]gmodset updatescheck` to check immediately.
