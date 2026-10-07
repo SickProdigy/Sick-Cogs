@@ -15,7 +15,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,CenterCollectView,TradeView,GymChallengeView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,CenterCollectView,TradeView,GymChallengeView,TradeCollectionView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -205,7 +205,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.50.2";__author__="SickProdigy"
+    __version__="0.51.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1081,7 +1081,7 @@ class Pokemon(commands.Cog):
     def sorted_collection(conf):
         return sorted(conf.get("collection",[]),key=lambda raw:((raw.get("nickname") or SPECIES[raw["species_id"]].name).casefold(),raw["species_id"],raw["instance_id"]))
 
-    async def rendered_collection(self,user,page=1):
+    async def rendered_collection(self,user,page=1,manage=True):
         conf=await self.config.user(user).all();ordered=self.sorted_collection(conf);total=len(ordered)
         pages=max(1,(total+COLLECTION_PAGE_SIZE-1)//COLLECTION_PAGE_SIZE);page=max(1,min(int(page),pages));start=(page-1)*COLLECTION_PAGE_SIZE
         party_slots={identity:index+1 for index,identity in enumerate(conf.get("party",[])[:6])};raw_items=[dict(raw) for raw in ordered[start:start+COLLECTION_PAGE_SIZE]]
@@ -1094,7 +1094,7 @@ class Pokemon(commands.Cog):
             lines.append(f"{number}. {party}{marker}{raw.get('nickname') or species.name} · Lv. {raw['level']}")
         trainer=getattr(user,"display_name",getattr(user,"name",str(user)))
         embed=discord.Embed(title=f"{trainer}'s Collection · {page}/{pages}",description="\n".join(lines) or "Empty",color=discord.Color.gold())
-        embed.set_footer(text=f"{total}/{MAX_COLLECTION} Pokémon · Select one below to manage your party")
+        embed.set_footer(text=f"{total}/{MAX_COLLECTION} Pokémon" + (" · Select one below to manage your party" if manage else " · Use these numbers when proposing a trade"))
         try:
             image=await self.renderer.collection_card(items,page,pages,total,trainer,[raw.get("party_slot") for raw in raw_items]);embed.set_image(url="attachment://collection.png")
             files=[discord.File(image,filename="collection.png")]
@@ -1157,7 +1157,7 @@ class Pokemon(commands.Cog):
     async def trade(self,ctx,member:discord.Member=None,your_slot:int=None,their_slot:int=None):
         """Offer an exact Pokémon-for-Pokémon trade."""
         if member is None or your_slot is None or their_slot is None:
-            await ctx.send("Use `pokemon trade @trainer <your collection number> <their collection number>`. Both Pokémon are shown for confirmation.");return
+            await ctx.send("Use `pokemon trade @trainer <your collection number> <their collection number>`. View another trainer’s numbered choices with `pokemon trade collection @trainer`. Both Pokémon are shown for confirmation.");return
         if member.id==ctx.author.id:await ctx.send("Choose another trainer to trade with.");return
         if member.bot:await ctx.send("Bots cannot own or trade Pokémon.");return
         first=min(ctx.author.id,member.id);second=max(ctx.author.id,member.id)
@@ -1176,6 +1176,14 @@ class Pokemon(commands.Cog):
         async with self.lock("trades"):
             trades=await self.config.trades();current=trades.get(str(trade_id))
             if current and current.get("state")=="offered":current["message_id"]=message.id;trades[str(trade_id)]=current;await self.config.trades.set(trades)
+
+    @trade.command(name="collection")
+    async def trade_collection(self,ctx,member:discord.Member,page:int=1):
+        """View another trainer’s numbered Pokémon for a trade."""
+        conf=await self.config.user(member).all()
+        if not conf.get("collection"):await ctx.send(f"{member.display_name} has no Pokémon to trade.");return
+        embed,files,page,pages,items=await self.rendered_collection(member,page,manage=False)
+        await ctx.send(embed=embed,files=files,view=TradeCollectionView(self,ctx.author.id,member,page,pages))
 
     @trade.command(name="cancel")
     async def trade_cancel(self,ctx,trade_id:int):
