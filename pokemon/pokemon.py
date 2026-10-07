@@ -205,7 +205,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.49.0";__author__="SickProdigy"
+    __version__="0.49.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1073,16 +1073,19 @@ class Pokemon(commands.Cog):
     async def rendered_collection(self,user,page=1):
         conf=await self.config.user(user).all();ordered=self.sorted_collection(conf);total=len(ordered)
         pages=max(1,(total+COLLECTION_PAGE_SIZE-1)//COLLECTION_PAGE_SIZE);page=max(1,min(int(page),pages));start=(page-1)*COLLECTION_PAGE_SIZE
-        raw_items=ordered[start:start+COLLECTION_PAGE_SIZE];items=[OwnedPokemon.from_raw(raw) for raw in raw_items]
+        party_slots={identity:index+1 for index,identity in enumerate(conf.get("party",[])[:6])};raw_items=[dict(raw) for raw in ordered[start:start+COLLECTION_PAGE_SIZE]]
+        for raw in raw_items:raw["party_slot"]=party_slots.get(raw.get("instance_id"))
+        items=[OwnedPokemon.from_raw(raw) for raw in raw_items]
         numbered=list(enumerate(raw_items,start+1));lines=[]
         for number,raw in numbered:
             species=SPECIES[raw["species_id"]];marker="Shiny " if raw.get("shiny") else ""
-            lines.append(f"{number}. {marker}{raw.get('nickname') or species.name} · Lv. {raw['level']}")
+            party=f"P{raw['party_slot']} · " if raw.get("party_slot") else ""
+            lines.append(f"{number}. {party}{marker}{raw.get('nickname') or species.name} · Lv. {raw['level']}")
         trainer=getattr(user,"display_name",getattr(user,"name",str(user)))
         embed=discord.Embed(title=f"{trainer}'s Collection · {page}/{pages}",description="\n".join(lines) or "Empty",color=discord.Color.gold())
         embed.set_footer(text=f"{total}/{MAX_COLLECTION} Pokémon · Select one below to manage your party")
         try:
-            image=await self.renderer.collection_card(items,page,pages,total,trainer);embed.set_image(url="attachment://collection.png")
+            image=await self.renderer.collection_card(items,page,pages,total,trainer,[raw.get("party_slot") for raw in raw_items]);embed.set_image(url="attachment://collection.png")
             files=[discord.File(image,filename="collection.png")]
         except RenderError:
             log.exception("Collection card rendering failed");files=[]
