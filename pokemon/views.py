@@ -131,22 +131,23 @@ class CollectionBrowserView(discord.ui.View):
     async def next(self,interaction,button):await self.refresh(interaction,self.page+1)
 
 class PartyPlacementButton(discord.ui.Button):
-    def __init__(self,cog,user_id,identity,target,label,row):
+    def __init__(self,cog,user_id,identity,target,label,row,source_message=None):
         super().__init__(label=label,style=discord.ButtonStyle.success if target is None else discord.ButtonStyle.primary,row=row)
-        self.cog=cog;self.user_id=user_id;self.identity=identity;self.target=target
+        self.cog=cog;self.user_id=user_id;self.identity=identity;self.target=target;self.source_message=source_message
     async def callback(self,interaction):
-        await self.cog.place_collection_pokemon(interaction,self.identity,self.target)
+        await self.cog.place_collection_pokemon(interaction,self.identity,self.target,self.source_message)
 
 class PartyPlacementView(discord.ui.View):
-    def __init__(self,cog,user_id,identity,party,owned):
+    def __init__(self,cog,user_id,identity,party,owned,source_message=None):
         super().__init__(timeout=120);self.user_id=user_id
         moving=identity in party
-        if not moving and len(party)<6:self.add_item(PartyPlacementButton(cog,user_id,identity,None,"Add to open slot",0))
+        if not moving and len(party)<6:self.add_item(PartyPlacementButton(cog,user_id,identity,None,"Add to open slot",0,source_message))
         for index,target in enumerate(party):
-            raw=owned.get(target);name=SPECIES[raw["species_id"]].name if raw else "Empty"
+            raw=owned.get(target);name=(raw.get("nickname") or SPECIES[raw["species_id"]].name) if raw else "Empty";level=f" · Lv.{raw['level']}" if raw else ""
             if target==identity:continue
             action="Move to" if moving else "Replace"
-            self.add_item(PartyPlacementButton(cog,user_id,identity,target,f"{action} {index+1}: {name}",1+index//3))
+            label=f"{action} {index+1}: {name}{level}"
+            self.add_item(PartyPlacementButton(cog,user_id,identity,target,label[:80],1+index//3,source_message))
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This party choice belongs to another trainer.",ephemeral=True);return False

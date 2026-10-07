@@ -205,7 +205,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.49.2";__author__="SickProdigy"
+    __version__="0.49.3";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1103,9 +1103,9 @@ class Pokemon(commands.Cog):
         conf=await self.config.user(interaction.user).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};raw=owned.get(identity)
         if not raw:await interaction.response.send_message("That Pokémon is no longer in your collection.",ephemeral=True);return
         name=raw.get("nickname") or SPECIES[raw["species_id"]].name
-        await interaction.response.send_message(f"Where should **{name}** go?",view=PartyPlacementView(self,interaction.user.id,identity,list(conf.get("party",[])),owned),ephemeral=True)
+        await interaction.response.send_message(f"Where should **{name} · Lv.{raw['level']}** go?",view=PartyPlacementView(self,interaction.user.id,identity,list(conf.get("party",[])),owned,getattr(interaction,"message",None)),ephemeral=True)
 
-    async def place_collection_pokemon(self,interaction,identity,target=None):
+    async def place_collection_pokemon(self,interaction,identity,target=None,source_message=None):
         async with self.lock(("user",interaction.user.id)):
             conf=await self.config.user(interaction.user).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])}
             if identity not in owned:await interaction.response.edit_message(content="That Pokémon is no longer in your collection.",view=None);return
@@ -1124,6 +1124,13 @@ class Pokemon(commands.Cog):
                     party[source],party[slot]=party[slot],party[source];message=f"Moved **{name}** to party slot {slot+1}; **{displaced}** moved to slot {source+1}."
             else:await interaction.response.edit_message(content="That party slot is no longer available.",view=None);return
             conf["party"]=party;await self.config.user(interaction.user).set(conf)
+        if source_message is not None:
+            await interaction.response.defer()
+            try:await source_message.delete()
+            except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
+            try:await interaction.delete_original_response()
+            except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
+            return
         await interaction.response.edit_message(content=message,view=None)
 
     @staticmethod
