@@ -1819,27 +1819,27 @@ class Pokemon(commands.Cog):
     @pokemon_set.command(name="removechannel")
     async def remove_channel(self,ctx,channel:discord.TextChannel):
         """Stop wild encounters in a channel."""
-        channels=await self.config.guild(ctx.guild).channels()
-        if channel.id in channels:channels.remove(channel.id)
-        await self.config.guild(ctx.guild).channels.set(channels);await ctx.send(f"Removed {channel.mention}.")
+        section=self.config.guild(ctx.guild);channels=await section.channels();previous=len(channels);removed=channel.id in channels
+        if removed:channels.remove(channel.id)
+        action="removed from" if removed else "not present in";await section.channels.set(channels);await ctx.send(f"This server: {channel.mention} was {action} the spawn-channel list. Configured channels: **{previous} → {len(channels)}**.")
     @pokemon_set.command(name="center")
     async def set_center(self,ctx,channel:discord.TextChannel):
         """Designate the server Pokémon Center."""
-        await self.config.guild(ctx.guild).center_channel.set(channel.id)
-        await ctx.send(f"{channel.mention} is now this server's Pokémon Center.")
+        section=self.config.guild(ctx.guild);previous=await section.center_channel();old=f"<#{previous}>" if previous else "not set";await section.center_channel.set(channel.id)
+        await ctx.send(f"This server: Pokémon Center changed from **{old}** to {channel.mention}.")
 
     @pokemon_set.command(name="removecenter")
     async def remove_center(self,ctx):
         """Remove the server Pokémon Center."""
-        await self.config.guild(ctx.guild).center_channel.set(None)
-        await ctx.send("This server's Pokémon Center was removed.")
+        section=self.config.guild(ctx.guild);previous=await section.center_channel();old=f"<#{previous}>" if previous else "not set";await section.center_channel.set(None)
+        await ctx.send(f"This server: Pokémon Center changed from **{old}** to **not set**.")
 
     @pokemon_owner_set.command(name="centercooldown")
     async def center_cooldown(self,ctx,minutes:int):
         """Set the bot-wide free Pokémon Center cooldown."""
         if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes.");return
-        await self.config.center_cooldown.set(minutes*60)
-        await ctx.send(f"Free Pokémon Center healing now has a {minutes}-minute per-user cooldown.")
+        previous=max(60,int(await self.config.center_cooldown()))//60;await self.config.center_cooldown.set(minutes*60)
+        await ctx.send(f"Bot-wide Pokémon Center cooldown changed from **{previous}m** to **{minutes}m** per user. This affects every server.")
 
     @pokemon_set.command(name="status",aliases=["settings"])
     async def spawn_status(self,ctx):
@@ -1873,20 +1873,20 @@ class Pokemon(commands.Cog):
         """Delete expired wild cards or keep their dimmed result."""
         mode=mode.casefold()
         if mode not in {"delete","keep"}:await ctx.send("Choose delete or keep.");return
-        await self.config.guild(ctx.guild).expired_card_mode.set(mode)
-        await ctx.send("Expired unattended encounter cards will be deleted." if mode=="delete" else "Expired unattended encounter cards will remain as dimmed got-away cards.")
+        section=self.config.guild(ctx.guild);previous=await section.expired_card_mode();await section.expired_card_mode.set(mode);effect="deleted" if mode=="delete" else "kept as dimmed got-away cards"
+        await ctx.send(f"This server: expired unattended cards changed from **{previous}** to **{mode}**; they will be {effect}.")
 
     @pokemon_set.command(name="mode")
     async def spawn_mode(self,ctx,mode:str):
         """Choose timed spawning or the optional activity system."""
         mode=mode.casefold()
         if mode not in {"timed","activity"}:await ctx.send("Choose timed or activity.");return
-        section=self.config.guild(ctx.guild);await section.spawn_mode.set(mode)
+        section=self.config.guild(ctx.guild);previous=await section.spawn_mode();await section.spawn_mode.set(mode)
         if mode=="timed":
             conf=await section.all();policy=await self.config.all();minutes=effective_timer_minutes(conf,policy);due=jittered_spawn_due(datetime.now(timezone.utc),minutes);await section.next_spawn_at.set(due.isoformat())
-            await ctx.send(f"Timed encounters enabled around every {minutes} minutes with jitter. The next encounter is <t:{int(due.timestamp())}:R>.")
+            await ctx.send(f"This server: spawn mode changed from **{previous}** to **timed**. Encounters run around every **{minutes}m** with jitter; the next is <t:{int(due.timestamp())}:R>.")
         else:
-            await section.next_spawn_at.set(None);await ctx.send("Activity-based encounters enabled. Timed spawning is paused.")
+            await section.next_spawn_at.set(None);await ctx.send(f"This server: spawn mode changed from **{previous}** to **activity**. Timed spawning is paused.")
 
     async def set_spawn_timer(self,ctx,minutes,owner_override=False):
         section=self.config.guild(ctx.guild);before=await section.all();policy=await self.config.all();previous=effective_timer_minutes(before,policy);await section.timer_minutes.set(minutes);await section.timer_owner_override.set(owner_override)
@@ -1907,7 +1907,7 @@ class Pokemon(commands.Cog):
     async def minimum_spawn_timer(self,ctx,minutes:int):
         """Set the fastest timer ordinary server administrators may choose."""
         if not SERVER_TIMER_MINUTES[0]<=minutes<=SERVER_TIMER_MINUTES[1]:await ctx.send("Use 1–10080 minutes.");return
-        await self.config.minimum_timer.set(minutes);await ctx.send(f"Server administrators may now set encounter timers from {minutes}–{SERVER_TIMER_MINUTES[1]} minutes.")
+        previous=int(await self.config.minimum_timer());await self.config.minimum_timer.set(minutes);await ctx.send(f"Bot-wide server-admin timer floor changed from **{previous}m** to **{minutes}m**. Administrators may choose **{minutes}–{SERVER_TIMER_MINUTES[1]:,}m**; existing owner overrides are unchanged.")
 
     @pokemon_owner_set.command(name="timer")
     async def owner_spawn_timer(self,ctx,minutes:int):
@@ -1920,22 +1920,22 @@ class Pokemon(commands.Cog):
         """Set this server’s simultaneous encounters within the bot limit."""
         maximum=max(1,min(5,int(await self.config.maximum_concurrency())))
         if not 1<=limit<=maximum:await ctx.send(f"Use 1–{maximum} active encounters.");return
-        section=self.config.guild(ctx.guild);await section.max_active_encounters.set(limit);await section.concurrency_owner_override.set(False)
-        await ctx.send(f"This server may now have up to {limit} simultaneous encounters across different channels.")
+        section=self.config.guild(ctx.guild);previous=int(await section.max_active_encounters());await section.max_active_encounters.set(limit);await section.concurrency_owner_override.set(False)
+        await ctx.send(f"This server: simultaneous encounter limit changed from **{previous}** to **{limit}**. It is bounded by the bot-wide administrator ceiling of **{maximum}**.")
 
     @pokemon_owner_set.command(name="concurrency",aliases=["slots"])
     async def owner_spawn_concurrency(self,ctx,limit:int):
         """Override this server’s simultaneous encounter limit."""
         if not 1<=limit<=5:await ctx.send("Use 1–5 active encounters.");return
-        section=self.config.guild(ctx.guild);await section.max_active_encounters.set(limit);await section.concurrency_owner_override.set(True)
-        await ctx.send(f"This server may now have up to {limit} simultaneous encounters across different channels (bot-owner override).")
+        section=self.config.guild(ctx.guild);previous=int(await section.max_active_encounters());await section.max_active_encounters.set(limit);await section.concurrency_owner_override.set(True)
+        await ctx.send(f"Bot-owner override for this server: simultaneous encounter limit changed from **{previous}** to **{limit}**. Other servers and the bot-wide administrator ceiling are unchanged.")
 
     @pokemon_owner_set.command(name="globalconcurrency")
     async def global_concurrency(self,ctx,limit:int):
         """Set the concurrency ceiling for ordinary server administrators."""
         if not 1<=limit<=5:await ctx.send("Use a global concurrency limit from 1–5.");return
-        await self.config.maximum_concurrency.set(limit)
-        await ctx.send(f"Server administrators may now configure up to {limit} simultaneous encounters.")
+        previous=int(await self.config.maximum_concurrency());await self.config.maximum_concurrency.set(limit)
+        await ctx.send(f"Bot-wide server-admin concurrency ceiling changed from **{previous}** to **{limit}** simultaneous encounters. Existing bot-owner server overrides are unchanged.")
 
     @pokemon_set.command(name="pace")
     async def pace(self,ctx,setting:str):
@@ -1943,51 +1943,52 @@ class Pokemon(commands.Cog):
         setting=setting.casefold()
         if setting not in PACE:
             await ctx.send("Choose active, normal, or relaxed.");return
-        policy=await self.config.all();minimum,maximum,cooldown=bounded_pace(*PACE[setting],policy)
-        await self.config.guild(ctx.guild).threshold_min.set(minimum)
-        await self.config.guild(ctx.guild).threshold_max.set(maximum)
-        await self.config.guild(ctx.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1))
-        await self.config.guild(ctx.guild).spawn_cooldown.set(cooldown)
-        await self.config.guild(ctx.guild).pace.set(setting)
-        await ctx.send(f"Encounter pace set to {setting}: {minimum}–{maximum} activity points, {cooldown}s cooldown.")
+        policy=await self.config.all();section=self.config.guild(ctx.guild);previous=await section.pace();minimum,maximum,cooldown=bounded_pace(*PACE[setting],policy)
+        await section.threshold_min.set(minimum)
+        await section.threshold_max.set(maximum)
+        await section.threshold.set(random.SystemRandom().randrange(minimum,maximum+1))
+        await section.spawn_cooldown.set(cooldown)
+        await section.pace.set(setting)
+        await ctx.send(f"This server: activity pace changed from **{previous}** to **{setting}** ({minimum}–{maximum} points, {cooldown}s cooldown). Bot-wide floors still apply.")
 
     @pokemon_set.command(name="threshold")
     async def threshold(self,ctx,minimum:int,maximum:int):
         """Set a slower custom activity threshold."""
         policy=await self.config.all();floor=policy["minimum_threshold"]
         if not floor<=minimum<=maximum<=500:await ctx.send(f"Use {floor}–500 with minimum <= maximum.");return
-        await self.config.guild(ctx.guild).pace.set("custom")
-        await self.config.guild(ctx.guild).threshold_min.set(minimum);await self.config.guild(ctx.guild).threshold_max.set(maximum)
-        await self.config.guild(ctx.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1));await ctx.send("Spawn threshold updated.")
+        section=self.config.guild(ctx.guild);old_min=int(await section.threshold_min());old_max=int(await section.threshold_max());await section.pace.set("custom")
+        await section.threshold_min.set(minimum);await section.threshold_max.set(maximum)
+        await section.threshold.set(random.SystemRandom().randrange(minimum,maximum+1));await ctx.send(f"This server: activity threshold changed from **{old_min}–{old_max}** to **{minimum}–{maximum} points**. Bot-wide floor: **{floor}**.")
     @pokemon_set.command(name="cooldown")
     async def cooldown(self,ctx,seconds:int):
         """Set a slower custom spawn cooldown."""
         policy=await self.config.all();floor=policy["minimum_cooldown"]
         if not floor<=seconds<=86400:await ctx.send(f"Use {floor}–86400 seconds.");return
-        await self.config.guild(ctx.guild).pace.set("custom")
-        await self.config.guild(ctx.guild).spawn_cooldown.set(seconds);await ctx.send("Spawn cooldown updated.")
+        section=self.config.guild(ctx.guild);previous=int(await section.spawn_cooldown());await section.pace.set("custom")
+        await section.spawn_cooldown.set(seconds);await ctx.send(f"This server: activity spawn cooldown changed from **{previous}s** to **{seconds}s**. Bot-wide floor: **{floor}s**.")
     @pokemon_set.command(name="battleexpiry")
     async def battle_expiry(self,ctx,battle_minutes:int):
         """Set the server battle time limit."""
         if not 5<=battle_minutes<=1440:await ctx.send("Use 5–1440 minutes.");return
-        await self.config.guild(ctx.guild).battle_timeout.set(battle_minutes*60);await ctx.send("Battle expiry updated.")
+        section=self.config.guild(ctx.guild);previous=max(1,int(await section.battle_timeout())//60);await section.battle_timeout.set(battle_minutes*60);await ctx.send(f"This server: battle lifetime changed from **{previous}m** to **{battle_minutes}m**.")
     @pokemon_set.command(name="encountertime")
     async def server_encounter_time(self,ctx,value:str):
         """Set or inherit this server's wild encounter lifetime."""
         policy=await self.config.all();minimum=effective_encounter_timeout({"encounter_timeout":0},policy)//60;maximum=effective_encounter_timeout({"encounter_timeout":10**9},policy)//60
+        section=self.config.guild(ctx.guild);previous_raw=await section.encounter_timeout();previous=effective_encounter_timeout({"encounter_timeout":previous_raw},policy)//60
         if value.casefold() in {"default","inherit","reset"}:
-            await self.config.guild(ctx.guild).encounter_timeout.set(None);default=effective_encounter_timeout({"encounter_timeout":None},policy)//60
-            await ctx.send(f"This server now inherits the bot-wide {default}-minute encounter lifetime.");return
+            await section.encounter_timeout.set(None);default=effective_encounter_timeout({"encounter_timeout":None},policy)//60
+            await ctx.send(f"This server: wild encounter lifetime changed from **{previous}m** to the inherited bot-wide default of **{default}m**.");return
         try:minutes=int(value)
         except ValueError:await ctx.send(f"Use {minimum}–{maximum} minutes, or `default`.");return
         if not minimum<=minutes<=maximum:await ctx.send(f"Use {minimum}–{maximum} minutes, or `default`.");return
-        await self.config.guild(ctx.guild).encounter_timeout.set(minutes*60);await ctx.send(f"This server's wild encounter lifetime is now {minutes} minutes.")
+        await section.encounter_timeout.set(minutes*60);await ctx.send(f"This server: wild encounter lifetime changed from **{previous}m** to a **{minutes}m server override**. Bot-wide defaults and limits are unchanged.")
     @pokemon_set.command(name="generations")
     async def generations(self,ctx,*values:int):
         """Choose from bot-enabled generations."""
         selected=sorted(set(values));allowed=await self.config.allowed_generations()
         if not selected or not set(selected)<=set(allowed):await ctx.send(f"Choose from bot-enabled generations: {', '.join(map(str,allowed))}.");return
-        await self.config.guild(ctx.guild).generations.set(selected);await ctx.send(f"Enabled generations: {', '.join(map(str,selected))}.")
+        section=self.config.guild(ctx.guild);previous=sorted(set(await section.generations()));await section.generations.set(selected);old=", ".join(map(str,previous)) or "none";new=", ".join(map(str,selected));await ctx.send(f"This server: enabled generations changed from **{old}** to **{new}**. Bot-wide allowed generations are unchanged.")
     @pokemon_set.command(name="spawn")
     async def force_spawn(self,ctx,target:str=None):
         """Trigger a test encounter; bot owners may use `shiny`."""
@@ -2024,19 +2025,19 @@ class Pokemon(commands.Cog):
             current_guild=await self.config.vip_guild_id();current_role=await self.config.vip_role_id();await ctx.send(f"VIP guild ID: **{current_guild or 'not set'}** · role ID: **{current_role or 'not set'}**");return
         guild=self.bot.get_guild(guild_id);role=guild.get_role(role_id) if guild else None
         if guild is None or role is None:await ctx.send("The bot must be in that guild and the role ID must exist there.");return
-        await self.config.vip_guild_id.set(guild_id);await self.config.vip_role_id.set(role_id);self.vip_cache.clear();await ctx.send(f"Global Pokémon VIP benefits now use **{guild.name}** and the **{role.name}** role.")
+        previous_guild=await self.config.vip_guild_id();previous_role=await self.config.vip_role_id();old_guild=previous_guild or "not set";old_role=previous_role or "not set";await self.config.vip_guild_id.set(guild_id);await self.config.vip_role_id.set(role_id);self.vip_cache.clear();await ctx.send(f"Bot-wide VIP source changed from guild **{old_guild}** / role **{old_role}** to **{guild.name}** / **{role.name}**. VIP capacity and monthly packs now use this role.")
 
     @pokemon_owner_set.command(name="vipclear")
     async def vip_clear(self,ctx):
         """Disable the trusted VIP role without removing prior rewards or Pokémon."""
-        await self.config.vip_guild_id.set(None);await self.config.vip_role_id.set(None);self.vip_cache.clear();await ctx.send("Pokémon VIP benefits are disabled. Existing collections and delivered supplies were not removed.")
+        previous_guild=await self.config.vip_guild_id();previous_role=await self.config.vip_role_id();old_guild=previous_guild or "not set";old_role=previous_role or "not set";await self.config.vip_guild_id.set(None);await self.config.vip_role_id.set(None);self.vip_cache.clear();await ctx.send(f"Bot-wide VIP source changed from guild **{old_guild}** / role **{old_role}** to **disabled**. Existing collections and delivered supplies were not removed.")
 
     @pokemon_owner_set.command(name="vippack")
     async def vip_pack(self,ctx,balls:int,great_balls:int,ultra_balls:int,potions:int,revives:int):
         """Set the monthly VIP supply pack."""
         values=(balls,great_balls,ultra_balls,potions,revives)
         if any(value<0 or value>1000 for value in values) or not any(values):await ctx.send("Use five amounts from 0–1000, with at least one item.");return
-        pack=dict(zip(("balls","great_ball","ultra_ball","potion","revive"),values));await self.config.vip_monthly_pack.set(pack);await ctx.send("Monthly Pokémon VIP pack: "+reward_summary(pack)+".")
+        previous=vip_pack_values(await self.config.vip_monthly_pack());pack=dict(zip(("balls","great_ball","ultra_ball","potion","revive"),values));await self.config.vip_monthly_pack.set(pack);await ctx.send(f"Bot-wide monthly VIP pack changed from **{reward_summary(previous)}** to **{reward_summary(pack)}**. Previously delivered packs are unchanged.")
 
     @pokemon_owner_set.command(name="martprice")
     async def mart_price(self,ctx,item:str,price:int):
@@ -2044,8 +2045,8 @@ class Pokemon(commands.Cog):
         key=mart_item_key(item)
         if not key:await ctx.send("Choose pokeball, greatball, ultraball, potion, or revive.");return
         if not 1<=price<=1_000_000_000:await ctx.send("Use a price from 1 to 1,000,000,000 credits.");return
-        prices=mart_prices(await self.config.mart_prices());prices[key]=price;await self.config.mart_prices.set(prices)
-        await ctx.send(f"{MART_ITEMS[key][0]} now costs {price:,} credits.")
+        prices=mart_prices(await self.config.mart_prices());previous=prices[key];prices[key]=price;await self.config.mart_prices.set(prices)
+        await ctx.send(f"Bot-wide Poké Mart price for {MART_ITEMS[key][0]} changed from **{previous:,}** to **{price:,} credits**. This affects every server using this bot.")
 
     @pokemon_owner_set.command(name="pokedexstyle")
     async def default_pokedex_style(self,ctx,style:str=None):
@@ -2059,7 +2060,7 @@ class Pokemon(commands.Cog):
             await ctx.send("Unknown style. Choose: "+", ".join(POKEDEX_STYLES)+".")
             return
         await self.config.pokedex_default_style.set(style)
-        await ctx.send(f"Default Pokédex style set to **{POKEDEX_STYLES[style].label}**.")
+        await ctx.send(f"Bot-wide default Pokédex style changed from **{POKEDEX_STYLES[current].label}** to **{POKEDEX_STYLES[style].label}**. Existing personal choices are unchanged.")
 
     @pokemon_owner_set.command(name="globalstatus",aliases=["settings","status"])
     async def global_status(self,ctx):
@@ -2085,40 +2086,40 @@ class Pokemon(commands.Cog):
         """Set the inherited bot-wide wild encounter lifetime."""
         policy=await self.config.all();minimum=max(60,min(900,int(policy.get("minimum_encounter_timeout",60))))//60;maximum=max(minimum*60,min(900,int(policy.get("maximum_encounter_timeout",900))))//60
         if not minimum<=minutes<=maximum:await ctx.send(f"Use {minimum}–{maximum} minutes.");return
-        await self.config.encounter_timeout.set(minutes*60);await ctx.send(f"Bot-wide default wild encounter lifetime set to {minutes} minutes. Servers using `default` inherit it.")
+        previous=effective_encounter_timeout({"encounter_timeout":None},policy)//60;await self.config.encounter_timeout.set(minutes*60);await ctx.send(f"Bot-wide default wild encounter lifetime changed from **{previous}m** to **{minutes}m**. Servers using `default` inherit it; server overrides are unchanged.")
 
     @pokemon_owner_set.command(name="encounterlimits")
     async def encounter_limits(self,ctx,minimum:int,maximum:int):
         """Set server wild-encounter lifetime boundaries."""
         if not 1<=minimum<=maximum<=15:await ctx.send("Use a minimum and maximum from 1–15 minutes.");return
-        await self.config.minimum_encounter_timeout.set(minimum*60);await self.config.maximum_encounter_timeout.set(maximum*60)
-        current=int(await self.config.encounter_timeout());clamped=max(minimum*60,min(maximum*60,current));await self.config.encounter_timeout.set(clamped)
-        await ctx.send(f"Server encounter lifetimes may now be set from {minimum}–{maximum} minutes. Bot-wide default: {clamped//60} minutes.")
+        old_min=int(await self.config.minimum_encounter_timeout())//60;old_max=int(await self.config.maximum_encounter_timeout())//60;current=int(await self.config.encounter_timeout());await self.config.minimum_encounter_timeout.set(minimum*60);await self.config.maximum_encounter_timeout.set(maximum*60)
+        clamped=max(minimum*60,min(maximum*60,current));await self.config.encounter_timeout.set(clamped)
+        clamp_note=f" Default clamped from **{current//60}m** to **{clamped//60}m**." if clamped!=current else f" Default remains **{clamped//60}m**.";await ctx.send(f"Bot-wide server encounter-lifetime range changed from **{old_min}–{old_max}m** to **{minimum}–{maximum}m**.{clamp_note}")
 
     @pokemon_owner_set.command(name="globallimits")
     async def global_limits(self,ctx,minimum_threshold:int,minimum_cooldown:int):
         """Set global spawn-rate floors."""
         if not 5<=minimum_threshold<=500 or not 60<=minimum_cooldown<=86400:await ctx.send("Threshold: 5–500; cooldown: 60–86400 seconds.");return
-        await self.config.minimum_threshold.set(minimum_threshold);await self.config.minimum_cooldown.set(minimum_cooldown);await ctx.send("Global spawn-rate floors updated. Servers may only use slower settings.")
+        old_threshold=int(await self.config.minimum_threshold());old_cooldown=int(await self.config.minimum_cooldown());await self.config.minimum_threshold.set(minimum_threshold);await self.config.minimum_cooldown.set(minimum_cooldown);await ctx.send(f"Bot-wide activity floors changed from **{old_threshold} points / {old_cooldown}s** to **{minimum_threshold} points / {minimum_cooldown}s**. Servers may only use slower settings.")
 
     @pokemon_owner_set.command(name="globalgenerations")
     async def global_generations(self,ctx,*values:int):
         """Set bot-wide available generations."""
         selected=sorted(set(values))
         if not selected or any(value<1 or value>9 for value in selected):await ctx.send("Choose generations 1–9.");return
-        await self.config.allowed_generations.set(selected);await ctx.send(f"Bot-wide generations: {', '.join(map(str,selected))}.")
+        previous=sorted(set(await self.config.allowed_generations()));await self.config.allowed_generations.set(selected);old=", ".join(map(str,previous)) or "none";new=", ".join(map(str,selected));await ctx.send(f"Bot-wide allowed generations changed from **{old}** to **{new}**. Server selections remain configured but are limited by this policy.")
 
     @pokemon_owner_set.command(name="rarity")
     async def rarity(self,ctx,profile:str):
         """Choose the global rarity profile."""
         profile=profile.casefold()
         if profile not in RARITY_PROFILES:await ctx.send("Choose friendly, standard, or challenging.");return
-        await self.config.rarity_profile.set(profile);await ctx.send(f"Global encounter rarity set to {profile}.")
+        previous=await self.config.rarity_profile();await self.config.rarity_profile.set(profile);await ctx.send(f"Bot-wide encounter rarity changed from **{previous}** to **{profile}**. This affects wild species weighting on every server.")
 
     @pokemon_owner_set.command(name="specials")
     async def specials(self,ctx,enabled:bool):
         """Allow or gate special species."""
-        await self.config.allow_special_species.set(enabled);await ctx.send("Special species may appear normally." if enabled else "Legendary and mythical species are event-only.")
+        previous=bool(await self.config.allow_special_species());await self.config.allow_special_species.set(enabled);old="enabled" if previous else "event-only";new="enabled" if enabled else "event-only";await ctx.send(f"Bot-wide special-species policy changed from **{old}** to **{new}**. This affects every server.")
 
     @pokemon_owner_set.command(name="catalogsync")
     async def catalog_sync(self,ctx,generation:int):

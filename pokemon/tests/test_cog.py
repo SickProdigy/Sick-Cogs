@@ -622,7 +622,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         prices=StoredValue({key:value[2] for key,value in MART_ITEMS.items()});cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(mart_prices=prices);ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.mart_price.callback(cog,ctx,"ultraball",450)
         self.assertEqual(prices.value["ultra_ball"],450)
-        ctx.send.assert_awaited_once_with("Ultra Ball now costs 450 credits.")
+        self.assertIn("Bot-wide Poké Mart price",ctx.send.await_args.args[0]);self.assertIn("from **300** to **450 credits**",ctx.send.await_args.args[0])
 
     async def test_pokedex_goals_award_once_at_collection_and_victory_milestones(self):
         current=battle();current.state="won"
@@ -838,7 +838,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cooldown=StoredValue(1800);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(center_cooldown=cooldown);ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.center_cooldown.callback(cog,ctx,45)
         self.assertEqual(cooldown.value,2700)
-        ctx.send.assert_awaited_once_with("Free Pokémon Center healing now has a 45-minute per-user cooldown.")
+        self.assertIn("Bot-wide Pokémon Center cooldown",ctx.send.await_args.args[0]);self.assertIn("from **30m** to **45m**",ctx.send.await_args.args[0])
 
     async def test_finished_battle_persists_hp_and_status(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
@@ -990,13 +990,13 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((slots.value,override.value),(2,False))
         ctx.send.reset_mock();await Pokemon.owner_spawn_concurrency.callback(cog,ctx,5)
         self.assertEqual((slots.value,override.value),(5,True))
-        self.assertIn("bot-owner override",ctx.send.await_args.args[0])
+        self.assertIn("Bot-owner override for this server",ctx.send.await_args.args[0])
 
     async def test_owner_sets_global_concurrency_ceiling(self):
         ceiling=StoredValue(3);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(maximum_concurrency=ceiling);ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.global_concurrency.callback(cog,ctx,2)
         self.assertEqual(ceiling.value,2)
-        ctx.send.assert_awaited_once_with("Server administrators may now configure up to 2 simultaneous encounters.")
+        self.assertIn("Bot-wide server-admin concurrency ceiling",ctx.send.await_args.args[0]);self.assertIn("from **3** to **2**",ctx.send.await_args.args[0])
 
     async def test_global_status_reports_only_complete_bot_wide_policy(self):
         policy={"encounter_timeout":120,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"center_cooldown":1800,"minimum_threshold":8,"minimum_cooldown":120,"maximum_concurrency":3,"minimum_timer":30,"allowed_generations":[1],"rarity_profile":"friendly","allow_special_species":False,"pokedex_default_style":"retro","mart_prices":{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400}}
@@ -1030,7 +1030,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         timeout=StoredValue(None);section=SimpleNamespace(encounter_timeout=timeout);policy={"encounter_timeout":600,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900}
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(all=AsyncMock(return_value=policy),guild=lambda guild:section);ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
         await Pokemon.server_encounter_time.callback(cog,ctx,"2");self.assertEqual(timeout.value,120)
-        await Pokemon.server_encounter_time.callback(cog,ctx,"default");self.assertIsNone(timeout.value);self.assertIn("inherits",ctx.send.await_args.args[0])
+        await Pokemon.server_encounter_time.callback(cog,ctx,"default");self.assertIsNone(timeout.value);self.assertIn("inherited bot-wide default",ctx.send.await_args.args[0])
 
     async def test_bot_owner_controls_encounter_default_and_server_range(self):
         timeout=StoredValue(900);minimum=StoredValue(60);maximum=StoredValue(900);policy={"encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900}
@@ -1118,7 +1118,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx=SimpleNamespace(guild=SimpleNamespace(id=1),send=AsyncMock())
         await Pokemon.expired_cards.callback(cog,ctx,"keep")
         self.assertEqual(setting.value,"keep")
-        ctx.send.assert_awaited_once_with("Expired unattended encounter cards will remain as dimmed got-away cards.")
+        self.assertIn("This server",ctx.send.await_args.args[0]);self.assertIn("from **delete** to **keep**",ctx.send.await_args.args[0])
 
     async def test_expired_unattended_cards_delete_or_keep_dimmed_result(self):
         raw={"guild_id":1,"channel_id":55,"message_id":99,"species_id":25}
