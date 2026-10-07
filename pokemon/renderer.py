@@ -2,9 +2,10 @@
 
 import asyncio
 import io
+import random
 import textwrap
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote,urlparse
 
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -15,6 +16,20 @@ from .models import OwnedPokemon,pokemon_max_hp
 SPRITE_HOST = "raw.githubusercontent.com"
 MAX_SPRITE_BYTES = 2 * 1024 * 1024
 MAX_RENDER_BYTES = 8 * 1024 * 1024
+MAX_COVER_BYTES = 6 * 1024 * 1024
+KANTO_COVERS = (
+    ("Red Version","Nintendo_-_Game_Boy","Pokemon - Red Version (USA, Europe) (SGB Enhanced).png"),
+    ("Blue Version","Nintendo_-_Game_Boy","Pokemon - Blue Version (USA, Europe) (SGB Enhanced).png"),
+    ("Yellow Version","Nintendo_-_Game_Boy","Pokemon - Yellow Version - Special Pikachu Edition (USA, Europe) (CGB+SGB Enhanced).png"),
+    ("Gold Version","Nintendo_-_Game_Boy_Color","Pokemon - Gold Version (USA, Europe) (SGB Enhanced) (GB Compatible).png"),
+    ("Silver Version","Nintendo_-_Game_Boy_Color","Pokemon - Silver Version (USA, Europe) (SGB Enhanced) (GB Compatible).png"),
+    ("Crystal Version","Nintendo_-_Game_Boy_Color","Pokemon - Crystal Version (USA).png"),
+    ("FireRed Version","Nintendo_-_Game_Boy_Advance","Pokemon - FireRed Version (USA).png"),
+    ("LeafGreen Version","Nintendo_-_Game_Boy_Advance","Pokemon - LeafGreen Version (USA).png"),
+    ("HeartGold Version","Nintendo_-_Nintendo_DS","Pokemon - HeartGold Version (USA).png"),
+    ("SoulSilver Version","Nintendo_-_Nintendo_DS","Pokemon - SoulSilver Version (USA).png"),
+    ("Let’s Go, Pikachu! / Eevee!",None,"https://upload.wikimedia.org/wikipedia/en/4/47/Pok%C3%A9mon_Let%27s_Go%2C_Pikachu%21_and_Let%27s_Go%2C_Eevee%21.jpg"),
+)
 RETRO = [
     (15, 56, 15),
     (48, 98, 48),
@@ -96,6 +111,26 @@ class BattleRenderer:
         await self._prune()
         return data
 
+    async def get_cover(self,entry):
+        label,repo,path=entry;key=label.casefold().replace(" ","-").replace("!","").replace("/","-").replace(",","").replace("’","")
+        cached=self.cache_dir/f"cover-{key}.img"
+        if cached.exists() and 0<cached.stat().st_size<=MAX_COVER_BYTES:return cached.read_bytes()
+        url=path if repo is None else f"https://raw.githubusercontent.com/libretro-thumbnails/{repo}/master/Named_Boxarts/{quote(path)}"
+        host=(urlparse(url).hostname or "").casefold()
+        if host not in {"raw.githubusercontent.com","upload.wikimedia.org"}:raise RenderError("Cover-art provider host is not allowed.")
+        session=await self._session()
+        try:
+            async with session.get(url) as response:
+                if response.status!=200:raise RenderError(f"Cover-art provider returned HTTP {response.status}.")
+                if (response.url.host or "").casefold() not in {"raw.githubusercontent.com","upload.wikimedia.org"}:raise RenderError("Cover art redirected to an untrusted host.")
+                data=await response.read()
+        except (aiohttp.ClientError,asyncio.TimeoutError) as exc:raise RenderError("Cover-art download failed.") from exc
+        if not 0<len(data)<=MAX_COVER_BYTES:raise RenderError("Cover-art file size is invalid.")
+        try:
+            with Image.open(io.BytesIO(data)) as image:image.verify()
+        except Exception as exc:raise RenderError("Cover-art image is invalid.") from exc
+        self.cache_dir.mkdir(parents=True,exist_ok=True);temporary=cached.with_suffix(".tmp");temporary.write_bytes(data);temporary.replace(cached);return data
+
     async def _prune(self):
         files = sorted(
             self.cache_dir.glob("*.png"),
@@ -160,9 +195,11 @@ class BattleRenderer:
         return result
 
     async def main_menu(self,user_name,conf,style="retro"):
-        party=self.trainer_party(conf);lead=party[0] if party else None
-        data=await self.get_sprite(lead.species_id,shiny=lead.shiny) if lead else None
-        try:return await self._render(self._main_menu_sync,user_name,conf,lead,data,style)
+        party=self.trainer_party(conf);lead=party[0] if party else None;data=None;cover_label=None
+        if style=="modern":
+            entry=random.SystemRandom().choice(KANTO_COVERS);cover_label=entry[0];data=await self.get_cover(entry)
+        elif lead:data=await self.get_sprite(lead.species_id,shiny=lead.shiny)
+        try:return await self._render(self._main_menu_sync,user_name,conf,lead,data,style,cover_label)
         except (OSError,ValueError) as exc:raise RenderError("Main-menu rendering failed.") from exc
 
     async def trainer_card(self,user_name,conf,style="retro"):
@@ -476,42 +513,34 @@ class BattleRenderer:
         draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,f"{species.name} was registered in {trainer}'s Pokedex.",(25,382),width=84,size=19)
         return self._save(canvas)
 
-    def _main_menu_sync(self,user_name,conf,lead,data,style):
+    def _main_menu_sync(self,user_name,conf,lead,data,style,cover_label=None):
         modern=style=="modern";width,height=800,500
         if modern:
-            canvas=Image.new("RGB",(width,height),(38,45,91));draw=ImageDraw.Draw(canvas)
-            top=(55,83,170);bottom=(185,92,157)
-            for y in range(height):
-                ratio=y/(height-1);color=tuple(round(a+(b-a)*ratio) for a,b in zip(top,bottom));draw.line((0,y,width,y),fill=color)
-            for x,y,r,color in ((90,80,150,(82,214,205)),(700,95,190,(255,184,98)),(615,440,230,(90,112,210))):draw.ellipse((x-r,y-r,x+r,y+r),fill=color)
-            draw.rounded_rectangle((38,32,762,468),28,fill=(240,245,255),outline=(255,255,255),width=5)
-            ink=(28,37,71);accent=(81,67,170);muted=(91,102,134);sprite_box=(418,105,728,382)
-            draw.text((70,62),"POKEMON JOURNEY",fill=accent,font=ImageFont.load_default(size=23));draw.text((70,102),str(user_name)[:24],fill=ink,font=ImageFont.load_default(size=35))
-            draw.rounded_rectangle(sprite_box,26,fill=(218,231,252),outline=accent,width=4)
-            draw.ellipse((455,315,690,370),fill=(129,169,216),outline=accent,width=4)
+            canvas=Image.new("RGBA",(width,height),(15,20,34,255));cover=Image.open(io.BytesIO(data)).convert("RGB")
+            cover=ImageOps.pad(cover,(500,500),method=Image.Resampling.LANCZOS,color=(8,12,22),centering=(0.5,0.5));canvas.paste(cover,(0,0))
+            shade=Image.new("RGBA",canvas.size,(0,0,0,0));shade_draw=ImageDraw.Draw(shade);shade_draw.rectangle((0,395,500,500),fill=(7,12,24,218));shade_draw.rectangle((455,0,800,500),fill=(12,18,34,244));canvas=Image.alpha_composite(canvas,shade);draw=ImageDraw.Draw(canvas)
+            ink=(244,247,255);accent=(255,204,72);muted=(173,187,216)
+            draw.text((485,34),"KANTO ARCHIVE",fill=accent,font=ImageFont.load_default(size=21));draw.text((485,70),str(user_name)[:20],fill=ink,font=ImageFont.load_default(size=29))
             menu=("PARTY","COLLECTION","POKEDEX","BAG","RESEARCH","MORE")
             for index,label in enumerate(menu):
-                x=72+(index%2)*158;y=180+(index//2)*63
-                draw.rounded_rectangle((x,y,x+140,y+44),12,fill=(225,231,249),outline=(154,159,207),width=2);draw.text((x+15,y+11),label,fill=ink,font=ImageFont.load_default(size=18))
-            draw.text((70,405),"Choose an option below",fill=muted,font=ImageFont.load_default(size=18))
-        else:
-            canvas=Image.new("RGB",(width,height),RETRO[4]);draw=ImageDraw.Draw(canvas);ink=RETRO[0]
-            for y in range(0,height,10):draw.line((0,y,width,y),fill=RETRO[5])
-            draw.rectangle((22,22,778,478),fill=RETRO[5],outline=ink,width=7);draw.rectangle((42,42,758,458),outline=RETRO[1],width=3)
-            draw.text((68,60),"POKEMON",fill=ink,font=ImageFont.load_default(size=42));draw.text((68,112),str(user_name)[:24],fill=RETRO[1],font=ImageFont.load_default(size=25))
-            draw.rounded_rectangle((425,65,720,360),18,fill=RETRO[4],outline=ink,width=5);draw.ellipse((465,295,680,350),fill=RETRO[2],outline=ink,width=4)
-            menu=("PARTY","COLLECTION","POKEDEX","BAG","RESEARCH","MORE")
-            for index,label in enumerate(menu):
-                y=170+index*43;draw.text((82,y),">",fill=RETRO[2],font=ImageFont.load_default(size=23));draw.text((117,y),label,fill=ink,font=ImageFont.load_default(size=23))
-            draw.text((437,390),"SELECT WITH BUTTONS",fill=RETRO[1],font=ImageFont.load_default(size=17))
+                y=130+index*49;draw.rounded_rectangle((480,y,770,y+38),10,fill=(38,50,78),outline=(91,111,151),width=2);draw.text((500,y+9),label,fill=ink,font=ImageFont.load_default(size=18))
+            draw.text((26,414),str(cover_label or "Kanto Collection")[:38],fill=ink,font=ImageFont.load_default(size=25));draw.text((26,454),"Choose an option below",fill=muted,font=ImageFont.load_default(size=18))
+            if lead:
+                species=SPECIES[lead.species_id];name=lead.nickname or species.name;label=f"Lead: {name} · Lv.{lead.level}";font=ImageFont.load_default(size=17);tw=int(draw.textlength(label,font=font));draw.text((470-tw,470),label,fill=muted,font=font)
+            return self._save(canvas.convert("RGB"))
+        canvas=Image.new("RGB",(width,height),RETRO[4]);draw=ImageDraw.Draw(canvas);ink=RETRO[0]
+        for y in range(0,height,10):draw.line((0,y,width,y),fill=RETRO[5])
+        draw.rectangle((22,22,778,478),fill=RETRO[5],outline=ink,width=7);draw.rectangle((42,42,758,458),outline=RETRO[1],width=3)
+        draw.text((68,60),"POKEMON",fill=ink,font=ImageFont.load_default(size=42));draw.text((68,112),str(user_name)[:24],fill=RETRO[1],font=ImageFont.load_default(size=25))
+        draw.rounded_rectangle((425,65,720,360),18,fill=RETRO[4],outline=ink,width=5);draw.ellipse((465,295,680,350),fill=RETRO[2],outline=ink,width=4)
+        menu=("PARTY","COLLECTION","POKEDEX","BAG","RESEARCH","MORE")
+        for index,label in enumerate(menu):
+            y=170+index*43;draw.text((82,y),">",fill=RETRO[2],font=ImageFont.load_default(size=23));draw.text((117,y),label,fill=ink,font=ImageFont.load_default(size=23))
+        draw.text((437,390),"SELECT WITH BUTTONS",fill=RETRO[1],font=ImageFont.load_default(size=17))
         if lead and data:
-            image=self._open(data,(245,225),trim=True,upscale=True)
-            if not modern:image=self._retro(image)
-            center_x=572;bottom_y=330;canvas.paste(image,(center_x-image.width//2,bottom_y-image.height),image)
-            species=SPECIES[lead.species_id];name=lead.nickname or species.name
-            label=f"{name}  Lv.{lead.level}";font=ImageFont.load_default(size=20);tw=int(draw.textlength(label,font=font));draw.text((center_x-tw//2,365),label,fill=ink,font=font)
-        else:
-            draw.text((488,205),"NO PARTY",fill=ink,font=ImageFont.load_default(size=25))
+            image=self._retro(self._open(data,(245,225),trim=True,upscale=True));center_x=572;canvas.paste(image,(center_x-image.width//2,330-image.height),image)
+            species=SPECIES[lead.species_id];name=lead.nickname or species.name;label=f"{name}  Lv.{lead.level}";font=ImageFont.load_default(size=20);tw=int(draw.textlength(label,font=font));draw.text((center_x-tw//2,365),label,fill=ink,font=font)
+        else:draw.text((488,205),"NO PARTY",fill=ink,font=ImageFont.load_default(size=25))
         return self._save(canvas)
 
     def _trainer_card_sync(self,user_name,conf,party,data,style):

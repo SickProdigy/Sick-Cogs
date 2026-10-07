@@ -7,7 +7,7 @@ from pokemon.catching import BALLS,attempt_catch,calculate_catch_value
 from pokemon.catalog_versions import CATALOG_VERSIONS,DIMENSIONS
 from pokemon.data import EVOLUTIONS,SPECIES,effectiveness,experience_to_next,total_experience
 from pokemon.models import Battle,BattleError,OwnedPokemon
-from pokemon.renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RETRO
+from pokemon.renderer import BattleRenderer,ENCOUNTER_BACKDROPS,KANTO_COVERS,RETRO
 from pokemon.rulesets import STANDARD,TYPE_CHARTS
 
 def battle(seed=1,wild=10):
@@ -355,6 +355,7 @@ class BattleTests(unittest.TestCase):
         data=source.getvalue();avatar_source=io.BytesIO();Image.new("RGBA",(80,80),(220,40,80,255)).save(avatar_source,"PNG");avatar_data=avatar_source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
         b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);expired=renderer._encounter_sync(10,data,backdrop=0,expired=True);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy");registration=renderer._pokedex_registration_sync(starter_pokemon,data,"SickProdigy");menu_conf={"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id]};retro_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"retro");modern_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"modern");trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},[starter_pokemon],[data],"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data,avatar_data);b.state="caught";caught_result=renderer._battle_result_sync(b,data,avatar_data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
         self.assertEqual(len(ENCOUNTER_BACKDROPS),12)
+        self.assertEqual(len(KANTO_COVERS),11)
         with Image.open(encounter) as image,Image.open(alternate) as other:
             self.assertEqual(image.size,(800,450))
             self.assertEqual(image.getpixel((400,400)),RETRO[5])
