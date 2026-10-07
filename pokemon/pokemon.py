@@ -15,7 +15,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,CenterCollectView,TradeView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,CenterCollectView,TradeView,GymChallengeView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -205,7 +205,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.50.0";__author__="SickProdigy"
+    __version__="0.50.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -678,7 +678,9 @@ class Pokemon(commands.Cog):
         if section=="profile":
             embed,files=await self.rendered_trainer_card(user,conf);await interaction.response.send_message(embed=embed,files=files,ephemeral=True);return
         if section=="achievements":await interaction.response.send_message(embed=self.accomplishments_embed(user,conf),ephemeral=True);return
-        if section=="gym":await interaction.response.send_message(embed=gym_status_embed(user,conf),ephemeral=True);return
+        if section=="gym":
+            upcoming=next_gym(conf.get("badges",[]));view=GymChallengeView(self,user.id,upcoming.leader) if upcoming else None
+            await interaction.response.send_message(embed=gym_status_embed(user,conf),view=view,ephemeral=True);return
         if section=="trade":
             await interaction.response.send_message("Start an exact trade with `poke trade  <your collection number> <their collection number>`. The other trainer must confirm before anything moves.",ephemeral=True);return
         if section=="mart":
@@ -1426,49 +1428,63 @@ class Pokemon(commands.Cog):
     @pokemon.group(name="gym",invoke_without_command=True)
     async def gym(self,ctx):
         """View your ordered Kanto Gym progress."""
-        conf=await self.config.user(ctx.author).all()
-        await ctx.send(embed=gym_status_embed(ctx.author,conf))
+        conf=await self.config.user(ctx.author).all();upcoming=next_gym(conf.get("badges",[]))
+        command=f"{getattr(ctx,'clean_prefix','[p]')}poke gym challenge"
+        await ctx.send(embed=gym_status_embed(ctx.author,conf,command),view=GymChallengeView(self,ctx.author.id,upcoming.leader) if upcoming else None)
 
     @gym.command(name="challenge")
     @commands.guild_only()
     async def gym_challenge(self,ctx):
         """Challenge the next Kanto Gym Leader's team."""
-        async with self.lock(("user",ctx.author.id)),self.lock(("spawn",ctx.guild.id)):
-            if any(b.user_id==ctx.author.id and b.state=="active" for b in self.battles.values()):
-                await ctx.send("Finish your active battle first.");return
-            guild_conf=await self.config.guild(ctx.guild).all();policy=await self.config.all();active=await self.guild_encounters(ctx.guild.id,guild_conf)
+        await self.start_gym_challenge(ctx.author,ctx.guild,ctx.channel,ctx.send)
+
+    async def gym_challenge_interaction(self,interaction):
+        async def send(*args,**kwargs):
+            if "embed" not in kwargs:kwargs.setdefault("ephemeral",True)
+            await interaction.response.send_message(*args,**kwargs)
+            return await interaction.original_response()
+        started=await self.start_gym_challenge(interaction.user,interaction.guild,interaction.channel,send)
+        if started:
+            try:await interaction.message.delete()
+            except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
+
+    async def start_gym_challenge(self,user,guild,channel,send):
+        async with self.lock(("user",user.id)),self.lock(("spawn",guild.id)):
+            if any(b.user_id==user.id and b.state=="active" for b in self.battles.values()):
+                await send("Finish your active battle first.");return
+            guild_conf=await self.config.guild(guild).all();policy=await self.config.all();active=await self.guild_encounters(guild.id,guild_conf)
             limit=effective_concurrency(guild_conf,policy)
             if len(active)>=limit:
-                await ctx.send(f"This server is already using all {limit} active encounter slots.");return
-            if ctx.channel.id in {int(raw.get("channel_id",0)) for raw in active.values()}:
-                await ctx.send("This channel already has an active encounter or Gym battle.");return
-            conf=await self.config.user(ctx.author).all();gym=next_gym(conf.get("badges",[]))
+                await send(f"This server is already using all {limit} active encounter slots.");return
+            if channel.id in {int(raw.get("channel_id",0)) for raw in active.values()}:
+                await send("This channel already has an active encounter or Gym battle.");return
+            conf=await self.config.user(user).all();gym=next_gym(conf.get("badges",[]))
             if not gym:
-                await ctx.send("You already earned all eight Kanto badges.");return
+                await send("You already earned all eight Kanto badges.");return
             if not conf["party"]:
-                await ctx.send("Choose a starter and prepare a party first.");return
+                await send("Choose a starter and prepare a party first.");return
             collection={item["instance_id"]:item for item in conf["collection"]}
             party=[OwnedPokemon.from_raw(collection[key]) for key in conf["party"] if key in collection]
             if not party:
-                await ctx.send("Your active party needs repair.");return
+                await send("Your active party needs repair.");return
             if not any((item.current_hp if item.current_hp is not None else pokemon_max_hp(item))>0 for item in party):
-                await ctx.send("Your party has fainted. Visit a Pokémon Center or use a Revive.");return
+                await send("Your party has fainted. Visit a Pokémon Center or use a Revive.");return
             async with self.lock("encounters"):
                 eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
             lead=party[0];first_species,first_level=gym.team[0]
-            battle=Battle(eid,ctx.author.id,ctx.guild.id,ctx.channel.id,0,lead,first_species,first_level,Battle.stat(lead,"hp"),1,seed=random.SystemRandom().randrange(1,2**31),battle_kind="gym",gym_key=gym.key,trainer_name=str(getattr(ctx.author,"display_name",getattr(ctx.author,"name","Trainer")))[:24])
+            battle=Battle(eid,user.id,guild.id,channel.id,0,lead,first_species,first_level,Battle.stat(lead,"hp"),1,seed=random.SystemRandom().randrange(1,2**31),battle_kind="gym",gym_key=gym.key,trainer_name=str(getattr(user,"display_name",getattr(user,"name","Trainer")))[:24])
             battle.initialize_party(party);battle.initialize_opponents(gym.team)
-            seen={int(value) for value in conf.get("pokedex_seen",[])};seen.add(first_species);conf["pokedex_seen"]=sorted(seen);self.pokedex_stat(conf,first_species)["seen"]+=1;await self.config.user(ctx.author).set(conf)
+            seen={int(value) for value in conf.get("pokedex_seen",[])};seen.add(first_species);conf["pokedex_seen"]=sorted(seen);self.pokedex_stat(conf,first_species)["seen"]+=1;await self.config.user(user).set(conf)
             self.battles[eid]=battle
             try:
                 embed,files=await self.rendered_battle(battle)
-                message=await ctx.send(embed=embed,files=files,view=BattleView(self,eid))
+                message=await send(embed=embed,files=files,view=BattleView(self,eid))
             except Exception:
                 self.battles.pop(eid,None)
                 raise
             battle.message_id=message.id
-            seconds=await self.config.guild(ctx.guild).battle_timeout()
-            raw={"kind":"gym","gym_key":gym.key,"state":"battle","guild_id":ctx.guild.id,"channel_id":ctx.channel.id,"message_id":message.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=seconds)).isoformat(),"battle":battle.raw()}
+            seconds=await self.config.guild(guild).battle_timeout()
+            raw={"kind":"gym","gym_key":gym.key,"state":"battle","guild_id":guild.id,"channel_id":channel.id,"message_id":message.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=seconds)).isoformat(),"battle":battle.raw()}
             try:
                 await self.put_encounter(eid,raw)
             except Exception:
@@ -1476,6 +1492,7 @@ class Pokemon(commands.Cog):
                 try:await message.edit(content="The Gym challenge could not be saved. Please try again.",view=None)
                 except discord.HTTPException:pass
                 raise
+        return True
 
     @pokemon.command(name="profile")
     async def profile(self,ctx,user:discord.Member=None):
