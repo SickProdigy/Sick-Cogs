@@ -869,7 +869,8 @@ class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
             await selector.callback(interaction)
         self.assertTrue(game.player(10).kept); self.assertEqual(len(game.player(10).hand),5)
         self.assertTrue(all(uid in game.player(10).library for uid in chosen))
-        self.assertIn("put 2 on the bottom",game.history[-1]["detail"])
+        keep_event=next(event for event in reversed(game.history) if event["action"]=="keep")
+        self.assertIn("put 2 on the bottom",keep_event["detail"])
 
     def test_private_hand_only_lists_currently_playable_cards(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.phase="precombat_main"; game.priority_user=10; cog.games={1:game}

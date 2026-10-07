@@ -12,8 +12,12 @@ class OpeningTests(unittest.TestCase):
         g=Game(1,[10,20],1)
         self.assertEqual(len(starter("red")),60); self.assertEqual(len(starter("green")),60)
         self.assertGreaterEqual(len(set(starter("red"))),12); self.assertGreaterEqual(len(set(starter("green"))),12)
-        self.assertLessEqual(max(starter("red").count(key) for key in set(starter("red")) if key!="mountain"),4)
-        self.assertLessEqual(max(starter("green").count(key) for key in set(starter("green")) if key!="forest"),4)
+        self.assertEqual(sum(CARDS[key].has_land_type("mountain") for key in starter("red")),24)
+        self.assertEqual(sum(CARDS[key].has_land_type("forest") for key in starter("green")),24)
+        self.assertEqual({key for key in starter("red") if CARDS[key].land},{"lea:292","lea:293"})
+        self.assertEqual({key for key in starter("green") if CARDS[key].land},{"lea:294","lea:295"})
+        self.assertLessEqual(max(starter("red").count(key) for key in set(starter("red")) if not CARDS[key].land),4)
+        self.assertLessEqual(max(starter("green").count(key) for key in set(starter("green")) if not CARDS[key].land),4)
         self.assertEqual(len(g.hand(10)),7); self.assertEqual(len(g.hand(20)),7)
         self.assertNotEqual(g.players[10].hand,g.players[20].hand)
     def test_london_mulligan_and_first_player_skips_draw(self):
@@ -1951,8 +1955,8 @@ class AlphaUtilitySpellTests(unittest.TestCase):
 class SpellTests(unittest.TestCase):
     def test_spell_uses_stack_and_resolves_after_two_passes(self):
         g=ready(); p=g.players[10]
-        lands=[uid for uid,key in list(g.cards.items()) if key=="mountain"][:2]
-        p.battlefield=[Permanent(uid,"mountain",sick=False) for uid in lands]
+        lands=[uid for uid in g.cards if g.card(uid).has_land_type("mountain")][:2]
+        p.battlefield=[Permanent(uid,g.cards[uid],sick=False) for uid in lands]
         spell=next(uid for uid,key in g.cards.items() if key=="lea:161")
         if spell in p.library: p.library.remove(spell)
         if spell in p.hand: p.hand.remove(spell)
@@ -1962,8 +1966,8 @@ class SpellTests(unittest.TestCase):
         self.assertEqual(g.players[20].life,17); self.assertFalse(g.stack)
     def test_opponent_can_cast_instant_with_priority(self):
         g=ready(); p=g.players[20]
-        land=next(uid for uid,key in g.cards.items() if key=="forest")
-        p.battlefield=[Permanent(land,"forest",sick=False)]
+        land=next(uid for uid in g.cards if g.card(uid).has_land_type("forest"))
+        p.battlefield=[Permanent(land,g.cards[land],sick=False)]
         growth=next(uid for uid,key in g.cards.items() if key=="lea:197")
         if growth in p.library: p.library.remove(growth)
         p.hand.insert(0,growth)
@@ -1974,8 +1978,8 @@ class SpellTests(unittest.TestCase):
 
     def test_invalid_target_does_not_consume_card_or_mana(self):
         g=ready(); p=g.players[20]
-        land=next(uid for uid,key in g.cards.items() if key=="forest")
-        p.battlefield=[Permanent(land,"forest",sick=False)]
+        land=next(uid for uid in g.cards if g.card(uid).has_land_type("forest"))
+        p.battlefield=[Permanent(land,g.cards[land],sick=False)]
         growth=next(uid for uid,key in g.cards.items() if key=="lea:197")
         if growth in p.library: p.library.remove(growth)
         if growth in p.hand: p.hand.remove(growth)
@@ -1985,8 +1989,8 @@ class SpellTests(unittest.TestCase):
 
     def test_sorcery_speed_spell_requires_empty_stack(self):
         g=ready(); p=g.players[10]
-        lands=[uid for uid,key in g.cards.items() if key=="mountain"][:4]
-        p.battlefield=[Permanent(uid,"mountain",sick=False) for uid in lands]
+        lands=[uid for uid in g.cards if g.card(uid).has_land_type("mountain")][:4]
+        p.battlefield=[Permanent(uid,g.cards[uid],sick=False) for uid in lands]
         creature=next(uid for uid,key in g.cards.items() if key=="lea:157")
         shock=next(uid for uid,key in g.cards.items() if key=="lea:161")
         for uid in (creature,shock):
@@ -1998,8 +2002,8 @@ class SpellTests(unittest.TestCase):
 
     def test_response_resets_passes_on_underlying_spell(self):
         g=ready(); active=g.players[10]; opponent=g.players[20]
-        mountains=[uid for uid,key in g.cards.items() if key=="mountain"][:2]
-        active.battlefield=[Permanent(uid,"mountain",sick=False) for uid in mountains]
+        mountains=[uid for uid in g.cards if g.card(uid).has_land_type("mountain")][:2]
+        active.battlefield=[Permanent(uid,g.cards[uid],sick=False) for uid in mountains]
         shocks=[uid for uid,key in g.cards.items() if key=="lea:161"][:2]
         for uid in shocks:
             if uid in active.library: active.library.remove(uid)
@@ -3585,10 +3589,10 @@ class CombatTests(unittest.TestCase):
         g=ready(); attacker=g.players[10]; defender=g.players[20]
         giant=next(uid for uid,key in g.cards.items() if key=="lea:157")
         bear=next(uid for uid,key in g.cards.items() if key=="lea:199")
-        forest=next(uid for uid,key in g.cards.items() if key=="forest")
+        forest=next(uid for uid in g.cards if g.card(uid).has_land_type("forest"))
         growth=next(uid for uid,key in g.cards.items() if key=="lea:197")
         attacker.battlefield=[Permanent(giant,"giant",sick=False)]
-        defender.battlefield=[Permanent(bear,"bear",sick=False),Permanent(forest,"forest",sick=False)]
+        defender.battlefield=[Permanent(bear,"bear",sick=False),Permanent(forest,g.cards[forest],sick=False)]
         for zone in (defender.library,defender.hand):
             if growth in zone: zone.remove(growth)
         defender.hand.insert(0,growth)
