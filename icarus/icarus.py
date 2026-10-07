@@ -73,7 +73,7 @@ class IcarusAnnouncements(commands.Cog):
     """Publish official Icarus Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.2"
+    __version__ = "0.1.3"
 
     default_guild = {
         "enabled": False,
