@@ -291,7 +291,7 @@ class FightView(BattleMenu):
 class PartyButton(discord.ui.Button):
     def __init__(self, cog, encounter_id, index, pokemon, hp, current):
         super().__init__(
-            label=f"{index + 1}. {SPECIES[pokemon.species_id].name} · {hp} HP",
+            label=f"{index + 1}. {SPECIES[pokemon.species_id].name} · Lv. {pokemon.level} · {hp} HP",
             style=discord.ButtonStyle.primary,
             custom_id=f"pokemon:{encounter_id}:party:{index}",
             row=index // 2,
