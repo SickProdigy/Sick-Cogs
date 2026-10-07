@@ -4,6 +4,7 @@ import random
 import time
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
 import discord
 from discord.ext import tasks
 from redbot.core import Config,bank,commands
@@ -19,7 +20,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":None,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1,"concurrency_owner_override":False,"timer_owner_override":False}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":None,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1,"concurrency_owner_override":False,"timer_owner_override":False,"notification_mode":"silent","notification_role_id":None,"quiet_timezone":None,"quiet_start":None,"quiet_end":None}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{},"menu_style":"retro","vip_reward_month":None}
 MART_ITEMS={
     "poke_ball":("Poké Ball","balls",50),
@@ -34,7 +35,7 @@ MART_ITEMS={
     "moon_stone":("Moon Stone","moon_stone",25000),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball","firestone":"fire_stone","waterstone":"water_stone","thunderstone":"thunder_stone","leafstone":"leaf_stone","moonstone":"moon_stone","fire":"fire_stone","water":"water_stone","thunder":"thunder_stone","leaf":"leaf_stone","moon":"moon_stone"}
-GLOBAL={"schema":18,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
+GLOBAL={"schema":19,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
 BOX_SIZE=30
 MAX_BOXES=8
 PARTY_SIZE=6
@@ -117,6 +118,25 @@ def jittered_spawn_due(now,minutes,rng=None):
     rng=rng or random.SystemRandom()
     seconds=max(60,int(minutes)*60)
     return now+timedelta(seconds=max(60,round(seconds*rng.uniform(.8,1.2))))
+
+def parse_quiet_clock(value):
+    parts=str(value).split(":")
+    if len(parts)!=2 or not all(part.isdigit() for part in parts):raise ValueError("Use 24-hour HH:MM times.")
+    hour,minute=map(int,parts)
+    if not 0<=hour<=23 or not 0<=minute<=59:raise ValueError("Use 24-hour HH:MM times.")
+    return hour*60+minute
+
+def format_quiet_clock(minutes):
+    minutes=int(minutes)%1440
+    return f"{minutes//60:02d}:{minutes%60:02d}"
+
+def quiet_hours_active(conf,now=None):
+    zone_name=conf.get("quiet_timezone");start=conf.get("quiet_start");end=conf.get("quiet_end")
+    if not zone_name or start is None or end is None:return False
+    try:local=(now or datetime.now(timezone.utc)).astimezone(ZoneInfo(str(zone_name)))
+    except (ZoneInfoNotFoundError,ValueError,TypeError):return False
+    current=local.hour*60+local.minute;start=int(start);end=int(end)
+    return start<=current<end if start<end else current>=start or current<end
 
 def encounter_gender(species,rng):
     if species.gender_rate<0:return "genderless"
@@ -268,7 +288,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.58.0";__author__="SickProdigy"
+    __version__="0.62.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -451,6 +471,11 @@ class Pokemon(commands.Cog):
             prices=mart_prices(await self.config.mart_prices())
             if prices["moon_stone"]==5000:prices["moon_stone"]=MART_ITEMS["moon_stone"][2]
             await self.config.mart_prices.set(prices);await self.config.schema.set(18)
+        if schema<19:
+            for guild_id,data in (await self.config.all_guilds()).items():
+                data.setdefault("notification_mode","silent");data.setdefault("notification_role_id",None);data.setdefault("quiet_timezone",None);data.setdefault("quiet_start",None);data.setdefault("quiet_end",None)
+                await self.config.guild_from_id(int(guild_id)).set(data)
+            await self.config.schema.set(19)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
@@ -628,7 +653,16 @@ class Pokemon(commands.Cog):
         offset=random.SystemRandom().choice((-2,-1,0,0,1,1,2,2,3,4))
         return encounter_level(levels,offset)
 
-    async def spawn(self,channel,*,force_shiny=False):
+    def encounter_delivery(self,channel,conf,now=None):
+        if quiet_hours_active(conf,now):return {"silent":True,"allowed_mentions":discord.AllowedMentions.none()}
+        mode=str(conf.get("notification_mode","silent")).casefold()
+        if mode=="role":
+            role_id=conf.get("notification_role_id");role=channel.guild.get_role(int(role_id)) if role_id else None
+            if role:return {"content":role.mention,"silent":False,"allowed_mentions":discord.AllowedMentions(everyone=False,users=False,roles=[role],replied_user=False)}
+            return {"silent":True,"allowed_mentions":discord.AllowedMentions.none()}
+        return {"silent":mode!="normal","allowed_mentions":discord.AllowedMentions.none()}
+
+    async def spawn(self,channel,*,force_shiny=False,automatic=True):
         async with self.lock("encounters"):
             eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
         conf=await self.config.guild(channel.guild).all();policy=await self.config.all()
@@ -639,11 +673,12 @@ class Pokemon(commands.Cog):
         chosen=rng.choices(pool,weights=[spawn_weight(item,policy["rarity_profile"]) for item in pool],k=1)[0]
         sid=chosen.id;gender=encounter_gender(chosen,rng);shiny=True if force_shiny else encounter_shiny(rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
         display=("Shiny " if shiny else "")+SPECIES[sid].name;embed=discord.Embed(title=f"A wild {display} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green())
+        delivery=self.encounter_delivery(channel,conf) if automatic else {"allowed_mentions":discord.AllowedMentions.none()}
         try:
             image=await self.renderer.encounter(sid,level,gender,backdrop,shiny=shiny);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
-            msg=await channel.send(embed=embed,file=file,view=EncounterView(self,eid))
+            msg=await channel.send(embed=embed,file=file,view=EncounterView(self,eid),**delivery)
         except RenderError:
-            log.exception("Encounter rendering failed");embed.set_image(url=sprite(sid,shiny=shiny));msg=await channel.send(embed=embed,view=EncounterView(self,eid))
+            log.exception("Encounter rendering failed");embed.set_image(url=sprite(sid,shiny=shiny));msg=await channel.send(embed=embed,view=EncounterView(self,eid),**delivery)
         encounter_timeout=effective_encounter_timeout(conf,policy)
         raw={"state":"open","species_id":sid,"level":level,"gender":gender,"shiny":shiny,"backdrop":backdrop,"level_locked":True,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=encounter_timeout)).isoformat(),"encounter_timeout":encounter_timeout}
         await self.put_encounter(eid,raw)
@@ -1862,11 +1897,55 @@ class Pokemon(commands.Cog):
         generations=effective_generations(conf.get("generations",[1]),policy.get("allowed_generations",[1]));generation_text=", ".join(map(str,generations))
         enabled=conf.get("enabled",False);encounter_minutes=effective_encounter_timeout(conf,policy)//60;encounter_source="server override" if conf.get("encounter_timeout") is not None else "bot-wide default";battle_minutes=int(conf.get("battle_timeout",1800))//60
         rarity=policy.get("rarity_profile","friendly");specials="enabled" if policy.get("allow_special_species") else "event-only";expired_cards=conf.get("expired_card_mode","delete")
+        notification_mode=str(conf.get("notification_mode","silent")).casefold();role_id=conf.get("notification_role_id");notification_role=f"<@&{role_id}>" if role_id and ctx.guild.get_role(int(role_id)) else ("missing/deleted" if role_id else "none")
+        if conf.get("quiet_timezone") and conf.get("quiet_start") is not None and conf.get("quiet_end") is not None:
+            quiet_state="active now" if quiet_hours_active(conf) else "inactive now";quiet_text=f"{format_quiet_clock(conf['quiet_start'])}–{format_quiet_clock(conf['quiet_end'])} {conf['quiet_timezone']} ({quiet_state})"
+        else:quiet_text="disabled"
         await ctx.send(
             f"**Pokémon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}**\nSpawn channels: {channels}\nPokémon Center: {center} · Free-heal cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m**\n"
             f"{progress}\nActive encounters: **{len(active)}/{slot_limit}** · Next spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** ({encounter_source}) · Battle lifetime: **{battle_minutes}m**\n"
+            f"Notifications: **{notification_mode}** · Alert role: {notification_role} · Quiet hours: **{quiet_text}**\n"
             f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nExpired unattended cards: **{expired_cards}**\nCatalog species: **{len(SPECIES)}**"
         )
+
+    @pokemon_set.command(name="notifications",aliases=["notify"])
+    async def encounter_notifications(self,ctx,mode:str):
+        """Choose silent, normal, or opt-in-role encounter alerts."""
+        mode=mode.casefold()
+        if mode not in {"silent","normal","role"}:await ctx.send("Choose silent, normal, or role.");return
+        section=self.config.guild(ctx.guild);previous=await section.notification_mode();await section.notification_mode.set(mode)
+        if mode=="role" and not await section.notification_role_id():suffix=" No alert role is configured, so encounters will remain silent until you set one."
+        elif mode=="silent":suffix=" Automatic encounters remain visible without push or desktop notifications."
+        elif mode=="normal":suffix=" Automatic encounters use Discord's normal channel notification behavior."
+        else:suffix=" The configured opt-in role will be mentioned outside quiet hours."
+        await ctx.send(f"This server: encounter notifications changed from **{previous}** to **{mode}**.{suffix}")
+
+    @pokemon_set.command(name="notificationrole",aliases=["alertrole"])
+    async def encounter_notification_role(self,ctx,role:str):
+        """Set or clear the opt-in encounter alert role."""
+        section=self.config.guild(ctx.guild);previous=await section.notification_role_id();old=f"<@&{previous}>" if previous else "none"
+        if role.casefold() in {"clear","none","off","reset"}:
+            await section.notification_role_id.set(None);await ctx.send(f"This server: encounter alert role changed from {old} to **none**. Role notification mode will safely send silently.");return
+        try:resolved=await commands.RoleConverter().convert(ctx,role)
+        except commands.BadArgument:await ctx.send("Mention an existing role, provide its ID, or use `clear`.");return
+        if resolved.is_default():await ctx.send("The @everyone role cannot be used for encounter alerts. Create an opt-in role instead.");return
+        await section.notification_role_id.set(resolved.id);await ctx.send(f"This server: encounter alert role changed from {old} to {resolved.mention}. Members can opt in to that role for wild encounter alerts.")
+
+    @pokemon_set.command(name="quiethours")
+    async def encounter_quiet_hours(self,ctx,timezone_name:str,start:str=None,end:str=None):
+        """Set local quiet hours or disable them with `off`."""
+        section=self.config.guild(ctx.guild);conf=await section.all()
+        if timezone_name.casefold() in {"off","clear","none","reset"}:
+            previous="disabled" if not conf.get("quiet_timezone") else f"{format_quiet_clock(conf['quiet_start'])}–{format_quiet_clock(conf['quiet_end'])} {conf['quiet_timezone']}"
+            conf.update({"quiet_timezone":None,"quiet_start":None,"quiet_end":None});await section.set(conf);await ctx.send(f"This server: Pokémon quiet hours changed from **{previous}** to **disabled**.");return
+        if start is None or end is None:await ctx.send("Use `pokemonset quiethours <timezone> <HH:MM> <HH:MM>`, or `off`.");return
+        try:ZoneInfo(timezone_name);start_minute=parse_quiet_clock(start);end_minute=parse_quiet_clock(end)
+        except ZoneInfoNotFoundError:await ctx.send("That IANA timezone was not found. Example: `America/New_York`.");return
+        except ValueError as error:await ctx.send(str(error));return
+        if start_minute==end_minute:await ctx.send("Quiet-hour start and end times must differ.");return
+        previous="disabled" if not conf.get("quiet_timezone") else f"{format_quiet_clock(conf['quiet_start'])}–{format_quiet_clock(conf['quiet_end'])} {conf['quiet_timezone']}"
+        conf.update({"quiet_timezone":timezone_name,"quiet_start":start_minute,"quiet_end":end_minute});await section.set(conf)
+        await ctx.send(f"This server: Pokémon quiet hours changed from **{previous}** to **{format_quiet_clock(start_minute)}–{format_quiet_clock(end_minute)} {timezone_name}**. Encounters remain visible but send silently with no alert-role mention during that window.")
 
     @pokemon_set.command(name="expiredcards",aliases=["missedcards"])
     async def expired_cards(self,ctx,mode:str):
@@ -2017,7 +2096,7 @@ class Pokemon(commands.Cog):
                     policy=await self.config.all();_,_,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
                     remaining=max(0,round((last+timedelta(seconds=cooldown)-datetime.now(timezone.utc)).total_seconds())) if last else 0
                     if remaining:await ctx.send(f"The activity spawn cooldown is active for another {remaining}s.");return
-            await self.spawn(channel,force_shiny=force_shiny)
+            await self.spawn(channel,force_shiny=force_shiny,automatic=False)
     @pokemon_owner_set.command(name="viprole")
     async def vip_role(self,ctx,guild_id:int=None,role_id:int=None):
         """Set or show the trusted guild and role for global VIP benefits."""
