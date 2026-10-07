@@ -616,6 +616,19 @@ class BattleRenderer:
                 if key in colors:pixels.rectangle((ox+column*scale,oy+row*scale,ox+(column+1)*scale-1,oy+(row+1)*scale-1),fill=colors[key])
 
     @staticmethod
+    def pokemon_center_state(pokemon,complete=False):
+        maximum=pokemon_max_hp(pokemon);current=maximum if pokemon.current_hp is None else max(0,min(maximum,int(pokemon.current_hp)))
+        if complete:return "READY",(72,196,117),current,maximum
+        if current<=0:return "FAINTED",(202,62,67),current,maximum
+        status={"burn":"BURNED","poison":"POISONED","paralysis":"PARALYZED","sleep":"ASLEEP","freeze":"FROZEN"}.get(str(pokemon.status),str(pokemon.status).upper())
+        if status:return status,(221,119,48),current,maximum
+        ratio=current/maximum if maximum else 0
+        if ratio<=.2:return "CRITICAL",(202,62,67),current,maximum
+        if ratio<=.5:return "LOW HP",(224,164,46),current,maximum
+        if any(int(pokemon.move_pp.get(key,MOVES[key].pp))<MOVES[key].pp for key in pokemon.moves):return "LOW PP",(80,137,196),current,maximum
+        return "STABLE",(72,196,117),current,maximum
+
+    @staticmethod
     def pokemon_center_message(trainer_name,complete=False):
         trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer"
         return f"{trainer}, your Pokemon are back to perfect health!" if complete else f"Restoring {trainer}’s party… Please wait."
@@ -628,12 +641,17 @@ class BattleRenderer:
         for index in range(6):
             column=index%3;row=index//3;x=38+column*288;y=86+row*164
             draw.rounded_rectangle((x,y,x+246,y+145),20,fill=(151,169,171),outline=ink,width=4);draw.rounded_rectangle((x+15,y+13,x+231,y+106),18,fill=glass,outline=metal,width=3)
-            draw.rectangle((x+22,y+108,x+224,y+137),fill=(72,84,87),outline=ink,width=2);draw.ellipse((x+195,y+115,x+210,y+128),fill=light,outline=ink,width=2)
+            draw.rectangle((x+22,y+108,x+224,y+137),fill=(72,84,87),outline=ink,width=2)
             if index>=len(party):
-                label="EMPTY";font=ImageFont.load_default(size=17);draw.text((x+123-int(draw.textlength(label,font=font))//2,y+54),label,fill=metal,font=font);continue
-            pokemon=party[index];image=self._open(data[index],(112,84),trim=True,upscale=True);canvas.paste(image,(x+123-image.width//2,y+98-image.height),image)
+                label="EMPTY";font=ImageFont.load_default(size=17);draw.text((x+123-int(draw.textlength(label,font=font))//2,y+54),label,fill=metal,font=font);draw.ellipse((x+195,y+115,x+210,y+128),fill=(120,139,142),outline=ink,width=2);continue
+            pokemon=party[index];state,state_color,current,maximum=self.pokemon_center_state(pokemon,complete);image=self._open(data[index],(112,84),trim=True,upscale=True)
+            if current<=0 and not complete:
+                alpha=image.getchannel("A");image=ImageOps.colorize(ImageOps.grayscale(image),(50,58,60),(155,165,162)).convert("RGBA");image.putalpha(alpha.point(lambda value:value*2//3))
+            canvas.paste(image,(x+123-image.width//2,y+98-image.height),image)
+            badge=ImageFont.load_default(size=11);badge_width=int(draw.textlength(state,font=badge))+12;draw.rounded_rectangle((x+24,y+18,x+24+badge_width,y+34),5,fill=state_color);draw.text((x+30,y+20),state,fill=(255,255,255),font=badge)
             name=pokemon.nickname or SPECIES[pokemon.species_id].name;font=ImageFont.load_default(size=13);label=f"{name} · Lv.{pokemon.level}";draw.text((x+31,y+111),label[:21],fill=(238,244,240),font=font)
-            maximum=pokemon_max_hp(pokemon);current=max(0,min(maximum,int(pokemon.current_hp)));hp=f"HP {current}/{maximum}";small=ImageFont.load_default(size=12);draw.text((x+31,y+124),hp,fill=(238,244,240),font=small)
+            hp=f"HP {current}/{maximum}";small=ImageFont.load_default(size=12);draw.text((x+31,y+124),hp,fill=(238,244,240),font=small);bar=(x+100,y+124,x+187,y+132);draw.rectangle(bar,fill=(236,241,236),outline=ink,width=1);ratio=current/maximum if maximum else 0;fill=(74,177,79) if ratio>.5 else (225,171,41) if ratio>.2 else (202,62,67);draw.rectangle((x+102,y+126,x+102+round(83*ratio),y+130),fill=fill)
+            draw.ellipse((x+195,y+115,x+210,y+128),fill=state_color,outline=ink,width=2)
         self._center_attendant(canvas)
         draw.rounded_rectangle((250,400,650,455),14,fill=(69,85,88),outline=ink,width=4)
         for index in range(7):draw.ellipse((278+index*48,418,292+index*48,432),fill=light if index<6 else (112,159,218),outline=ink,width=2)

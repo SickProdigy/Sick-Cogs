@@ -150,6 +150,11 @@ def grant_mart_item(conf,key,quantity):
     else:
         items=conf.setdefault("items",{});items[storage]=int(items.get(storage,0))+quantity;conf["items"]=items
 
+def pokemon_needs_center(pokemon):
+    maximum=pokemon_max_hp(pokemon);current=maximum if pokemon.current_hp is None else max(0,min(maximum,int(pokemon.current_hp)))
+    if current<maximum or bool(pokemon.status):return True
+    return any(int(pokemon.move_pp.get(key,MOVES[key].pp))<MOVES[key].pp for key in pokemon.moves)
+
 def evolve_owned_raw(raw,target_species):
     pokemon=OwnedPokemon.from_raw(raw);source=pokemon.species_id;pokemon.species_id=int(target_species)
     abilities=SPECIES[pokemon.species_id].abilities
@@ -1616,18 +1621,21 @@ class Pokemon(commands.Cog):
         if not center:await ctx.send("This server has not configured a Pokémon Center.");return
         if ctx.channel.id!=int(center):await ctx.send(f"Visit <#{center}> to use this server’s Pokémon Center.");return
         async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all();last=conf.get("center_last_at");now=datetime.now(timezone.utc)
+            conf=await self.config.user(ctx.author).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};before_party=[]
+            for identity in conf.get("party",[])[:6]:
+                raw=owned.get(identity)
+                if raw:before_party.append(OwnedPokemon.from_raw(raw))
+            if not before_party:await ctx.send("Choose a starter and prepare a party first.");return
+            if not any(pokemon_needs_center(pokemon) for pokemon in before_party):await ctx.send("Your party is already in perfect health!");return
+            last=conf.get("center_last_at");now=datetime.now(timezone.utc)
             if last:
                 try:remaining=max(60,int(await self.config.center_cooldown()))-(now-datetime.fromisoformat(last)).total_seconds()
                 except (TypeError,ValueError):remaining=0
                 if remaining>0:
                     seconds=int(remaining)+1;minutes,seconds=divmod(seconds,60);wait=f"{minutes}m {seconds}s" if minutes else f"{seconds}s";await ctx.send(f"The Pokémon Center will be ready again in {wait}.");return
-            owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};before_party=[];party=[]
-            for identity in conf.get("party",[])[:6]:
-                raw=owned.get(identity)
-                if not raw:continue
-                pokemon=OwnedPokemon.from_raw(raw);before_party.append(OwnedPokemon.from_raw(pokemon.raw()));pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status="";pokemon.status_turns=0;pokemon.move_pp={key:MOVES[key].pp for key in pokemon.moves};raw.update(pokemon.raw());party.append(pokemon)
-            if not party:await ctx.send("Choose a starter and prepare a party first.");return
+            party=[]
+            for pokemon in before_party:
+                raw=owned[pokemon.instance_id];healed=OwnedPokemon.from_raw(pokemon.raw());healed.current_hp=pokemon_max_hp(healed);healed.status="";healed.status_turns=0;healed.move_pp={key:MOVES[key].pp for key in healed.moves};raw.update(healed.raw());party.append(healed)
             conf["center_last_at"]=now.isoformat();await self.config.user(ctx.author).set(conf)
         embed,files=await self.rendered_center(ctx.author,before_party,False);message=await ctx.send(embed=embed,files=files)
         await asyncio.sleep(CENTER_TREATMENT_SECONDS)

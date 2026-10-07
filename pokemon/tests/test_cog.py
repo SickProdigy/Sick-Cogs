@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, patch
 from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import COMPLETED_GYMS,KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
-from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
+from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
+from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeCollectionView, GymChallengeView
@@ -823,7 +823,16 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(value>0 for value in healed.move_pp.values()))
         self.assertEqual(still_boxed.current_hp,1)
         await Pokemon.pokemon_center.callback(cog,ctx)
+        self.assertIn("already in perfect health",ctx.send.await_args.args[0])
+        damaged=OwnedPokemon.from_raw(section.value["collection"][0]);damaged.current_hp-=1;section.value["collection"][0]=damaged.raw()
+        await Pokemon.pokemon_center.callback(cog,ctx)
         self.assertIn("ready again in 30m",ctx.send.await_args.args[0])
+
+    def test_center_needed_for_hp_status_or_pp_but_not_healthy_party(self):
+        pokemon=OwnedPokemon.create("health-check",25,5,seed=2);self.assertFalse(pokemon_needs_center(pokemon))
+        pokemon.current_hp=pokemon_max_hp(pokemon)-1;self.assertTrue(pokemon_needs_center(pokemon))
+        pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status="poison";self.assertTrue(pokemon_needs_center(pokemon))
+        pokemon.status="";move=next(iter(pokemon.move_pp));pokemon.move_pp[move]-=1;self.assertTrue(pokemon_needs_center(pokemon))
 
     async def test_owner_can_adjust_center_cooldown(self):
         cooldown=StoredValue(1800);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(center_cooldown=cooldown);ctx=SimpleNamespace(send=AsyncMock())
