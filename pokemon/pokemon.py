@@ -31,10 +31,10 @@ MART_ITEMS={
     "water_stone":("Water Stone","water_stone",5000),
     "thunder_stone":("Thunder Stone","thunder_stone",5000),
     "leaf_stone":("Leaf Stone","leaf_stone",5000),
-    "moon_stone":("Moon Stone","moon_stone",5000),
+    "moon_stone":("Moon Stone","moon_stone",25000),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball","firestone":"fire_stone","waterstone":"water_stone","thunderstone":"thunder_stone","leafstone":"leaf_stone","moonstone":"moon_stone","fire":"fire_stone","water":"water_stone","thunder":"thunder_stone","leaf":"leaf_stone","moon":"moon_stone"}
-GLOBAL={"schema":17,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
+GLOBAL={"schema":18,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
 BOX_SIZE=30
 MAX_BOXES=8
 PARTY_SIZE=6
@@ -442,6 +442,10 @@ class Pokemon(commands.Cog):
                 if not battle:continue
                 battle["player"]=repair_underleveled_evolution_moves(battle["player"]);battle["party"]=[repair_underleveled_evolution_moves(item) for item in battle.get("party",[])]
             await self.config.encounters.set(encounters);await self.config.schema.set(17)
+        if schema<18:
+            prices=mart_prices(await self.config.mart_prices())
+            if prices["moon_stone"]==5000:prices["moon_stone"]=MART_ITEMS["moon_stone"][2]
+            await self.config.mart_prices.set(prices);await self.config.schema.set(18)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
