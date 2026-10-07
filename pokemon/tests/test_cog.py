@@ -814,6 +814,8 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         with patch("pokemon.pokemon.asyncio.sleep",new=AsyncMock()) as sleep:
             await Pokemon.pokemon_center.callback(cog,ctx)
         sleep.assert_awaited_once_with(5);self.assertEqual(cog.rendered_center.await_count,2)
+        before=cog.rendered_center.await_args_list[0].args[1][0];after=cog.rendered_center.await_args_list[1].args[1][0]
+        self.assertEqual(before.current_hp,0);self.assertEqual(after.current_hp,Battle.stat(after,"hp"))
         self.assertIsInstance(message.edit.await_args.kwargs["view"],CenterCollectView)
         healed=OwnedPokemon.from_raw(section.value["collection"][0]);still_boxed=OwnedPokemon.from_raw(section.value["collection"][1])
         self.assertEqual(healed.current_hp,Battle.stat(healed,"hp"))
