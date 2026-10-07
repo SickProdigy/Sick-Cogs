@@ -654,9 +654,14 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         edited=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=edited));cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel)
         await cog.expire_trades(datetime.fromisoformat(record["expires_at"])+timedelta(seconds=1));self.assertEqual(trades.value["1"]["state"],"expired");edited.edit.assert_awaited_once_with(content="This Pokémon trade offer expired.",view=None)
 
+    async def test_trade_command_cancel_retires_original_controls(self):
+        record={"state":"offered","trade_id":1,"offerer_id":10,"recipient_id":20,"channel_id":2,"message_id":99};trades=StoredValue({"1":record});edited=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=edited))
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(trades=trades);cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel);ctx=SimpleNamespace(author=SimpleNamespace(id=10),send=AsyncMock())
+        await Pokemon.trade_cancel.callback(cog,ctx,1);self.assertEqual(trades.value["1"]["state"],"cancelled");edited.edit.assert_awaited_once_with(content="Trade #1 was cancelled.",view=None)
+
     async def test_player_deletion_cancels_pending_trades(self):
-        trades=StoredValue({"1":{"state":"offered","offerer_id":10,"recipient_id":20}});section=StoredSection({"collection":[]});encounters=StoredValue({});cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:section,encounters=encounters)
-        await cog.reset_player_data(10);self.assertEqual(trades.value["1"]["state"],"cancelled_deleted_user");self.assertEqual(section.value,{})
+        record={"state":"offered","offerer_id":10,"recipient_id":20,"channel_id":2,"message_id":99};trades=StoredValue({"1":record});section=StoredSection({"collection":[]});encounters=StoredValue({});edited=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=edited));cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel);cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:section,encounters=encounters)
+        await cog.reset_player_data(10);self.assertEqual(trades.value["1"]["state"],"cancelled_deleted_user");self.assertEqual(section.value,{});edited.edit.assert_awaited_once_with(content="This Pokémon trade was cancelled because a trainer's data was deleted.",view=None)
 
     async def test_configured_center_restores_party_only(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
