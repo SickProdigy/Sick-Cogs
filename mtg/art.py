@@ -116,7 +116,7 @@ def _font(size):
     return ImageFont.load_default()
 
 
-def render_hand(cards, paths, page=0):
+def render_hand(cards, paths, page=0, playable_positions=()):
     start = page * HAND_PAGE_SIZE
     visible = cards[start : start + HAND_PAGE_SIZE]
     visible_paths = paths[start : start + HAND_PAGE_SIZE]
@@ -129,6 +129,7 @@ def render_hand(cards, paths, page=0):
     canvas = Image.new("RGB", (columns * 236 + 20, rows * row_height + 48), (22, 27, 25))
     draw = ImageDraw.Draw(canvas)
     title_font, label_font = _font(24), _font(14)
+    playable_positions=set(playable_positions)
     draw.text((16, 12), f"Private hand - page {page + 1}", fill=(240, 235, 218), font=title_font)
     for offset, (card, path) in enumerate(zip(visible, visible_paths)):
         column, row = offset % 4, offset // 4
@@ -146,9 +147,13 @@ def render_hand(cards, paths, page=0):
             fallback = ImageDraw.Draw(panel)
             fallback.multiline_text((14, 50), f"{card.name}\n\n{card.kind}\nCost {card.cost}\n\n{card.text}", fill=(240, 235, 218), font=_font(18), spacing=5)
         canvas.paste(panel, (x, y))
-        label = f"{start + offset + 1} · {card.kind}" + (f" · {card.mana_cost}" if card.mana_cost else "")
-        draw.rounded_rectangle((x, y - 31, x + card_width, y - 5), 8, fill=(15, 18, 17), outline=(222, 185, 82), width=2)
-        draw.text((x + card_width / 2, y - 18), label, fill=(255, 244, 207), font=label_font, anchor="mm")
+        position=start+offset+1; playable=position in playable_positions
+        label = f"{position} · {card.kind}" + (f" · {card.mana_cost}" if card.mana_cost else "")
+        fill=(35,29,14) if playable else (28,19,38)
+        outline=(222,185,82) if playable else (151,103,219)
+        text_color=(255,220,112) if playable else (211,181,255)
+        draw.rounded_rectangle((x, y - 31, x + card_width, y - 5), 8, fill=fill, outline=outline, width=2)
+        draw.text((x + card_width / 2, y - 18), label, fill=text_color, font=label_font, anchor="mm")
     output = io.BytesIO()
     canvas.save(output, format="PNG", optimize=True)
     output.seek(0)

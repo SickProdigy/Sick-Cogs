@@ -430,7 +430,7 @@ class HandPaginationView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog,self.game_id,self.user_id,self.page,self.pages=cog,game_id,user_id,page,pages
         game=cog.games.get(game_id); entries=_playable_hand_entries(game,user_id,page) if game and game.priority_user==user_id and game.phase!="opening" else []
-        self.playable_count=len(entries)
+        self.playable_count=len(entries); self.playable_positions={position for position,_ in entries}
         if game and game.phase=="opening" and not game.player(user_id).kept:
             if game.player(user_id).mulligans: self.add_item(OpeningBottomSelect(self,game))
             else: self.add_item(OpeningHandButton(self,True))

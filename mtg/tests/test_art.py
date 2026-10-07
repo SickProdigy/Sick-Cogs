@@ -30,6 +30,13 @@ class ArtTests(unittest.TestCase):
                 self.assertEqual(image.getpixel((43,99)),(255,255,255))
                 self.assertNotEqual(image.getpixel((126,56)),(255,255,255))
 
+    def test_hand_bezels_distinguish_playable_and_neutral_cards(self):
+        cards=list(CARDS.values())[:2]
+        output=render_hand(cards,[None,None],0,{1})
+        with Image.open(output) as image:
+            self.assertEqual(image.getpixel((126,41)),(222,185,82))
+            self.assertEqual(image.getpixel((362,41)),(151,103,219))
+
     def test_public_battlefield_render_is_bounded_png(self):
         game=Game(1,[10,20],1)
         creature=next(uid for uid,key in game.cards.items() if key=="lea:164")

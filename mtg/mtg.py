@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.121.3"
+    __version__="0.121.4"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -371,9 +371,9 @@ class MTG(commands.Cog):
         elif game.priority_user!=interaction.user.id: guidance="You do not currently have priority. Return to the public game table for the required action."
         elif view.playable_count: guidance="Use the private menu below to play or cast a currently legal card."
         else: guidance="You have no cards you can legally play right now. Return to the public table and use **Pass priority** or the required combat control."
-        text=guidance
+        text=guidance+"\n**Gold** = playable now · **Purple** = not currently playable."
         try:
-            image=await asyncio.to_thread(render_hand,cards,paths,page)
+            image=await asyncio.to_thread(render_hand,cards,paths,page,view.playable_positions)
             file=discord.File(image,filename=f"mtg-hand-{game_id}-{page+1}.png")
             if editing: await interaction.edit_original_response(content=text,attachments=[file],view=view)
             else:
