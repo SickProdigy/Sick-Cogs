@@ -401,10 +401,22 @@ class HandPlaySelect(discord.ui.Select):
 
 class OpeningHandButton(discord.ui.Button):
     def __init__(self,browser,keep):
-        super().__init__(label="Keep hand" if keep else "Mulligan",style=discord.ButtonStyle.success if keep else discord.ButtonStyle.secondary,row=0)
+        game=browser.cog.games.get(browser.game_id); mulligans=game.player(browser.user_id).mulligans if game else 0
+        label="Keep all 7 cards" if keep else f"Mulligan · next hand keeps {max(0,6-mulligans)}"
+        row=1 if mulligans and not keep else 0
+        super().__init__(label=label,style=discord.ButtonStyle.success if keep else discord.ButtonStyle.secondary,row=row)
         self.browser,self.keep=browser,keep
     async def callback(self,interaction):
         await self.browser.cog.opening_hand_interaction(interaction,self.browser.game_id,self.keep)
+
+class OpeningBottomSelect(discord.ui.Select):
+    def __init__(self,browser,game):
+        self.browser=browser; player=game.player(browser.user_id); count=min(player.mulligans,len(player.hand))
+        options=[discord.SelectOption(label=f"{position}. {game.card(uid).name}"[:100],description=f"{game.card(uid).kind} · {_mana_help(game.card(uid).mana_cost)}"[:100],value=str(position)) for position,uid in enumerate(player.hand,1)]
+        noun="card" if count==1 else "cards"
+        super().__init__(placeholder=f"Choose {count} {noun} to bottom, then keep",min_values=count,max_values=count,options=options,row=0)
+    async def callback(self,interaction):
+        await self.browser.cog.opening_hand_interaction(interaction,self.browser.game_id,True,[int(value) for value in self.values])
 
 class HandPassButton(discord.ui.Button):
     def __init__(self,browser):
@@ -420,7 +432,9 @@ class HandPaginationView(discord.ui.View):
         game=cog.games.get(game_id); entries=_playable_hand_entries(game,user_id,page) if game and game.priority_user==user_id and game.phase!="opening" else []
         self.playable_count=len(entries)
         if game and game.phase=="opening" and not game.player(user_id).kept:
-            self.add_item(OpeningHandButton(self,True)); self.add_item(OpeningHandButton(self,False))
+            if game.player(user_id).mulligans: self.add_item(OpeningBottomSelect(self,game))
+            else: self.add_item(OpeningHandButton(self,True))
+            self.add_item(OpeningHandButton(self,False))
         elif entries: self.add_item(HandPlaySelect(self,entries))
         if game and game.phase=="attackers" and game.active_user==user_id:
             eligible=[permanent for permanent in game.player(user_id).battlefield if game.can_attack_permanent(permanent)]

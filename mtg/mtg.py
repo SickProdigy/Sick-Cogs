@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.121.1"
+    __version__="0.121.2"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -335,7 +335,8 @@ class MTG(commands.Cog):
         for event in visible:
             actor=names.get(event.get("user"),"Game")
             turn=event.get("turn","?"); phase=str(event.get("phase","unknown")).replace("_"," ").title(); action=labels.get(event.get("action"),str(event.get("action","Action")).replace("_"," ").title())
-            lines.append(f"**#{event.get('seq', '?')} · Turn {turn} · {phase}** — {actor}: {action}")
+            detail=str(event.get("detail","")).replace("\n"," ")[:180]
+            lines.append(f"**#{event.get('seq', '?')} · Turn {turn} · {phase}** — {actor}: {action}"+(f" — {detail}" if detail else ""))
         content=f"**Game {game_id} history · newest first · page {page+1}/{pages}**\n"+("\n".join(lines) if lines else "No actions have been recorded yet.")
         view=HistoryPaginationView(self,game_id,interaction.user.id,page,pages)
         if editing: await interaction.edit_original_response(content=content,view=view)
@@ -358,7 +359,12 @@ class MTG(commands.Cog):
         paths=[None]*start+visible_paths
         fallback_text="\n".join(f"**{start+n}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for n,card in enumerate(visible,1)) or "Your hand is empty."
         view=HandPaginationView(self,game_id,interaction.user.id,page,pages)
-        if game.phase=="opening": guidance="You kept this hand. Waiting for the other player." if game.player(interaction.user.id).kept else "Choose **Keep hand** or **Mulligan** below."
+        if game.phase=="opening":
+            player=game.player(interaction.user.id)
+            if player.kept: guidance="You kept this hand. Waiting for the other player."
+            elif player.mulligans:
+                kept=max(0,len(player.hand)-player.mulligans); guidance=f"To keep **{kept} cards**, select exactly **{player.mulligans}** card{'s' if player.mulligans!=1 else ''} to put on the bottom of your library. Or choose **Mulligan** to redraw."
+            else: guidance="Choose **Keep all 7 cards** or **Mulligan** below."
         elif game.phase=="attackers" and game.active_user==interaction.user.id: guidance="**Your turn — choose attackers below**, or choose **No attacks**."
         elif game.phase=="blockers" and game.opponent(game.active_user)==interaction.user.id: guidance="**You are defending — choose blockers below**, or choose **No blocks**."
         elif game.phase in ("attackers","blockers"): guidance="Waiting for the other player to complete the combat declaration."
@@ -382,13 +388,16 @@ class MTG(commands.Cog):
                 kwargs={"ephemeral":True}
                 if view is not None: kwargs["view"]=view
                 await interaction.followup.send(fallback,**kwargs)
-    async def opening_hand_interaction(self,interaction,game_id,keep):
+    async def opening_hand_interaction(self,interaction,game_id,keep,bottom_positions=None):
         game=self.games.get(game_id)
         if not game or interaction.user.id not in game.order:
             await interaction.response.send_message("This private hand is unavailable.",ephemeral=True); return
         async with self.lock(game.game_id):
             try:
-                game.mulligan(interaction.user.id,keep); game.record(interaction.user.id,"keep" if keep else "mulligan"); self.advance_automatic(game); await self.save(game)
+                player=game.player(interaction.user.id); mulligans=player.mulligans
+                game.mulligan(interaction.user.id,keep,bottom_positions)
+                detail=(f"Kept {len(player.hand)} cards; put {mulligans} on the bottom of the library." if keep and mulligans else "Kept all 7 cards." if keep else f"Redrew seven cards; keeping {max(0,6-mulligans)} if this hand is kept.")
+                game.record(interaction.user.id,"keep" if keep else "mulligan",detail); self.advance_automatic(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
         await interaction.response.defer()

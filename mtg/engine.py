@@ -463,12 +463,16 @@ class Game:
                 else: failed.add(user)
         self._finish_failed_draws(failed)
 
-    def mulligan(self,user,keep):
+    def mulligan(self,user,keep,bottom_positions=None):
         if self.phase!="opening": raise GameError("Opening hands are complete.")
         p=self.player(user)
         if p.kept: raise GameError("You already kept.")
         if keep:
-            for _ in range(min(p.mulligans, len(p.hand))): p.library.insert(0, p.hand.pop())
+            count=min(p.mulligans,len(p.hand))
+            positions=list(bottom_positions) if bottom_positions is not None else list(range(len(p.hand)-count+1,len(p.hand)+1))
+            if len(positions)!=count or len(set(positions))!=count or any(position<1 or position>len(p.hand) for position in positions):
+                raise GameError(f"Choose exactly {count} card{'s' if count!=1 else ''} to put on the bottom of your library.")
+            for position in sorted(positions,reverse=True): p.library.insert(0,p.hand.pop(position-1))
             p.kept=True
         else:
             p.library+=p.hand; p.hand=[]; random.SystemRandom().shuffle(p.library); self._draw(p,7)

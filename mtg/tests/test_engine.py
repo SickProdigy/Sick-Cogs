@@ -19,8 +19,17 @@ class OpeningTests(unittest.TestCase):
     def test_london_mulligan_and_first_player_skips_draw(self):
         g=Game(1,[10,20],2); g.mulligan(10,False)
         self.assertEqual(len(g.hand(10)),7)
-        g.mulligan(10,True); g.mulligan(20,True)
+        chosen=g.player(10).hand[1]
+        g.mulligan(10,True,[2]); g.mulligan(20,True)
         self.assertEqual(g.turn,1); self.assertEqual(len(g.hand(10)),6); self.assertEqual(len(g.hand(20)),7)
+        self.assertNotIn(chosen,g.player(10).hand); self.assertIn(chosen,g.player(10).library)
+
+    def test_london_mulligan_requires_exact_valid_bottom_choices(self):
+        g=Game(1,[10,20],2); g.mulligan(10,False); g.mulligan(10,False)
+        for positions in ([1],[1,1],[1,8]):
+            with self.assertRaisesRegex(GameError,"Choose exactly 2 cards"):
+                g.mulligan(10,True,positions)
+        g.mulligan(10,True,[1,7]); self.assertEqual(len(g.hand(10)),5)
 
 class TurnTests(unittest.TestCase):
     def test_land_once_and_turn_progression(self):

@@ -849,7 +849,7 @@ class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.mulligan(20,True); cog.games={1:game}
         cog.art_cache=SimpleNamespace(get=AsyncMock(return_value="unused.jpg"))
         interaction=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(defer=AsyncMock(),send_message=AsyncMock()),edit_original_response=AsyncMock())
-        view=HandPaginationView(cog,1,10,0,1); keep=next(item for item in view.children if getattr(item,"label",None)=="Keep hand")
+        view=HandPaginationView(cog,1,10,0,1); keep=next(item for item in view.children if getattr(item,"label",None)=="Keep all 7 cards")
         with patch("mtg.mtg.render_hand",return_value=Mock()), patch("mtg.mtg.discord.File",return_value=Mock()):
             await keep.callback(interaction)
         self.assertTrue(game.player(10).kept)
@@ -857,6 +857,19 @@ class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
         interaction.edit_original_response.assert_awaited_once()
         self.assertNotIn("Choose **Keep hand**",interaction.edit_original_response.await_args.kwargs["content"])
         cog.refresh_message.assert_awaited_once_with(game)
+
+    async def test_private_mulligan_requires_player_selected_bottom_cards(self):
+        cog=cog_fixture(); game=Game(1,[10,20],1); game.mulligan(10,False); game.mulligan(10,False); game.mulligan(20,True); cog.games={1:game}
+        cog.art_cache=SimpleNamespace(get=AsyncMock(return_value="unused.jpg"))
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(defer=AsyncMock(),send_message=AsyncMock()),edit_original_response=AsyncMock())
+        view=HandPaginationView(cog,1,10,0,1); selector=next(item for item in view.children if getattr(item,"placeholder","").startswith("Choose 2 cards"))
+        selector._values=["2","6"]
+        chosen=[game.player(10).hand[1],game.player(10).hand[5]]
+        with patch("mtg.mtg.render_hand",return_value=Mock()), patch("mtg.mtg.discord.File",return_value=Mock()):
+            await selector.callback(interaction)
+        self.assertTrue(game.player(10).kept); self.assertEqual(len(game.player(10).hand),5)
+        self.assertTrue(all(uid in game.player(10).library for uid in chosen))
+        self.assertIn("put 2 on the bottom",game.history[-1]["detail"])
 
     def test_private_hand_only_lists_currently_playable_cards(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.phase="precombat_main"; game.priority_user=10; cog.games={1:game}
