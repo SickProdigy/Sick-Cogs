@@ -95,6 +95,18 @@ class CenterCollectView(discord.ui.View):
         await interaction.response.edit_message(content=f"**{name}** collected their fully restored party.",view=None)
 
 
+class ReleasePokemonView(discord.ui.View):
+    def __init__(self,cog,user_id,identity,name):
+        super().__init__(timeout=120);self.cog=cog;self.user_id=user_id;self.identity=identity;self.name=name
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This release confirmation belongs to another trainer.",ephemeral=True);return False
+    @discord.ui.button(label="Release Pokémon",emoji="🕊️",style=discord.ButtonStyle.danger)
+    async def confirm(self,interaction,button):await self.cog.release_collection_pokemon(interaction,self.identity,self.name)
+    @discord.ui.button(label="Keep Pokémon",style=discord.ButtonStyle.secondary)
+    async def cancel(self,interaction,button):await interaction.response.edit_message(content=f"**{self.name}** was kept.",view=None)
+
+
 class TradeCollectionView(discord.ui.View):
     def __init__(self,cog,user_id,trainer,page,pages):
         super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;self.trainer=trainer;self.page=page;self.pages=pages
