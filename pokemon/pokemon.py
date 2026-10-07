@@ -6,7 +6,7 @@ from datetime import datetime,timedelta,timezone
 from pathlib import Path
 import discord
 from discord.ext import tasks
-from redbot.core import Config,commands
+from redbot.core import Config,bank,commands
 from redbot.core.data_manager import cog_data_path
 from .catalog import CatalogError,PokemonCatalog
 from .catalog_versions import CATALOG_VERSIONS
@@ -21,7 +21,15 @@ log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete"}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[]}
-GLOBAL={"schema":7,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
+MART_ITEMS={
+    "poke_ball":("Poké Ball","balls",50),
+    "great_ball":("Great Ball","great_ball",150),
+    "ultra_ball":("Ultra Ball","ultra_ball",300),
+    "potion":("Potion","potion",75),
+    "revive":("Revive","revive",400),
+}
+MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
+GLOBAL={"schema":8,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()}}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
@@ -66,6 +74,20 @@ def rarity_tier(species):
 
 def first_pokedex_registration(conf,species_id):
     return int(species_id) not in {int(value) for value in conf.get("pokedex_caught",[]) if str(value).isdigit()}
+
+def mart_item_key(value):
+    key=str(value).casefold().replace("-","_").replace(" ","_")
+    return MART_ALIASES.get(key,key) if MART_ALIASES.get(key,key) in MART_ITEMS else None
+
+def mart_prices(configured=None):
+    configured=configured or {}
+    return {key:max(1,int(configured.get(key,details[2]))) for key,details in MART_ITEMS.items()}
+
+def grant_mart_item(conf,key,quantity):
+    storage=MART_ITEMS[key][1]
+    if storage=="balls":conf["balls"]=int(conf.get("balls",0))+quantity
+    else:
+        items=conf.setdefault("items",{});items[storage]=int(items.get(storage,0))+quantity;conf["items"]=items
 
 def spawn_weight(species,profile="friendly"):
     weights=RARITY_PROFILES.get(profile,RARITY_PROFILES["friendly"])
@@ -123,7 +145,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.39.1";__author__="SickProdigy"
+    __version__="0.40.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -248,6 +270,9 @@ class Pokemon(commands.Cog):
                 data["pokedex_stats"]=migrated_pokedex_stats(data);data.setdefault("recorded_battles",[]);data.setdefault("achievement_rewards",[])
                 await self.config.user_from_id(int(user_id)).set(data)
             await self.config.schema.set(7)
+        if schema<8:
+            await self.config.mart_prices.set(mart_prices(await self.config.mart_prices()))
+            await self.config.schema.set(8)
     def lock(self,key):return self.locks.setdefault(key,asyncio.Lock())
     async def put_encounter(self,eid,raw):
         async with self.lock("encounters"):
@@ -893,6 +918,41 @@ class Pokemon(commands.Cog):
         conf=await self.config.user(ctx.author).all();items=conf.get("items",{})
         await ctx.send(f"**Poké Balls**\nPoké Ball: **{int(conf.get('balls',0))}** · Great Ball: **{int(items.get('great_ball',0))}** · Ultra Ball: **{int(items.get('ultra_ball',0))}**\n**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**")
 
+    @pokemon.command(name="mart")
+    @commands.guild_only()
+    async def pokemon_mart(self,ctx):
+        """View supplies sold for Red bank credits."""
+        prices=mart_prices(await self.config.mart_prices());currency=await bank.get_currency_name(ctx.guild);balance=await bank.get_balance(ctx.author)
+        lines=[f"**{label}** — {prices[key]:,} {currency}" for key,(label,_,_) in MART_ITEMS.items()]
+        scope="global" if await bank.is_global() else "server-local"
+        await ctx.send("**Poké Mart**\n"+"\n".join(lines)+f"\n\nYour balance: **{balance:,} {currency}** ({scope})\nBuy with `{ctx.clean_prefix}poke buy <item> [quantity]`.")
+
+    @pokemon.command(name="buy")
+    @commands.guild_only()
+    async def pokemon_buy(self,ctx,item:str,quantity:int=1):
+        """Buy Poké Mart supplies with Red bank credits."""
+        key=mart_item_key(item)
+        if not key:await ctx.send("Choose pokeball, greatball, ultraball, potion, or revive.");return
+        if not 1<=quantity<=100:await ctx.send("Choose a quantity from 1 to 100.");return
+        prices=mart_prices(await self.config.mart_prices());cost=prices[key]*quantity;currency=await bank.get_currency_name(ctx.guild);label=MART_ITEMS[key][0]
+        async with self.lock(("user",ctx.author.id)):
+            if not await bank.can_spend(ctx.author,cost):
+                balance=await bank.get_balance(ctx.author);await ctx.send(f"You need **{cost:,} {currency}** but only have **{balance:,}**.");return
+            charged=False
+            try:
+                await bank.withdraw_credits(ctx.author,cost);charged=True
+                conf=await self.config.user(ctx.author).all();grant_mart_item(conf,key,quantity);await self.config.user(ctx.author).set(conf)
+            except Exception:
+                if charged:
+                    try:await bank.deposit_credits(ctx.author,cost)
+                    except Exception:
+                        log.critical("Could not refund failed Poké Mart purchase for user %s",ctx.author.id,exc_info=True)
+                        await ctx.send("The purchase failed and its refund also failed. Please contact the bot owner.");return
+                log.exception("Poké Mart purchase failed for user %s",ctx.author.id)
+                await ctx.send("The purchase failed. Your payment was returned.");return
+        balance=await bank.get_balance(ctx.author);plural="" if quantity==1 else "s"
+        await ctx.send(f"Purchased **{quantity} {label}{plural}** for **{cost:,} {currency}**. Balance: **{balance:,}**.")
+
     @pokemon.group(name="use",invoke_without_command=True)
     async def pokemon_use(self,ctx):
         """Use an item on one of your Pokémon."""
@@ -1234,6 +1294,16 @@ class Pokemon(commands.Cog):
                 remaining=max(0,round((last+timedelta(seconds=cooldown)-datetime.now(timezone.utc)).total_seconds())) if last else 0
                 if remaining:await ctx.send(f"The activity spawn cooldown is active for another {remaining}s.");return
         await self.spawn(channel,force_shiny=force_shiny)
+    @pokemon_set.command(name="martprice")
+    @commands.is_owner()
+    async def mart_price(self,ctx,item:str,price:int):
+        """Set a bot-wide Poké Mart item price."""
+        key=mart_item_key(item)
+        if not key:await ctx.send("Choose pokeball, greatball, ultraball, potion, or revive.");return
+        if not 1<=price<=1_000_000_000:await ctx.send("Use a price from 1 to 1,000,000,000 credits.");return
+        prices=mart_prices(await self.config.mart_prices());prices[key]=price;await self.config.mart_prices.set(prices)
+        await ctx.send(f"{MART_ITEMS[key][0]} now costs {price:,} credits.")
+
     @pokemon_set.command(name="pokedexstyle")
     @commands.is_owner()
     async def default_pokedex_style(self,ctx,style:str=None):

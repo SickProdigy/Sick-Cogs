@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import GUILD, PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
+from pokemon.pokemon import GUILD, MART_ITEMS, PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
@@ -207,6 +207,8 @@ class CogPolicyTests(unittest.TestCase):
         self.assertNotIn("pokemon heal",player_names)
         self.assertFalse(any(name.startswith("pokemon set") for name in player_names))
         self.assertIn("pokemon center",player_names)
+        self.assertIn("pokemon mart",player_names)
+        self.assertIn("pokemon buy",player_names)
         self.assertIn("pokemon use potion",player_names)
         self.assertIn("pokemon use revive",player_names)
         self.assertIn("pokemon pokedex",player_names)
@@ -216,6 +218,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemon profilestyle",player_names)
         self.assertIn("pokemonset battleexpiry",admin_names)
         self.assertIn("pokemonset encountertime",admin_names)
+        self.assertIn("pokemonset martprice",admin_names)
         self.assertIn("pokemonset rarity",admin_names)
         self.assertIn("pokemonset catalogsync",admin_names)
         self.assertIn("pokemonset resetplayer",admin_names)
@@ -445,6 +448,37 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([Pokemon.ball_inventory(conf,key) for key in ("poke_ball","great_ball","ultra_ball")],[10,3,1])
         Pokemon.consume_ball(conf,"poke_ball");Pokemon.consume_ball(conf,"great_ball");Pokemon.consume_ball(conf,"ultra_ball")
         self.assertEqual((conf["balls"],conf["items"]["great_ball"],conf["items"]["ultra_ball"]),(9,2,0))
+
+    async def test_mart_defaults_and_aliases_match_payday_scale(self):
+        self.assertEqual(mart_prices(),{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400})
+        self.assertEqual((mart_item_key("pokeball"),mart_item_key("great-ball"),mart_item_key("missing")),("poke_ball","great_ball",None))
+        conf={"balls":1,"items":{"potion":2}};grant_mart_item(conf,"poke_ball",3);grant_mart_item(conf,"potion",2)
+        self.assertEqual((conf["balls"],conf["items"]["potion"]),(4,4))
+
+    async def test_mart_purchase_withdraws_bank_credits_and_grants_items(self):
+        section=StoredSection({"balls":10,"items":{"great_ball":3}});prices=StoredValue({key:value[2] for key,value in MART_ITEMS.items()})
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(mart_prices=prices,user=lambda user:section)
+        ctx=SimpleNamespace(author=SimpleNamespace(id=7),guild=SimpleNamespace(id=42),send=AsyncMock())
+        with patch("pokemon.pokemon.bank.get_currency_name",AsyncMock(return_value="credits")),patch("pokemon.pokemon.bank.can_spend",AsyncMock(return_value=True)),patch("pokemon.pokemon.bank.withdraw_credits",AsyncMock()) as withdraw,patch("pokemon.pokemon.bank.get_balance",AsyncMock(return_value=700)):
+            await Pokemon.pokemon_buy.callback(cog,ctx,"greatball",2)
+        withdraw.assert_awaited_once_with(ctx.author,300)
+        self.assertEqual(section.value["items"]["great_ball"],5)
+        self.assertIn("2 Great Balls",ctx.send.await_args.args[0])
+
+    async def test_mart_refunds_when_inventory_persistence_fails(self):
+        section=SimpleNamespace(all=AsyncMock(return_value={"balls":10,"items":{}}),set=AsyncMock(side_effect=RuntimeError("storage failed")));prices=StoredValue({key:value[2] for key,value in MART_ITEMS.items()})
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(mart_prices=prices,user=lambda user:section)
+        ctx=SimpleNamespace(author=SimpleNamespace(id=7),guild=SimpleNamespace(id=42),send=AsyncMock())
+        with patch("pokemon.pokemon.bank.get_currency_name",AsyncMock(return_value="credits")),patch("pokemon.pokemon.bank.can_spend",AsyncMock(return_value=True)),patch("pokemon.pokemon.bank.withdraw_credits",AsyncMock()),patch("pokemon.pokemon.bank.deposit_credits",AsyncMock()) as refund:
+            await Pokemon.pokemon_buy.callback(cog,ctx,"pokeball",2)
+        refund.assert_awaited_once_with(ctx.author,100)
+        ctx.send.assert_awaited_once_with("The purchase failed. Your payment was returned.")
+
+    async def test_bot_owner_can_adjust_mart_price(self):
+        prices=StoredValue({key:value[2] for key,value in MART_ITEMS.items()});cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(mart_prices=prices);ctx=SimpleNamespace(send=AsyncMock())
+        await Pokemon.mart_price.callback(cog,ctx,"ultraball",450)
+        self.assertEqual(prices.value["ultra_ball"],450)
+        ctx.send.assert_awaited_once_with("Ultra Ball now costs 450 credits.")
 
     async def test_pokedex_goals_award_once_at_collection_and_victory_milestones(self):
         current=battle();current.state="won"
