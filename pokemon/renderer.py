@@ -223,7 +223,9 @@ class BattleRenderer:
         if battle.state!="active":
             species_id=battle.player.species_id if battle.state=="won" else battle.wild_species_id
             result_sprite=await self.get_sprite(species_id,shiny=battle.player.shiny if battle.state=="won" else battle.wild_shiny)
-            try:return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data)
+            try:
+                if battle.state=="won" and battle.gym_key:return await self._render(self._gym_victory_sync,battle,result_sprite,avatar_data)
+                return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data)
             except (OSError,ValueError) as exc:raise RenderError("Battle result rendering failed.") from exc
         front = await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
         try:
@@ -411,7 +413,7 @@ class BattleRenderer:
         trainer=" ".join(str(battle.trainer_name or "Trainer").split())[:24] or "Trainer"
         if battle.state=="caught":return f"Gotcha! {wild.name} was caught by {trainer}!"
         if battle.state=="won":return f"{trainer} defeated {wild.name}!"
-        if battle.state=="lost":return f"{wild.name} escaped from {trainer}! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
+        if battle.state=="lost":return (f"Gym challenge lost, {trainer}! Go to a Pokemon Center to heal." if battle.gym_key else f"{wild.name} escaped from {trainer}! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
         return f"{wild.name} escaped from {trainer}!"
 
     @classmethod
@@ -428,6 +430,22 @@ class BattleRenderer:
         canvas.paste(avatar,(x,y),mask)
         return True
 
+    def _gym_victory_sync(self,battle,data,avatar_data=None):
+        labels={"boulder":"Boulder Badge","cascade":"Cascade Badge","thunder":"Thunder Badge","rainbow":"Rainbow Badge","soul":"Soul Badge","marsh":"Marsh Badge","volcano":"Volcano Badge","earth":"Earth Badge"}
+        badge=labels.get(battle.gym_key,"Gym Badge");canvas=Image.new("RGB",(800,450),(229,214,145));draw=ImageDraw.Draw(canvas)
+        for y in range(450):
+            ratio=y/449;draw.line((0,y,800,y),fill=(int(244-49*ratio),int(232-58*ratio),int(174-69*ratio)))
+        draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
+        self._trainer_portrait(canvas,draw,avatar_data,center=(125,190),diameter=112)
+        draw.text((400-int(draw.textlength(badge,font=ImageFont.load_default(size=36)))//2,42),badge,fill=RETRO[0],font=ImageFont.load_default(size=36))
+        image=self._open(data,(220,190),trim=True,upscale=True);canvas.paste(image,(365-image.width//2,300-image.height),image)
+        if battle.gym_key=="boulder":
+            points=((610,125),(665,105),(714,140),(705,205),(650,242),(592,207),(580,150))
+            draw.polygon(points,fill=(126,126,112),outline=RETRO[0]);draw.line((607,144,648,128,687,151,674,195,632,211,604,188,607,144),fill=(201,192,151),width=6)
+        draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
+        self._dialogue(draw,battle.result or f"{badge} earned!",(70,360),width=76,size=16)
+        return self._save(canvas)
+
     def _battle_result_sync(self,battle,data,avatar_data=None):
         wild=SPECIES[battle.wild_species_id];message=self.battle_result_text(battle)
         if battle.state in {"lost","ran"}:
@@ -440,7 +458,8 @@ class BattleRenderer:
             self._status_box(draw,(40,35),wild.name,battle.wild_level,battle.wild_hp,battle.wild_max_hp,battle.wild_status,battle.wild_gender)
             if battle.state=="lost":
                 draw.rounded_rectangle((430,275,750,345),12,fill=RETRO[7],outline=RETRO[0],width=4)
-                draw.text((474,298),"ESCAPED",fill=RETRO[0],font=ImageFont.load_default(size=24))
+                label="CHALLENGE LOST" if battle.gym_key else "ESCAPED"
+                draw.text((474,298),label,fill=RETRO[0],font=ImageFont.load_default(size=20 if battle.gym_key else 24))
             draw.rectangle((0,390,800,450),fill=RETRO[5],outline=RETRO[0],width=5)
             self._dialogue(draw,message,(20,400))
             return self._save(canvas)
