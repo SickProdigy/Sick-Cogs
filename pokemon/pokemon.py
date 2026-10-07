@@ -123,7 +123,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.39.0";__author__="SickProdigy"
+    __version__="0.39.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -186,7 +186,7 @@ class Pokemon(commands.Cog):
         now=now or datetime.now(timezone.utc)
         for guild_id,conf in (await self.config.all_guilds()).items():
             if not conf.get("enabled") or conf.get("spawn_mode","timed")!="timed" or not conf.get("channels"):continue
-            section=self.config.guild_from_id(int(guild_id));minutes=max(30,int(conf.get("timer_minutes",60)))
+            section=self.config.guild_from_id(int(guild_id));minutes=max(10,int(conf.get("timer_minutes",60)))
             try:due=datetime.fromisoformat(conf.get("next_spawn_at") or "")
             except (TypeError,ValueError):due=None
             if due is None:
@@ -316,7 +316,7 @@ class Pokemon(commands.Cog):
         await self.config.guild(channel.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1))
         spawned_at=datetime.now(timezone.utc);section=self.config.guild(channel.guild)
         await section.last_spawn_at.set(spawned_at.isoformat())
-        if conf.get("spawn_mode","timed")=="timed":await section.next_spawn_at.set((spawned_at+timedelta(minutes=max(30,int(conf.get("timer_minutes",60))))).isoformat())
+        if conf.get("spawn_mode","timed")=="timed":await section.next_spawn_at.set((spawned_at+timedelta(minutes=max(10,int(conf.get("timer_minutes",60))))).isoformat())
     async def claim(self,i,eid):
         async with self.lock(("user",i.user.id)), self.lock(("encounter",eid)), self.lock("encounters"):
             if any(b.user_id==i.user.id and b.state=="active" for b in self.battles.values()):
@@ -1085,7 +1085,7 @@ class Pokemon(commands.Cog):
         if not already:channels.append(channel.id)
         await section.channels.set(channels);await section.enabled.set(True)
         if await section.spawn_mode()=="timed" and not await section.next_spawn_at():
-            minutes=max(30,int(await section.timer_minutes()));await section.next_spawn_at.set((datetime.now(timezone.utc)+timedelta(minutes=minutes)).isoformat())
+            minutes=max(10,int(await section.timer_minutes()));await section.next_spawn_at.set((datetime.now(timezone.utc)+timedelta(minutes=minutes)).isoformat())
         if already and was_enabled:message=f"Wild encounters were already enabled in {channel.mention}."
         elif already:message=f"Wild encounters re-enabled in {channel.mention}."
         else:message=f"Wild encounters enabled in {channel.mention}."
@@ -1116,7 +1116,7 @@ class Pokemon(commands.Cog):
         channels=", ".join(f"<#{value}>" for value in conf.get("channels",[])) or "None"
         center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None";active=conf.get("active_encounter")
         if mode=="timed":
-            minutes=max(30,int(conf.get("timer_minutes",60)));due_text="Scheduling now"
+            minutes=max(10,int(conf.get("timer_minutes",60)));due_text="Scheduling now"
             try:due=datetime.fromisoformat(conf.get("next_spawn_at") or "")
             except (TypeError,ValueError):due=None
             if due:due_text=f"<t:{int(due.timestamp())}:R>"
@@ -1150,17 +1150,17 @@ class Pokemon(commands.Cog):
         if mode not in {"timed","activity"}:await ctx.send("Choose timed or activity.");return
         section=self.config.guild(ctx.guild);await section.spawn_mode.set(mode)
         if mode=="timed":
-            minutes=max(30,int(await section.timer_minutes()));due=datetime.now(timezone.utc)+timedelta(minutes=minutes);await section.next_spawn_at.set(due.isoformat())
+            minutes=max(10,int(await section.timer_minutes()));due=datetime.now(timezone.utc)+timedelta(minutes=minutes);await section.next_spawn_at.set(due.isoformat())
             await ctx.send(f"Timed encounters enabled every {minutes} minutes. The next encounter is <t:{int(due.timestamp())}:R>.")
         else:
             await section.next_spawn_at.set(None);await ctx.send("Activity-based encounters enabled. Timed spawning is paused.")
 
     @pokemon_set.command(name="timer")
     async def spawn_timer(self,ctx,minutes:int):
-        """Set the timed interval; bot owners may use 30 minutes."""
-        owner=await self.bot.is_owner(ctx.author);minimum=30 if owner else 60
+        """Set the timed interval; bot owners may use 10 minutes."""
+        owner=await self.bot.is_owner(ctx.author);minimum=10 if owner else 60
         if not minimum<=minutes<=10080:
-            limit="30–10080 minutes" if owner else "60–10080 minutes; only the bot owner may use 30–59"
+            limit="10–10080 minutes" if owner else "60–10080 minutes; only the bot owner may use 10–59"
             await ctx.send(f"Use {limit}.");return
         section=self.config.guild(ctx.guild);await section.timer_minutes.set(minutes)
         if await section.spawn_mode()=="timed":
@@ -1226,7 +1226,7 @@ class Pokemon(commands.Cog):
             try:last=datetime.fromisoformat(conf["last_spawn_at"])
             except (TypeError,ValueError):last=None
             if conf.get("spawn_mode","timed")=="timed":
-                due=last+timedelta(minutes=max(30,int(conf.get("timer_minutes",60)))) if last else None
+                due=last+timedelta(minutes=max(10,int(conf.get("timer_minutes",60)))) if last else None
                 remaining=max(0,round((due-datetime.now(timezone.utc)).total_seconds())) if due else 0
                 if remaining:await ctx.send(f"The server spawn timer is active for another {remaining}s.");return
             else:
