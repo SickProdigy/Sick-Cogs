@@ -113,6 +113,20 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(game.winner, AI)
         self.assertIn(game.finished_reason, {"zero life", "empty library"})
 
+    def test_solo_automation_stops_for_human_with_legal_blocker(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True
+        game.player(AI).battlefield=[]; game.player(HUMAN).battlefield=[]
+        attacker=self.add(game,AI,"giant"); blocker=self.add(game,HUMAN,"bear"); blocker.sick=True
+        game.active_index=0; game.attackers=[attacker.uid]; game.phase="after_attackers"; game.priority_user=AI
+        for _ in range(20):
+            ai_changed=advance_solo(game); pass_changed=game.auto_pass_empty_priority()
+            if not ai_changed and not pass_changed: break
+        self.assertEqual((game.phase,game.priority_user),("blockers",None))
+        self.assertTrue(game.can_block(attacker.uid,blocker.uid)[0])
+        self.assertFalse(any(event["action"]=="auto_no_blocks" for event in game.history))
+        game.declare_blockers(HUMAN,{1:1})
+        self.assertEqual(game.blocks,{attacker.uid:blocker.uid})
+
     def test_ai_accounts_for_basilisk_end_combat_destruction_when_blocking(self):
         hunting=solo(); hunting.player(HUMAN).kept=True; hunting.player(AI).kept=True
         giant=self.add(hunting,HUMAN,"giant"); basilisk=self.add(hunting,AI,"lea:218"); bear=self.add(hunting,AI,"bear")
