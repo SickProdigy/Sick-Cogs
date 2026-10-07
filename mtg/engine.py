@@ -845,8 +845,6 @@ class Game:
         if self.stack and self.stack[-1].decision_pending:
             return True
         player=self.player(user)
-        if player.mana_pool:
-            return True
         main_phase=user==self.active_user and self.phase in ("precombat_main","postcombat_main") and not self.stack
         for uid in player.hand:
             card=self.card(uid)
@@ -856,11 +854,18 @@ class Game:
             timing=card.kind=="Instant" or main_phase
             if timing and self.can_pay(user,card,0): return True
         for position,permanent in enumerate(player.battlefield,1):
-            card=self.card(permanent.uid)
-            mana_ready=not permanent.tapped and bool(self.current_mana_choices(permanent)) and not (self.is_creature(permanent) and permanent.sick and not card.haste and "haste" not in self.current_keywords(permanent))
-            activation_cost,activation_effect,activation_tap,_=self._activation_profile(permanent)
-            activation_ready=bool(activation_cost or activation_effect) and not (activation_tap and permanent.tapped)
-            if mana_ready or activation_ready: return True
+            card=self.card(permanent.uid); activation_cost,activation_effect,activation_tap,_=self._activation_profile(permanent)
+            if not (activation_cost or activation_effect): continue
+            if activation_effect=="corpse_regenerate" and permanent.corpse_counters<=0: continue
+            if card.activation_upkeep_only and (self.phase!="upkeep" or self.active_user!=user): continue
+            if activation_effect=="force_attack" and (user==self.active_user or self.phase not in ("upkeep","draw","precombat_main")): continue
+            if card.activation_controller_turn_only and self.active_user!=user: continue
+            if card.activation_owner_only and permanent.owner!=user: continue
+            if card.activation_once_per_turn and permanent.activations_this_turn: continue
+            if card.animate_combat and self.phase not in ("after_attackers","after_blockers","after_first_strike"): continue
+            if activation_tap and (permanent.tapped or (self.is_creature(permanent) and permanent.sick and not card.haste and "haste" not in self.current_keywords(permanent))): continue
+            excluded=(permanent.uid,) if activation_tap else ()
+            if self._mana_payment(player,card,mana_cost=activation_cost,excluded_uids=excluded,activation_colors=self.current_colors(permanent),activation_is_enchantment=card.has_type("Enchantment")) is not None: return True
         return False
 
     def auto_pass_empty_priority(self):

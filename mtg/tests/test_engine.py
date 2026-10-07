@@ -76,12 +76,19 @@ class TurnTests(unittest.TestCase):
         self.assertEqual((game.phase,game.priority_user),("attackers",None))
         self.assertTrue(any(event["action"]=="auto_pass" for event in game.history))
 
-    def test_smart_priority_stops_for_playable_land_and_ready_mana(self):
+    def test_smart_priority_stops_for_playable_land_but_not_unused_mana(self):
         game=ready(); game.phase="precombat_main"; game.priority_user=10
         game.player(10).hand=[]; land=game.next_uid; game.next_uid+=1; game.cards[land]="mountain"; game.player(10).hand=[land]
         self.assertFalse(game.auto_pass_empty_priority()); self.assertEqual(game.priority_user,10)
         game.player(10).hand=[]; game.priority_user=20; game.player(20).hand=[]; mana=game.next_uid; game.next_uid+=1; game.cards[mana]="mountain"; game.player(20).battlefield=[Permanent(mana,"mountain",owner=20,sick=False)]
-        self.assertFalse(game.auto_pass_empty_priority()); self.assertEqual(game.priority_user,20)
+        self.assertTrue(game.auto_pass_empty_priority()); self.assertNotEqual(game.priority_user,20)
+
+    def test_smart_priority_requires_activated_ability_cost_to_be_payable(self):
+        game=ready(); game.phase="ending"; game.priority_user=10; game.player(10).hand=[]; game.player(20).hand=[]
+        troll=game.next_uid; game.next_uid+=1; game.cards[troll]="lea:180"; game.player(10).battlefield=[Permanent(troll,"lea:180",owner=10,sick=False)]
+        self.assertTrue(game.auto_pass_empty_priority())
+        game.phase="ending"; game.priority_user=10; mountain=game.next_uid; game.next_uid+=1; game.cards[mountain]="mountain"; game.player(10).battlefield.append(Permanent(mountain,"mountain",owner=10,sick=False))
+        self.assertFalse(game.auto_pass_empty_priority()); self.assertEqual(game.priority_user,10)
 
     def test_smart_priority_never_skips_combat_declarations(self):
         game=ready(); game.phase="attackers"; game.priority_user=None
