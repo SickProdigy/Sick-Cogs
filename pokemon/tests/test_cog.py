@@ -587,7 +587,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_mart_defaults_and_aliases_match_payday_scale(self):
         self.assertEqual({key:mart_prices()[key] for key in ("poke_ball","great_ball","ultra_ball","potion","revive")},{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400})
-        self.assertTrue(all(mart_prices()[key]==5000 for key in STONE_EVOLUTIONS))
+        self.assertTrue(all(mart_prices()[key]==5000 for key in STONE_EVOLUTIONS if key!="moon_stone"));self.assertEqual(mart_prices()["moon_stone"],25000)
         self.assertEqual((mart_item_key("pokeball"),mart_item_key("great-ball"),mart_item_key("thunder"),mart_item_key("missing")),("poke_ball","great_ball","thunder_stone",None))
         conf={"balls":1,"items":{"potion":2}};grant_mart_item(conf,"poke_ball",3);grant_mart_item(conf,"potion",2)
         self.assertEqual((conf["balls"],conf["items"]["potion"]),(4,4))
@@ -708,11 +708,16 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repaired.moves,("ember",));self.assertEqual(repaired.move_pp,{"ember":1})
         rapidash.moves=("ember","agility");self.assertEqual(repair_underleveled_evolution_moves(rapidash.raw())["moves"],["ember","agility"])
 
-    async def test_schema_seventeen_adds_vip_tracking_and_repairs_legacy_moves(self):
+    async def test_schema_eighteen_adds_vip_tracking_repairs_moves_and_raises_default_moon_stone_price(self):
         schema=AsyncMock(return_value=13);schema.set=AsyncMock();timer_minimum=AsyncMock(return_value=60);timer_minimum.set=AsyncMock()
-        encounter_minimum=StoredValue(60);encounter_maximum=StoredValue(900);encounter_default=StoredValue(120)
-        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,minimum_timer=timer_minimum,minimum_encounter_timeout=encounter_minimum,maximum_encounter_timeout=encounter_maximum,encounter_timeout=encounter_default,all_guilds=AsyncMock(return_value={}),all_users=AsyncMock(return_value={}),encounters=StoredValue({}))
-        await cog._migrate();timer_minimum.set.assert_awaited_once_with(60);self.assertEqual(schema.set.await_args_list[-1].args,(17,));self.assertEqual((encounter_minimum.value,encounter_maximum.value,encounter_default.value),(60,900,120))
+        encounter_minimum=StoredValue(60);encounter_maximum=StoredValue(900);encounter_default=StoredValue(120);prices=StoredValue({**mart_prices(),"moon_stone":5000})
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,minimum_timer=timer_minimum,minimum_encounter_timeout=encounter_minimum,maximum_encounter_timeout=encounter_maximum,encounter_timeout=encounter_default,all_guilds=AsyncMock(return_value={}),all_users=AsyncMock(return_value={}),encounters=StoredValue({}),mart_prices=prices)
+        await cog._migrate();timer_minimum.set.assert_awaited_once_with(60);self.assertEqual(schema.set.await_args_list[-1].args,(18,));self.assertEqual((encounter_minimum.value,encounter_maximum.value,encounter_default.value),(60,900,120));self.assertEqual(prices.value["moon_stone"],25000)
+
+    async def test_schema_eighteen_preserves_custom_moon_stone_price(self):
+        schema=AsyncMock(return_value=17);schema.set=AsyncMock();prices=StoredValue({**mart_prices(),"moon_stone":42000})
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,mart_prices=prices)
+        await cog._migrate();self.assertEqual(prices.value["moon_stone"],42000);self.assertEqual(schema.set.await_args.args,(18,))
 
     async def test_gift_settlement_moves_up_to_three_without_payment(self):
         gifts=[OwnedPokemon.create(f"gift-{index}",species,5,seed=index).raw() for index,species in enumerate((1,4,7),1)];keeper=OwnedPokemon.create("keeper",25,5,seed=9).raw();offerer=StoredSection({"collection":gifts+[keeper],"party":[raw["instance_id"] for raw in gifts]});recipient=StoredSection({"collection":[],"party":[]})
