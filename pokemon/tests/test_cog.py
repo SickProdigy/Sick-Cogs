@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight, store_caught_pokemon
+from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView, TradeCollectionView, GymChallengeView
@@ -97,6 +97,10 @@ class CogPolicyTests(unittest.TestCase):
         self.assertFalse(store_caught_pokemon(conf,caught,300));self.assertEqual(len(conf["collection"]),301)
         conf["collection"].pop();self.assertFalse(store_caught_pokemon(conf,caught,300));self.assertEqual(len(conf["collection"]),300)
         conf["collection"].pop();self.assertTrue(store_caught_pokemon(conf,caught,300));self.assertEqual(len(conf["collection"]),300)
+
+    def test_missing_persisted_vip_pack_uses_complete_defaults(self):
+        self.assertEqual(vip_pack_values(None),{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3})
+        self.assertEqual(vip_pack_values({"balls":30})["great_ball"],5)
 
     def test_monthly_vip_pack_is_idempotent_and_renews_next_utc_month(self):
         conf={"balls":0,"items":{},"vip_reward_month":None};pack={"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3};cog=Pokemon.__new__(Pokemon)

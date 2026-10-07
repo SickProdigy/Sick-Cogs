@@ -159,6 +159,10 @@ def grant_supply_items(conf,reward):
     conf["items"]=items
     return parts
 
+def vip_pack_values(configured=None):
+    configured=configured or {}
+    return {key:max(0,int(configured.get(key,GLOBAL["vip_monthly_pack"][key]))) for key in GLOBAL["vip_monthly_pack"]}
+
 def reward_summary(reward):
     labels={"balls":"Poké Balls","great_ball":"Great Balls","ultra_ball":"Ultra Balls","potion":"Potions","revive":"Revives"}
     return ", ".join(f"{amount} {labels.get(item,item.replace(chr(95),chr(32)).title())}" for item,amount in reward.items())
@@ -219,7 +223,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.54.0";__author__="SickProdigy"
+    __version__="0.54.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -419,9 +423,9 @@ class Pokemon(commands.Cog):
         policy=await self.config.all();eligible=await self.is_vip(ctx.author.id,policy)
         if not eligible:return
         async with self.lock(("user",ctx.author.id)):
-            section=self.config.user(ctx.author);conf=await section.all();awarded=self.apply_vip_monthly(conf,True,policy.get("vip_monthly_pack",GLOBAL["vip_monthly_pack"]))
+            section=self.config.user(ctx.author);conf=await section.all();awarded=self.apply_vip_monthly(conf,True,vip_pack_values(policy.get("vip_monthly_pack")))
             if awarded:await section.set(conf)
-        if awarded:await ctx.send("Your monthly SickGaming VIP Pokémon supplies have arrived: "+reward_summary(policy.get("vip_monthly_pack",GLOBAL["vip_monthly_pack"]))+".")
+        if awarded:await ctx.send("Your monthly SickGaming VIP Pokémon supplies have arrived: "+reward_summary(vip_pack_values(policy.get("vip_monthly_pack")))+".")
     @staticmethod
     def trade_collection_after(conf,outgoing_id,incoming_raw):
         incoming_id=incoming_raw["instance_id"];updated=dict(conf)
@@ -1000,7 +1004,7 @@ class Pokemon(commands.Cog):
             if battle.battle_kind=="gym":
                 await i.response.send_message("Poké Balls cannot be used in a Gym battle.",ephemeral=True);return
             policy=await self.config.all();eligible=await self.is_vip(i.user.id,policy);capacity=VIP_MAX_COLLECTION if eligible else MAX_COLLECTION
-            conf=await self.config.user(i.user).all();self.apply_vip_monthly(conf,eligible,policy.get("vip_monthly_pack",GLOBAL["vip_monthly_pack"]));tx_key=f"{eid}:{battle.rolls}";tx=conf["transactions"].get(tx_key,{})
+            conf=await self.config.user(i.user).all();self.apply_vip_monthly(conf,eligible,vip_pack_values(policy.get("vip_monthly_pack")));tx_key=f"{eid}:{battle.rolls}";tx=conf["transactions"].get(tx_key,{})
             ball_names={"poke_ball":"Poké Balls","great_ball":"Great Balls","ultra_ball":"Ultra Balls"}
             if ball_key not in ball_names:await i.response.send_message("That Poké Ball is unavailable.",ephemeral=True);return
             if self.ball_inventory(conf,ball_key)<1 and not tx.get("ball_charged"):await i.response.send_message(f"You have no {ball_names[ball_key]}.",ephemeral=True);return
@@ -1880,7 +1884,7 @@ class Pokemon(commands.Cog):
             f"Activity-mode floors: **{policy.get('minimum_threshold',8)} points** · **{policy.get('minimum_cooldown',120)}s cooldown**\n"
             f"Concurrency limits: server-admin ceiling **{max(1,min(5,int(policy.get('maximum_concurrency',5))))}** (owner-set range **1–5**) · per-server owner override **1–5**\n"
             f"Allowed generations: **{generations}** · Rarity: **{policy.get('rarity_profile','friendly')}** · Special species: **{'enabled' if policy.get('allow_special_species') else 'event-only'}**\n"
-            f"VIP benefits: guild **{policy.get('vip_guild_id') or 'not set'}** · role **{policy.get('vip_role_id') or 'not set'}** · capacity **{MAX_COLLECTION}/{VIP_MAX_COLLECTION}** · monthly {reward_summary(policy.get('vip_monthly_pack',GLOBAL['vip_monthly_pack']))}\n"
+            f"VIP benefits: guild **{policy.get('vip_guild_id') or 'not set'}** · role **{policy.get('vip_role_id') or 'not set'}** · capacity **{MAX_COLLECTION}/{VIP_MAX_COLLECTION}** · monthly {reward_summary(vip_pack_values(policy.get('vip_monthly_pack')))}\n"
             f"Default Pokédex style: **{resolve_style(policy.get('pokedex_default_style','retro')).label}**\n"
             f"Poké Mart prices: {price_text}"
         )
