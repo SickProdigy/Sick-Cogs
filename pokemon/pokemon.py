@@ -12,10 +12,10 @@ from .catalog import CatalogError,PokemonCatalog
 from .catalog_versions import CATALOG_VERSIONS
 from .data import EVOLUTIONS,MOVES,SPECIES,experience_to_next,generation_for,moves_for_level,sprite
 from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
-from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
+from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,CenterCollectView,TradeView,GymChallengeView,TradeCollectionView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,CenterCollectView,TradeView,GymChallengeView,TradeCollectionView,ReleasePokemonView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -226,7 +226,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.55.0";__author__="SickProdigy"
+    __version__="0.56.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -683,9 +683,9 @@ class Pokemon(commands.Cog):
     async def rendered_trainer_card(self,user,conf):
         style=conf.get("trainer_card_style","retro")
         if style not in {"retro","gold"}:style="retro"
-        capacity=await self.vip_capacity(user.id);embed=trainer_profile_embed(user,conf,capacity)
+        eligible=await self.is_vip(user.id);capacity=VIP_MAX_COLLECTION if eligible else MAX_COLLECTION;card_conf=dict(conf);card_conf["vip"]=eligible;embed=trainer_profile_embed(user,card_conf,capacity)
         try:
-            image=await self.renderer.trainer_card(user.display_name,conf,style);embed.set_image(url="attachment://trainer-card.png")
+            image=await self.renderer.trainer_card(user.display_name,card_conf,style);embed.set_image(url="attachment://trainer-card.png")
             return embed,[discord.File(image,filename="trainer-card.png")]
         except RenderError:
             log.exception("Trainer card rendering failed");return embed,[]
@@ -769,7 +769,7 @@ class Pokemon(commands.Cog):
             embed,files=await self.rendered_trainer_card(user,conf);await interaction.response.send_message(embed=embed,files=files,ephemeral=True);return
         if section=="achievements":await interaction.response.send_message(embed=self.accomplishments_embed(user,conf),ephemeral=True);return
         if section=="gym":
-            upcoming=next_gym(conf.get("badges",[]));view=GymChallengeView(self,user.id,upcoming.leader) if upcoming else None
+            upcoming=next_gym(conf.get("badges",[]));view=GymChallengeView(self,user.id,upcoming.leader) if upcoming and upcoming.key in COMPLETED_GYMS else None
             await interaction.response.send_message(embed=gym_status_embed(user,conf),view=view,ephemeral=True);return
         if section=="trade":
             await interaction.response.send_message("Start an exact trade with `poke trade  <your collection number> <their collection number>`. The other trainer must confirm before anything moves.",ephemeral=True);return
@@ -1190,13 +1190,36 @@ class Pokemon(commands.Cog):
             log.exception("Collection card rendering failed");files=[]
         return embed,files,page,pages,numbered
 
-    @pokemon.command(name="collection",aliases=["box"])
+    @pokemon.group(name="collection",aliases=["box"],invoke_without_command=True)
     async def collection(self,ctx,page:int=1):
         """Browse and manage Pokémon in your global collection."""
         conf=await self.config.user(ctx.author).all()
         if not conf["collection"]:await ctx.send("Choose a starter first.");return
         embed,files,page,pages,items=await self.rendered_collection(ctx.author,page)
         await ctx.send(embed=embed,files=files,view=CollectionBrowserView(self,ctx.author.id,page,pages,items))
+
+    @collection.command(name="release")
+    async def collection_release(self,ctx,number:int):
+        """Permanently release one boxed Pokémon after confirmation."""
+        conf=await self.config.user(ctx.author).all();ordered=self.sorted_collection(conf)
+        if not 1<=number<=len(ordered):await ctx.send("That collection number is unavailable. Check `pokemon collection`.");return
+        raw=ordered[number-1];identity=raw["instance_id"];name=raw.get("nickname") or SPECIES[raw["species_id"]].name
+        if len(conf.get("collection",[]))<=1:await ctx.send("You must keep at least one Pokémon.");return
+        if identity in conf.get("party",[]):await ctx.send(f"Remove **{name}** from your party before releasing it.");return
+        trades=await self.config.trades()
+        if self.trade_reserved(trades,identity):await ctx.send(f"**{name}** is reserved in a pending trade or gift.");return
+        if self.trainer_in_active_battle(ctx.author.id):await ctx.send("Finish your active battle before releasing a Pokémon.");return
+        await ctx.send(f"Release **{name} · Lv.{raw['level']}** permanently? This cannot be undone.",view=ReleasePokemonView(self,ctx.author.id,identity,name))
+
+    async def release_collection_pokemon(self,interaction,identity,name):
+        async with self.lock(("user",interaction.user.id)):
+            conf=await self.config.user(interaction.user).all();owned={raw.get("instance_id"):raw for raw in conf.get("collection",[])}
+            if identity not in owned:await interaction.response.edit_message(content="That Pokémon is no longer available.",view=None);return
+            if len(conf.get("collection",[]))<=1 or identity in conf.get("party",[]):await interaction.response.edit_message(content="That Pokémon can no longer be released safely.",view=None);return
+            if self.trainer_in_active_battle(interaction.user.id):await interaction.response.send_message("Finish your active battle first.",ephemeral=True);return
+            if self.trade_reserved(await self.config.trades(),identity):await interaction.response.send_message("That Pokémon is reserved in a pending trade or gift.",ephemeral=True);return
+            conf["collection"]=[raw for raw in conf["collection"] if raw.get("instance_id")!=identity];await self.config.user(interaction.user).set(conf)
+        await interaction.response.edit_message(content=f"**{name}** was released. The collection slot is now free.",view=None)
 
     async def collection_party_choice(self,interaction,identity):
         conf=await self.config.user(interaction.user).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};raw=owned.get(identity)
@@ -1567,7 +1590,7 @@ class Pokemon(commands.Cog):
         """View your ordered Kanto Gym progress."""
         conf=await self.config.user(ctx.author).all();upcoming=next_gym(conf.get("badges",[]))
         command=f"{getattr(ctx,'clean_prefix','[p]')}poke gym challenge"
-        await ctx.send(embed=gym_status_embed(ctx.author,conf,command),view=GymChallengeView(self,ctx.author.id,upcoming.leader) if upcoming else None)
+        await ctx.send(embed=gym_status_embed(ctx.author,conf,command),view=GymChallengeView(self,ctx.author.id,upcoming.leader) if upcoming and upcoming.key in COMPLETED_GYMS else None)
 
     @gym.command(name="challenge")
     @commands.guild_only()
@@ -1598,6 +1621,8 @@ class Pokemon(commands.Cog):
             conf=await self.config.user(user).all();gym=next_gym(conf.get("badges",[]))
             if not gym:
                 await send("You already earned all eight Kanto badges.");return
+            if gym.key not in COMPLETED_GYMS:
+                await send(f"{gym.leader}’s Gym is still under development. Only completed Gym Leader battles can be challenged.");return
             if not conf["party"]:
                 await send("Choose a starter and prepare a party first.");return
             collection={item["instance_id"]:item for item in conf["collection"]}

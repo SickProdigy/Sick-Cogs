@@ -578,6 +578,8 @@ class BattleRenderer:
         canvas=Image.new("RGB",(800,610),paper);draw=ImageDraw.Draw(canvas)
         draw.rounded_rectangle((24,24,776,586),22,fill=panel,outline=ink,width=7)
         draw.text((55,48),"TRAINER CARD",fill=ink,font=ImageFont.load_default(size=32));draw.text((55,96),user_name[:28],fill=ink,font=ImageFont.load_default(size=27))
+        if conf.get("vip"):
+            vip_font=ImageFont.load_default(size=22);draw.rounded_rectangle((650,48,744,91),12,fill=(214,165,52),outline=ink,width=3);draw.text((675,58),"VIP",fill=ink,font=vip_font)
         draw.text((55,150),f"BADGES  {len(conf.get('badges',[]))}/8",fill=ink,font=ImageFont.load_default(size=20))
         badge_keys=("boulder","cascade","thunder","rainbow","soul","marsh","volcano","earth")
         for index,key in enumerate(badge_keys):

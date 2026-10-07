@@ -11,12 +11,12 @@ from unittest.mock import AsyncMock, patch
 
 from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
-from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
+from pokemon.gyms import COMPLETED_GYMS,KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
 from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView, TradeCollectionView, GymChallengeView
+from pokemon.views import BagView, BattleView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView, TradeCollectionView, GymChallengeView
 
 
 class StoredValue:
@@ -241,6 +241,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemon trade cancel",player_names)
         self.assertIn("pokemon trade collection",player_names)
         self.assertIn("pokemon trade give",player_names)
+        self.assertIn("pokemon collection release",player_names)
         self.assertIn("pokemon mart",player_names)
         self.assertIn("pokemon achievements",player_names)
         self.assertIn("pokemon research",player_names)
@@ -301,6 +302,7 @@ class GymProgressionTests(unittest.TestCase):
         self.assertEqual(next_gym([]).team,((74,12),(95,14)))
         self.assertEqual(next_gym(["boulder"]).leader,"Misty")
         self.assertIsNone(next_gym([gym.key for gym in KANTO_GYMS]))
+        self.assertEqual(COMPLETED_GYMS,{"boulder"})
 
     def test_badge_case_and_profile_show_journey(self):
         user=SimpleNamespace(display_name="SickProdigy",display_avatar=SimpleNamespace(url="https://example.com/avatar.png"))
@@ -308,10 +310,10 @@ class GymProgressionTests(unittest.TestCase):
         profile=trainer_profile_embed(user,conf,300)
         self.assertIn("SickProdigy",profile.title)
         self.assertIn("1/8",profile.fields[0].name)
-        self.assertIn("Misty",profile.footer.text)
+        self.assertIn("Misty",profile.footer.text);self.assertIn("Locked",profile.footer.text)
         self.assertEqual(badge_case(["boulder"]).count("◻️"),7)
         status=gym_status_embed(user,conf,"!poke gym challenge")
-        self.assertIn("Misty",status.fields[1].value);self.assertIn("!poke gym challenge",status.footer.text)
+        self.assertIn("Misty",status.fields[1].value);self.assertIn("under development",status.fields[1].value);self.assertNotIn("!poke gym challenge",status.footer.text)
 
 
 class PokedexTests(unittest.TestCase):
@@ -524,6 +526,35 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await Pokemon.profile.callback(cog,ctx,other)
         cog.rendered_trainer_card.assert_awaited_once_with(other,section.value)
         self.assertEqual(ctx.send.await_args.kwargs["embed"].title,"Other Trainer")
+
+    async def test_collection_release_requires_confirmation_and_removes_exact_boxed_pokemon(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        party=OwnedPokemon.create("party",4,5,seed=1);boxed=OwnedPokemon.create("boxed",7,4,seed=2)
+        section=StoredSection({"collection":[party.raw(),boxed.raw()],"party":["party"]});trades=StoredValue({})
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(user=lambda user:section,trades=trades)
+        user=SimpleNamespace(id=42);ctx=SimpleNamespace(author=user,send=AsyncMock())
+        await Pokemon.collection_release.callback(cog,ctx,2)
+        self.assertIsInstance(ctx.send.await_args.kwargs["view"],ReleasePokemonView)
+        response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock());interaction=SimpleNamespace(user=user,response=response)
+        await cog.release_collection_pokemon(interaction,"boxed","Squirtle")
+        self.assertEqual([raw["instance_id"] for raw in section.value["collection"]],["party"]);response.edit_message.assert_awaited_once()
+
+    async def test_collection_release_rejects_party_and_trade_reserved_pokemon(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        party=OwnedPokemon.create("party",4,5,seed=1);boxed=OwnedPokemon.create("boxed",7,4,seed=2)
+        section=StoredSection({"collection":[party.raw(),boxed.raw()],"party":["party"]});trades=StoredValue({})
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(user=lambda user:section,trades=trades)
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42),send=AsyncMock())
+        await Pokemon.collection_release.callback(cog,ctx,1);self.assertIn("Remove",ctx.send.await_args.args[0])
+        trades.value={"gift":{"state":"offered","offered_ids":["boxed"]}}
+        await Pokemon.collection_release.callback(cog,ctx,2);self.assertIn("reserved",ctx.send.await_args.args[0])
+
+    async def test_vip_profile_marks_embed_and_rendered_card(self):
+        conf={"trainer_card_style":"retro","collection":[],"party":[],"badges":[],"pokedex_seen":[],"pokedex_caught":[],"balls":0,"items":{}}
+        cog=Pokemon.__new__(Pokemon);cog.is_vip=AsyncMock(return_value=True);cog.renderer=SimpleNamespace(trainer_card=AsyncMock(return_value=io.BytesIO(b"card")))
+        user=SimpleNamespace(id=42,display_name="VIP Trainer",display_avatar=SimpleNamespace(url=None))
+        embed,files=await cog.rendered_trainer_card(user,conf)
+        self.assertIn("VIP Trainer Profile",embed.title);self.assertIn("SickGaming VIP",embed.description);self.assertTrue(cog.renderer.trainer_card.await_args.args[1]["vip"]);self.assertEqual(len(files),1)
 
     async def test_owner_reset_requires_confirmation_and_releases_battle(self):
         section=StoredSection({"collection":[{"instance_id":"starter"}],"starter_chosen":True})
@@ -769,6 +800,15 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx=SimpleNamespace(author=SimpleNamespace(id=42),clean_prefix="!",send=AsyncMock())
         await Pokemon.gym.callback(cog,ctx)
         sent=ctx.send.await_args.kwargs;self.assertIn("!poke gym challenge",sent["embed"].footer.text);self.assertEqual(sent["view"].challenge.label,"Challenge Brock")
+
+    async def test_unfinished_next_gym_is_locked_in_ui_and_authoritative_path(self):
+        conf={"badges":["boulder"],"collection":[],"party":[]};section=StoredSection(conf)
+        guild_section=SimpleNamespace(all=AsyncMock(return_value={"active_encounter":None,"max_active_encounters":1}))
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(user=lambda user:section,guild=lambda guild:guild_section,all=AsyncMock(return_value={"maximum_concurrency":3}))
+        cog.guild_encounters=AsyncMock(return_value={})
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42),guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=2),clean_prefix="!",send=AsyncMock())
+        await Pokemon.gym.callback(cog,ctx);self.assertIsNone(ctx.send.await_args.kwargs["view"]);self.assertIn("Locked",ctx.send.await_args.kwargs["embed"].fields[1].name)
+        ctx.send.reset_mock();await cog.start_gym_challenge(ctx.author,ctx.guild,ctx.channel,ctx.send);self.assertIn("under development",ctx.send.await_args.args[0])
 
     async def test_gym_challenge_view_is_trainer_scoped(self):
         view=GymChallengeView(SimpleNamespace(),42,"Brock")

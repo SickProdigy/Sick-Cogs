@@ -33,6 +33,7 @@ KANTO_GYMS=(
     Gym("earth","Earth Badge","🌍","Giovanni","Viridian City",((112,50),)),
 )
 GYMS={gym.key:gym for gym in KANTO_GYMS}
+COMPLETED_GYMS={"boulder"}
 
 
 def earned_badges(raw):
@@ -66,8 +67,10 @@ def gym_status_embed(user,conf,challenge_command="[p]poke gym challenge"):
     embed.add_field(name="Badges",value=f"{len(badges)}/{len(KANTO_GYMS)}",inline=True)
     if upcoming:
         team=" · ".join(f"{SPECIES[species_id].name} Lv. {level}" for species_id,level in upcoming.team)
-        embed.add_field(name="Next challenge",value=f"{upcoming.leader} · {upcoming.city}\n{team}",inline=True)
-        embed.set_footer(text=f"Use {challenge_command} when your party is ready, or press Challenge {upcoming.leader} below.")
+        if upcoming.key in COMPLETED_GYMS:
+            embed.add_field(name="Next challenge",value=f"{upcoming.leader} · {upcoming.city}\n{team}",inline=True);embed.set_footer(text=f"Use {challenge_command} when your party is ready, or press Challenge {upcoming.leader} below.")
+        else:
+            embed.add_field(name="Next challenge · Locked",value=f"{upcoming.leader} · {upcoming.city}\nThis Gym is still under development.",inline=True);embed.set_footer(text="Only completed Gym Leader battles can be challenged.")
     else:
         embed.add_field(name="Journey",value="All eight Kanto badges earned.",inline=True)
         embed.set_footer(text="You completed the Kanto Gym challenge.")
@@ -79,7 +82,8 @@ def trainer_profile_embed(user,conf,max_collection):
     owned={item["instance_id"]:item for item in conf.get("collection",[])}
     lead=owned.get(conf.get("party",[None])[0]) if conf.get("party") else None
     name=getattr(user,"display_name",getattr(user,"name","Trainer"))
-    embed=discord.Embed(title=f"{name}'s Trainer Profile",color=discord.Color.red())
+    embed=discord.Embed(title=f"{name}'s {'VIP ' if conf.get('vip') else ''}Trainer Profile",color=discord.Color.gold() if conf.get("vip") else discord.Color.red())
+    if conf.get("vip"):embed.description="💎 SickGaming VIP Trainer · Expanded storage and monthly supplies"
     avatar=getattr(getattr(user,"display_avatar",None),"url",None)
     if avatar:embed.set_thumbnail(url=avatar)
     badge_names=", ".join(GYMS[key].badge for key in badges) or "No badges earned yet."
@@ -97,5 +101,5 @@ def trainer_profile_embed(user,conf,max_collection):
     else:
         embed.add_field(name="Partner",value="Choose a starter to begin your journey.",inline=False)
     upcoming=next_gym(badges)
-    embed.set_footer(text=(f"Next: {upcoming.leader} in {upcoming.city}" if upcoming else "Kanto Gym challenge complete"))
+    embed.set_footer(text=(f"Next: {upcoming.leader} in {upcoming.city}" if upcoming and upcoming.key in COMPLETED_GYMS else f"Next: {upcoming.leader} · Locked while under development" if upcoming else "Kanto Gym challenge complete"))
     return embed
