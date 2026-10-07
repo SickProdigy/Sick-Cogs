@@ -73,7 +73,7 @@ class IcarusAnnouncements(commands.Cog):
     """Publish official Icarus Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.1"
+    __version__ = "0.1.2"
 
     default_guild = {
         "enabled": False,
@@ -366,8 +366,10 @@ class IcarusAnnouncements(commands.Cog):
     async def icarus(self, ctx: commands.Context):
         """Browse official Icarus Steam announcements.
 
-        Server administrators and owners can configure a destination channel, card or
-        article delivery, filters, and automatic posting with `[p]icarusset`.
+        Quick setup for server administrators and owners:
+        `[p]icarusset channel #updates`
+        `[p]icarusset mode card` (or `article`)
+        `[p]icarusset autopost start`
         """
         await ctx.invoke(self.icarus_latest)
 

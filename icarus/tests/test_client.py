@@ -17,8 +17,11 @@ from icarus.client import (
 
 
 class IcarusClientTests(unittest.TestCase):
-    def test_public_help_points_administrators_to_settings(self):
-        self.assertIn("[p]icarusset", IcarusAnnouncements.icarus.help)
+    def test_public_help_includes_quick_setup(self):
+        help_text = IcarusAnnouncements.icarus.help
+        self.assertIn("[p]icarusset channel #updates", help_text)
+        self.assertIn("[p]icarusset mode card", help_text)
+        self.assertIn("[p]icarusset autopost start", help_text)
 
     def test_classifies_devblog_before_embedded_update_words(self):
         item = {"title": "Icarus Developer Blog: Update Preview", "contents": "A patch is coming."}
