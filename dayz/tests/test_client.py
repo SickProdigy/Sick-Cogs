@@ -60,6 +60,28 @@ class DayZClientTests(unittest.TestCase):
             "Before\nWatch trailer on YouTube: https://youtu.be/gsWm02GX1zw\nAfter",
         )
 
+    def test_extracts_dayz_img_src_markup(self):
+        source = (
+            "[p][img src=\"{STEAM_CLAN_IMAGE}/4458811/"
+            "3affd440d2688d4b46e6878268f71cf0c065a0f4.png\"][/img][/p]"
+        )
+        expected = (
+            "https://clan.steamstatic.com/images/4458811/"
+            "3affd440d2688d4b46e6878268f71cf0c065a0f4.png"
+        )
+        self.assertEqual(extract_image(source), expected)
+        self.assertEqual(extract_images(source), [expected])
+
+    def test_fastly_clan_image_is_canonicalized(self):
+        source = (
+            "[img src=\"https://clan.fastly.steamstatic.com/"
+            "images/123/a.png\"][/img]"
+        )
+        self.assertEqual(
+            extract_image(source),
+            "https://clan.steamstatic.com/images/123/a.png",
+        )
+
     def test_extracts_and_expands_steam_clan_image(self):
         source = "[img]{STEAM_CLAN_IMAGE}/12345/banner.jpg[/img]"
         self.assertEqual(

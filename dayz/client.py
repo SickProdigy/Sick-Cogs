@@ -11,7 +11,7 @@ from PIL import Image, UnidentifiedImageError
 APP_ID = 221100
 API_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
 ANNOUNCEMENTS_URL = f"https://steamcommunity.com/app/{APP_ID}/announcements/"
-USER_AGENT = "Sick-Cogs-DayZAnnouncements/0.1.2 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-DayZAnnouncements/0.1.3 (+https://github.com/SickProdigy/Sick-Cogs)"
 OFFICIAL_FEED_NAME = "steam_community_announcements"
 STEAM_CLAN_IMAGE_ROOT = "https://clan.steamstatic.com/images"
 
@@ -26,6 +26,10 @@ CATEGORY_LABELS = {
     "official": "Official Announcement",
 }
 
+_BB_IMAGE_SRC_RE = re.compile(
+    r"\[img[^\]]*\bsrc=[\"\x27]([^\"\x27]+)[\"\x27][^\]]*\](?:\[/img\])?",
+    re.IGNORECASE | re.DOTALL,
+)
 _BB_IMAGE_RE = re.compile(r"\[img\](.+?)\[/img\]", re.IGNORECASE | re.DOTALL)
 _HTML_IMAGE_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)', re.IGNORECASE)
 _YOUTUBE_RE = re.compile(
@@ -53,6 +57,10 @@ def normalize_image_url(value: str) -> Optional[str]:
         "https://clan.cloudflare.steamstatic.com/images",
         STEAM_CLAN_IMAGE_ROOT,
     )
+    url = url.replace(
+        "https://clan.fastly.steamstatic.com/images",
+        STEAM_CLAN_IMAGE_ROOT,
+    )
     if url.startswith("//"):
         url = f"https:{url}"
     if not url.startswith(("https://", "http://")):
@@ -62,7 +70,7 @@ def normalize_image_url(value: str) -> Optional[str]:
 
 def extract_image(contents: str) -> Optional[str]:
     source = contents or ""
-    for pattern in (_BB_IMAGE_RE, _HTML_IMAGE_RE):
+    for pattern in (_BB_IMAGE_SRC_RE, _BB_IMAGE_RE, _HTML_IMAGE_RE):
         for match in pattern.finditer(source):
             image = normalize_image_url(match.group(1))
             if image:
@@ -79,7 +87,7 @@ def extract_images(contents: str, *, limit: int = 4) -> List[str]:
     featured = extract_image(source)
     if featured:
         candidates.append(featured)
-    for pattern in (_BB_IMAGE_RE, _HTML_IMAGE_RE):
+    for pattern in (_BB_IMAGE_SRC_RE, _BB_IMAGE_RE, _HTML_IMAGE_RE):
         for match in pattern.finditer(source):
             image = normalize_image_url(match.group(1))
             if image and image not in candidates:
