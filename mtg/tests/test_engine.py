@@ -8,6 +8,14 @@ def ready(seed=7):
     g=Game(1,[10,20],seed); g.mulligan(10,True); g.mulligan(20,True); return g
 
 class OpeningTests(unittest.TestCase):
+    def test_game_accepts_validated_exact_printing_decklists(self):
+        red=list(starter("red")); red[0]="mountain"
+        game=Game(1,[10,20],1,decks={10:"Custom",20:"green"},decklists={10:red})
+        player_keys=[game.cards[uid] for uid in game.player(10).hand+game.player(10).library]
+        self.assertEqual(len(player_keys),60)
+        self.assertIn("mountain",player_keys)
+        self.assertEqual(game.player(10).deck,"Custom")
+
     def test_decks_are_sixty_and_hands_private(self):
         g=Game(1,[10,20],1)
         self.assertEqual(len(starter("red")),60); self.assertEqual(len(starter("green")),60)

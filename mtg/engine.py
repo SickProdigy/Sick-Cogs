@@ -113,10 +113,11 @@ class Spell:
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
-    def __init__(self, game_id, users, seed=None, decks=None, ai_user=None, ai_difficulty=None):
+    def __init__(self, game_id, users, seed=None, decks=None, ai_user=None, ai_difficulty=None, decklists=None):
         if len(users) != 2 or users[0] == users[1]: raise GameError("Two different players are required.")
         self.game_id, self.order = int(game_id), [int(x) for x in users]
         decks = {int(user): color for user, color in (decks or {}).items()}
+        decklists = {int(user):list(cards) for user,cards in (decklists or {}).items()}
         self.players = {
             user: Player(user, decks.get(user, color))
             for user, color in zip(self.order, ("red", "green"))
@@ -161,7 +162,9 @@ class Game:
         rng = random.Random(seed)
         for user in self.order:
             p=self.players[user]
-            for key in starter(p.deck):
+            deck_cards=decklists[user] if user in decklists else starter(p.deck)
+            for key in deck_cards:
+                if key not in CARDS: raise GameError(f"Unknown card printing in deck: {key}")
                 self.cards[self.next_uid]=key; p.library.append(self.next_uid); self.next_uid+=1
             rng.shuffle(p.library); self._draw(p,7)
         self.log.append("Both players drew seven cards.")
