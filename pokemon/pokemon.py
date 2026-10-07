@@ -15,12 +15,12 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1,"concurrency_owner_override":False}
-USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{}}
+USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{},"menu_style":"retro"}
 MART_ITEMS={
     "poke_ball":("Poké Ball","balls",50),
     "great_ball":("Great Ball","great_ball",150),
@@ -29,7 +29,7 @@ MART_ITEMS={
     "revive":("Revive","revive",400),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
-GLOBAL={"schema":11,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":3}
+GLOBAL={"schema":12,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":3}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
@@ -194,7 +194,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.45.0";__author__="SickProdigy"
+    __version__="0.46.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -336,6 +336,10 @@ class Pokemon(commands.Cog):
             for user_id,data in (await self.config.all_users()).items():
                 data.setdefault("daily_research",{});await self.config.user_from_id(int(user_id)).set(data)
             await self.config.schema.set(11)
+        if schema<12:
+            for user_id,data in (await self.config.all_users()).items():
+                data.setdefault("menu_style","retro");await self.config.user_from_id(int(user_id)).set(data)
+            await self.config.schema.set(12)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
@@ -514,6 +518,77 @@ class Pokemon(commands.Cog):
             return embed,[discord.File(image,filename="trainer-card.png")]
         except RenderError:
             log.exception("Trainer card rendering failed");return embed,[]
+
+    async def rendered_main_menu(self,user,conf):
+        style=conf.get("menu_style","retro")
+        if style not in {"retro","modern"}:style="retro"
+        trainer=getattr(user,"display_name",getattr(user,"name","Trainer"))
+        embed=discord.Embed(title=f"{trainer}’s Pokémon Menu",description=f"**{style.title()} style** · Choose an option below.",color=discord.Color.green() if style=="retro" else discord.Color.blurple())
+        try:
+            image=await self.renderer.main_menu(trainer,conf,style);embed.set_image(url="attachment://pokemon-menu.png")
+            return embed,[discord.File(image,filename="pokemon-menu.png")]
+        except RenderError:
+            log.exception("Pokémon main-menu rendering failed");return embed,[]
+
+    @staticmethod
+    def accomplishments_embed(user,conf):
+        totals=achievement_totals(conf);claimed=set(conf.get("achievement_rewards",[]));trainer=getattr(user,"display_name","Trainer")
+        embed=discord.Embed(title=f"{trainer}'s Accomplishments",color=discord.Color.gold())
+        for key,label,rewards in (("collection","Unique collection",COLLECTION_REWARDS),("victories","Victories",VICTORY_REWARDS),("encounters","Completed encounters",ENCOUNTER_REWARDS)):
+            total=totals[key];next_goal=next(((target,reward) for target,reward in rewards.items() if total<target),None)
+            value="All milestones complete." if next_goal is None else f"**{total}/{next_goal[0]}** · Next: {reward_summary(next_goal[1])}"
+            earned=sum(1 for target in rewards if f"{key}:{target}" in claimed);embed.add_field(name=label,value=f"{value}\nClaimed: {earned}/{len(rewards)}",inline=False)
+        lines=[]
+        for pokemon_type,total in sorted(totals["types"].items(),key=lambda item:(-item[1],item[0])):
+            next_goal=next(((target,reward) for target,reward in TYPE_REWARDS.items() if total<target),None)
+            lines.append(f"**{pokemon_type.title()}** {total}/{next_goal[0]} · {reward_summary(next_goal[1])}" if next_goal else f"**{pokemon_type.title()}** complete")
+        embed.add_field(name="Type specialists",value="\n".join(lines) or "Catch Pokémon to begin type-specialist goals.",inline=False);embed.set_footer(text="Rewards are granted automatically when a battle settles.")
+        return embed
+
+    @staticmethod
+    def research_embed(conf):
+        totals=achievement_totals(conf);state=conf.get("daily_research",{});baseline=state.get("baseline",{});claimed=set(state.get("claimed",[]))
+        embed=discord.Embed(title="Professor Research · Daily Tasks",description="Complete these before the next UTC day. Rewards are delivered automatically.",color=discord.Color.green())
+        for key,target,reward,label in DAILY_RESEARCH_TASKS:
+            progress=min(target,max(0,totals[key]-int(baseline.get(key,0))));done=key in claimed;embed.add_field(name=("✅ " if done else "")+label,value=f"**{progress}/{target}** · {reward_summary(reward)}",inline=False)
+        embed.set_footer(text=f"Resets daily at 00:00 UTC · {len(claimed)}/{len(DAILY_RESEARCH_TASKS)} complete");return embed
+
+    async def open_menu_section(self,interaction,section):
+        user=interaction.user
+        if section=="style":
+            async with self.lock(("user",user.id)):
+                conf=await self.config.user(user).all();conf["menu_style"]="modern" if conf.get("menu_style","retro")=="retro" else "retro";await self.config.user(user).set(conf)
+            embed,files=await self.rendered_main_menu(user,conf);await interaction.response.edit_message(embed=embed,attachments=files,view=MainMenuView(self,user.id));return
+        conf=await self.config.user(user).all()
+        if section=="party":
+            owned={p["instance_id"]:p for p in conf.get("collection",[])};party=[OwnedPokemon.from_raw(owned[key]) for key in conf.get("party",[]) if key in owned];lines=[]
+            for slot,item in enumerate(party,1):
+                maximum=pokemon_max_hp(item);current=maximum if item.current_hp is None else item.current_hp;lines.append(f"{slot}. {item.nickname or SPECIES[item.species_id].name} · Lv. {item.level} · HP {current}/{maximum}")
+            trainer=getattr(user,"display_name","Trainer");embed=discord.Embed(title=f"{trainer}’s Party",description="\n".join(lines) or "Empty",color=discord.Color.gold())
+            try:image=await self.renderer.party_card(party,trainer);embed.set_image(url="attachment://party.png");files=[discord.File(image,filename="party.png")]
+            except RenderError:files=[]
+            await interaction.response.send_message(embed=embed,files=files,ephemeral=True);return
+        if section=="collection":
+            embed,files,page,pages,items=await self.rendered_collection(user,1);await interaction.response.send_message(embed=embed,files=files,view=CollectionBrowserView(self,user.id,page,pages,items),ephemeral=True);return
+        if section=="pokedex":
+            session=PokedexSession(user_id=user.id,seen={int(x) for x in conf.get("pokedex_seen",[])},caught={int(x) for x in conf.get("pokedex_caught",[])},style=await self.selected_pokedex_style(user),stats=migrated_pokedex_stats(conf));view=PokedexView(self,session)
+            await interaction.response.send_message(embed=render_pokedex(session),view=view,ephemeral=True);view.message=await interaction.original_response();return
+        if section=="bag":
+            items=conf.get("items",{});counts=(int(conf.get("balls",0)),int(items.get("great_ball",0)),int(items.get("ultra_ball",0)),int(items.get("potion",0)),int(items.get("revive",0)))
+            text="**Poké Balls**\nPoké Ball: **{}** · Great Ball: **{}** · Ultra Ball: **{}**\n**Medicine**\nPotion: **{}** · Revive: **{}**".format(*counts);await interaction.response.send_message(text,ephemeral=True);return
+        if section=="research":
+            async with self.lock(("user",user.id)):
+                conf=await self.config.user(user).all();self.ensure_daily_research(conf);await self.config.user(user).set(conf)
+            await interaction.response.send_message(embed=self.research_embed(conf),ephemeral=True);return
+        if section=="profile":
+            embed,files=await self.rendered_trainer_card(user,conf);await interaction.response.send_message(embed=embed,files=files,ephemeral=True);return
+        if section=="achievements":await interaction.response.send_message(embed=self.accomplishments_embed(user,conf),ephemeral=True);return
+        if section=="gym":await interaction.response.send_message(embed=gym_status_embed(user,conf),ephemeral=True);return
+        if section=="mart":
+            if interaction.guild is None:await interaction.response.send_message("The Poké Mart is available inside a server.",ephemeral=True);return
+            prices=mart_prices(await self.config.mart_prices());currency=await bank.get_currency_name(interaction.guild);balance=await bank.get_balance(user);lines=[f"**{label}** — {prices[key]:,} {currency}" for key,(label,_,_) in MART_ITEMS.items()]
+            await interaction.response.send_message("**Poké Mart**\n"+"\n".join(lines)+f"\n\nYour balance: **{balance:,} {currency}**\nBuy with `poke buy <item> [quantity]`.",ephemeral=True);return
+        await interaction.response.send_message("That menu option is unavailable.",ephemeral=True)
 
     async def send_progression(self,interaction,battle):
         events=battle.progression_events or [{"instance_id":battle.player.instance_id,"evolved_from":battle.evolved_from,"learned_moves":battle.learned_moves,"pending_moves":battle.pending_moves}]
@@ -821,7 +896,9 @@ class Pokemon(commands.Cog):
             embed.add_field(name="How to begin",value="Choose a partner, find a wild encounter, battle it, then use a Poké Ball to catch it.",inline=False)
             await ctx.send(embed=embed,files=files,view=StarterView(self,ctx.author.id,setup_hint=setup_hint))
             return
-        await ctx.send_help()
+        embed,files=await self.rendered_main_menu(ctx.author,conf)
+        await ctx.send(embed=embed,files=files,view=MainMenuView(self,ctx.author.id))
+
     @staticmethod
     def starter_embed(user,selected=0,setup_hint=None):
         starter_ids=(1,4,7);sid=starter_ids[int(selected)%len(starter_ids)];species=SPECIES[sid]
@@ -1012,34 +1089,14 @@ class Pokemon(commands.Cog):
     @pokemon.command(name="achievements",aliases=["goals"])
     async def achievements(self,ctx):
         """View accomplishment progress and upcoming supply rewards."""
-        conf=await self.config.user(ctx.author).all();totals=achievement_totals(conf);claimed=set(conf.get("achievement_rewards",[]))
-        embed=discord.Embed(title=f"{getattr(ctx.author,'display_name','Trainer')}'s Accomplishments",color=discord.Color.gold())
-        for key,label,rewards in (("collection","Unique collection",COLLECTION_REWARDS),("victories","Victories",VICTORY_REWARDS),("encounters","Completed encounters",ENCOUNTER_REWARDS)):
-            total=totals[key];next_goal=next(((target,reward) for target,reward in rewards.items() if total<target),None)
-            value="All milestones complete." if next_goal is None else f"**{total}/{next_goal[0]}** · Next: {reward_summary(next_goal[1])}"
-            earned=sum(1 for target in rewards if f"{key}:{target}" in claimed)
-            embed.add_field(name=label,value=f"{value}\nClaimed: {earned}/{len(rewards)}",inline=False)
-        type_lines=[]
-        for pokemon_type,total in sorted(totals["types"].items(),key=lambda item:(-item[1],item[0])):
-            next_goal=next(((target,reward) for target,reward in TYPE_REWARDS.items() if total<target),None)
-            if next_goal:type_lines.append(f"**{pokemon_type.title()}** {total}/{next_goal[0]} · {reward_summary(next_goal[1])}")
-            else:type_lines.append(f"**{pokemon_type.title()}** complete")
-        embed.add_field(name="Type specialists",value="\n".join(type_lines) or "Catch Pokémon to begin type-specialist goals.",inline=False)
-        embed.set_footer(text="Rewards are granted automatically when a battle settles.")
-        await ctx.send(embed=embed)
+        conf=await self.config.user(ctx.author).all();await ctx.send(embed=self.accomplishments_embed(ctx.author,conf))
 
     @pokemon.command(name="research",aliases=["daily"])
     async def professor_research(self,ctx):
         """View today’s Professor research tasks and supply rewards."""
         async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all();state=self.ensure_daily_research(conf);await self.config.user(ctx.author).set(conf)
-        totals=achievement_totals(conf);baseline=state.get("baseline",{});claimed=set(state.get("claimed",[]))
-        embed=discord.Embed(title="Professor Research · Daily Tasks",description="Complete these before the next UTC day. Rewards are delivered automatically.",color=discord.Color.green())
-        for key,target,reward,label in DAILY_RESEARCH_TASKS:
-            progress=min(target,max(0,totals[key]-int(baseline.get(key,0))));done=key in claimed
-            embed.add_field(name=("✅ " if done else "")+label,value=f"**{progress}/{target}** · {reward_summary(reward)}",inline=False)
-        embed.set_footer(text=f"Resets daily at 00:00 UTC · {len(claimed)}/{len(DAILY_RESEARCH_TASKS)} complete")
-        await ctx.send(embed=embed)
+            conf=await self.config.user(ctx.author).all();self.ensure_daily_research(conf);await self.config.user(ctx.author).set(conf)
+        await ctx.send(embed=self.research_embed(conf))
 
     @pokemon.command(name="mart")
     @commands.guild_only()
@@ -1246,6 +1303,15 @@ class Pokemon(commands.Cog):
         target=user or ctx.author;conf=await self.config.user(target).all()
         embed,files=await self.rendered_trainer_card(target,conf)
         await ctx.send(embed=embed,files=files)
+
+    @pokemon.command(name="menustyle")
+    async def menu_style(self,ctx,style:str=None):
+        """Choose the Retro or Modern Pokémon main-menu style."""
+        current=await self.config.user(ctx.author).menu_style()
+        if style is None:await ctx.send(f"Pokémon menu style: **{current}**. Choices: retro, modern.");return
+        style=style.casefold()
+        if style not in {"retro","modern"}:await ctx.send("Unknown style. Choose: retro or modern.");return
+        await self.config.user(ctx.author).menu_style.set(style);await ctx.send(f"Pokémon menu style set to **{style}**.")
 
     @pokemon.command(name="profilestyle",aliases=["cardstyle"])
     async def profile_style(self,ctx,style:str=None):

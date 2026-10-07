@@ -43,6 +43,31 @@ class StarterView(discord.ui.View):
         self.cycle(1);await self.refresh(interaction)
 
 
+class MainMenuButton(discord.ui.Button):
+    def __init__(self,cog,user_id,section,label,emoji,row=0,style=discord.ButtonStyle.secondary):
+        super().__init__(label=label,emoji=emoji,style=style,row=row,custom_id=f"pokemon:menu:{section}")
+        self.cog=cog;self.user_id=user_id;self.section=section
+
+    async def callback(self,interaction):
+        await self.cog.open_menu_section(interaction,self.section)
+
+
+class MainMenuView(discord.ui.View):
+    ITEMS=(
+        ("party","Party","👥",0),("collection","Collection","📦",0),("pokedex","Pokedex","📕",0),("bag","Bag","🎒",0),("research","Research","📋",0),
+        ("profile","Profile","🪪",1),("achievements","Goals","🏆",1),("gym","Gyms","🎖️",1),("mart","Mart","🛒",1),("style","Switch Style","🎨",1),
+    )
+    def __init__(self,cog,user_id):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id
+        for section,label,emoji,row in self.ITEMS:
+            style=discord.ButtonStyle.primary if section=="style" else discord.ButtonStyle.secondary
+            self.add_item(MainMenuButton(cog,user_id,section,label,emoji,row,style))
+
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This Pokémon menu belongs to another trainer.",ephemeral=True);return False
+
+
 class CollectionPokemonSelect(discord.ui.Select):
     def __init__(self,cog,user_id,items):
         options=[]

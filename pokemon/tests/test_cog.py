@@ -16,7 +16,7 @@ from pokemon.models import Battle,OwnedPokemon
 from pokemon.pokemon import GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
+from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView
 
 
 class StoredValue:
@@ -229,6 +229,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemon party add",player_names)
         self.assertIn("pokemon moves",player_names)
         self.assertIn("pokemon profilestyle",player_names)
+        self.assertIn("pokemon menustyle",player_names)
         self.assertIn("pokemonset battleexpiry",admin_names)
         self.assertNotIn("pokemonset encountertime",admin_names)
         self.assertIn("pokemonownerset encountertime",owner_names)
@@ -379,9 +380,24 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         charmander=cog.starter_embed(ctx.author,sent["view"].selected,"!pokemonset")
         self.assertEqual(charmander.title,"Choose Charmander?")
         self.assertTrue(charmander.image.url.endswith("/4.png"))
-        ctx.send.reset_mock();section.value={"collection":[{"instance_id":"owned"}],"starter_chosen":True}
+        ctx.send.reset_mock();section.value={"collection":[{"instance_id":"owned"}],"starter_chosen":True,"menu_style":"retro"}
+        cog.rendered_main_menu=AsyncMock(return_value=(discord.Embed(title="Trainer’s Pokémon Menu"),[]))
         await Pokemon.pokemon.callback(cog,ctx)
-        ctx.send_help.assert_awaited_once()
+        returning=ctx.send.await_args.kwargs
+        self.assertEqual(returning["embed"].title,"Trainer’s Pokémon Menu")
+        self.assertIsInstance(returning["view"],MainMenuView)
+        self.assertEqual(len(returning["view"].children),10)
+        ctx.send_help.assert_not_awaited()
+
+    async def test_main_menu_is_owner_scoped_and_toggles_style(self):
+        conf={"collection":[],"party":[],"menu_style":"retro"};section=StoredSection(conf)
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(user=lambda user:section);cog.rendered_main_menu=AsyncMock(return_value=(discord.Embed(title="Modern menu"),[]))
+        view=MainMenuView(cog,42);denied=SimpleNamespace(user=SimpleNamespace(id=7),response=SimpleNamespace(send_message=AsyncMock()))
+        self.assertFalse(await view.interaction_check(denied));denied.response.send_message.assert_awaited_once()
+        response=SimpleNamespace(edit_message=AsyncMock());interaction=SimpleNamespace(user=SimpleNamespace(id=42,display_name="Trainer"),response=response)
+        await cog.open_menu_section(interaction,"style")
+        self.assertEqual(section.value["menu_style"],"modern")
+        response.edit_message.assert_awaited_once();self.assertIsInstance(response.edit_message.await_args.kwargs["view"],MainMenuView)
 
     async def test_starter_picker_is_one_time_and_encounter_scoped(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
