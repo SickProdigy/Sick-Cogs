@@ -11,7 +11,7 @@ import aiohttp
 APP_ID = 4000
 API_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
 ANNOUNCEMENTS_URL = f"https://steamcommunity.com/app/{APP_ID}/announcements/"
-USER_AGENT = "Sick-Cogs-GMod/1.0.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-GMod/1.0.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 OFFICIAL_FEED_NAME = "steam_community_announcements"
 
 _BB_IMAGE_SRC_RE = re.compile(

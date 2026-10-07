@@ -12,6 +12,21 @@ class SteamNewsTests(unittest.TestCase):
         self.assertIn("[p]gmodset updateschannel #updates", help_text)
         self.assertIn("[p]gmodset updates start", help_text)
 
+    def test_settings_subcommands_have_help(self):
+        names = (
+            "info", "remove", "default", "statuschannel", "monitoring",
+            "statusinterval", "statusrole", "updateschannel", "updates",
+            "updatesrole", "updatesinterval", "updatescheck",
+        )
+        for name in names:
+            with self.subTest(name=name):
+                self.assertTrue(GMod.gmodset.get_command(name).help)
+
+    def test_updates_start_accepts_recent_count(self):
+        start = GMod.gmodset_updates.get_command("start")
+        self.assertIn("recent_posts", start.clean_params)
+        self.assertIn("backfilling", start.help)
+
     def test_official_feed_filter_excludes_third_party_news(self):
         self.assertTrue(is_official_news({"feedname": "steam_community_announcements"}))
         self.assertFalse(is_official_news({"feedname": "PC Gamer"}))
