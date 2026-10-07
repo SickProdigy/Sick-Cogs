@@ -226,7 +226,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.56.0";__author__="SickProdigy"
+    __version__="0.56.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -760,7 +760,7 @@ class Pokemon(commands.Cog):
             await interaction.response.send_message(embed=render_pokedex(session),view=view,ephemeral=True);view.message=await interaction.original_response();return
         if section=="bag":
             items=conf.get("items",{});counts=(int(conf.get("balls",0)),int(items.get("great_ball",0)),int(items.get("ultra_ball",0)),int(items.get("potion",0)),int(items.get("revive",0)))
-            text="**Poké Balls**\nPoké Ball: **{}** · Great Ball: **{}** · Ultra Ball: **{}**\n**Medicine**\nPotion: **{}** · Revive: **{}**".format(*counts);await interaction.response.send_message(text,ephemeral=True);return
+            trainer=getattr(user,"display_name",getattr(user,"name","Trainer"));text=f"**{trainer}’s Poke Bag**\n**Poké Balls**\nPoké Ball: **{{}}** · Great Ball: **{{}}** · Ultra Ball: **{{}}**\n**Medicine**\nPotion: **{{}}** · Revive: **{{}}**".format(*counts);await interaction.response.send_message(text,ephemeral=True);return
         if section=="research":
             async with self.lock(("user",user.id)):
                 conf=await self.config.user(user).all();self.ensure_daily_research(conf);await self.config.user(user).set(conf)
@@ -1424,7 +1424,8 @@ class Pokemon(commands.Cog):
     async def pokemon_bag(self,ctx):
         """View your available medicine and items."""
         conf=await self.config.user(ctx.author).all();items=conf.get("items",{})
-        await ctx.send(f"**Poké Balls**\nPoké Ball: **{int(conf.get('balls',0))}** · Great Ball: **{int(items.get('great_ball',0))}** · Ultra Ball: **{int(items.get('ultra_ball',0))}**\n**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**")
+        trainer=getattr(ctx.author,"display_name",getattr(ctx.author,"name","Trainer"))
+        await ctx.send(f"**{trainer}’s Poke Bag**\n**Poké Balls**\nPoké Ball: **{int(conf.get('balls',0))}** · Great Ball: **{int(items.get('great_ball',0))}** · Ultra Ball: **{int(items.get('ultra_ball',0))}**\n**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**")
 
     @pokemon.command(name="achievements",aliases=["goals"])
     async def achievements(self,ctx):
