@@ -35,6 +35,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `clanker` - Base Sepolia token launches with reviewed CryptoWallet execution, token rundowns, rewards, and owner controls.
 - `coc` - Clash of Clans clan and war status utilities.
 - `dadjokes` - On-demand and scheduled random dad jokes.
+- `dayz` - Official DayZ Steam announcements with category filters and card or article delivery.
 - `cryptowallet` - Provider-backed multichain testnet wallets with protected authorization, recovery, and sends.
 - `dictionary` - English definitions, pronunciations, related words, and community slang.
 - `donate` - Configurable donation information command.
