@@ -12,20 +12,20 @@ from .ai import DIFFICULTIES, advance_solo
 from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, match_result, render_battlefield, render_hand
 from .cards import BASE_CARDS, CARDS, starter
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
-from .collection import resolve_deck
+from .collection import build_pack, resolve_deck
 from .engine import Game, GameError
 from .views import CatalogDetailView, CatalogView, ChallengeView, CollectionDetailView, CollectionView, GameView, HandPaginationView, HistoryPaginationView, LibrarySearchView, NaturalSelectionView, PrivateHandDecisionView
 
 log=logging.getLogger("red.sick-cogs.MTG")
 CONFIG_IDENTIFIER=813604927115
 DEFAULTS={"schema":1,"next_game_id":1,"games":{}}
-DEFAULT_PROFILE={"schema":1,"starter":"","collection":{},"decks":{},"active_deck":""}
+DEFAULT_PROFILE={"schema":2,"starter":"","collection":{},"decks":{},"active_deck":"","unopened_packs":0,"rewarded_solo_games":[],"pack_history":[]}
 MATCH_TIMEOUT_SECONDS=7*24*60*60
 
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.123.0"
+    __version__="0.124.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.config.register_user(**DEFAULT_PROFILE)
@@ -62,7 +62,9 @@ class MTG(commands.Cog):
     def human_players(self,game):
         return [user for user in game.order if user != getattr(game,"ai_user",None)]
     async def player_profile(self,user_id):
-        return await self.config.user_from_id(int(user_id)).all()
+        profile=await self.config.user_from_id(int(user_id)).all()
+        for key,value in DEFAULT_PROFILE.items(): profile.setdefault(key,dict(value) if isinstance(value,dict) else list(value) if isinstance(value,list) else value)
+        return profile
     async def claim_starter(self,user_id,color):
         color=color.casefold()
         if color not in ("red","green"): raise GameError("Choose the red or green starter.")
@@ -134,6 +136,25 @@ class MTG(commands.Cog):
             scope=self.config.user_from_id(int(user_id)); profile=await scope.all(); deck_id,_=self.find_saved_deck(profile,query)
             self.resolve_saved_deck(profile,deck_id); profile["active_deck"]=deck_id; await scope.set(profile); return deck_id,profile
 
+    async def _award_solo_pack_unlocked(self,game):
+        if not game.finished or game.ai_user is None or game.winner is None or game.winner==game.ai_user or game.finished_reason=="inactivity timeout": return False
+        user=game.winner; scope=self.config.user_from_id(user); profile=await scope.all()
+        rewarded=[int(item) for item in profile.get("rewarded_solo_games",[])]
+        if game.game_id in rewarded: return False
+        profile.setdefault("collection",{}); profile.setdefault("decks",{}); profile.setdefault("pack_history",[])
+        profile["unopened_packs"]=int(profile.get("unopened_packs",0))+1; rewarded.append(game.game_id); profile["rewarded_solo_games"]=rewarded; profile["schema"]=2
+        await scope.set(profile); game.record(user,"pack_reward","Earned 1 unopened pack for a solo victory."); return True
+    async def open_pack(self,user_id,rng=None):
+        async with self.storage_lock:
+            scope=self.config.user_from_id(int(user_id)); profile=await scope.all()
+            if not profile.get("starter"): raise GameError("Choose a starter before opening packs.")
+            if int(profile.get("unopened_packs",0))<1: raise GameError("You do not have an unopened pack.")
+            cards=build_pack(CARDS,rng or secrets.SystemRandom()); collection=dict(profile.get("collection",{}))
+            for key in cards: collection[key]=int(collection.get(key,0))+1
+            profile["collection"]=collection; profile["unopened_packs"]=int(profile.get("unopened_packs",0))-1
+            history=list(profile.get("pack_history",[])); history.append({"at":int(__import__("time").time()),"cards":cards}); profile["pack_history"]=history[-100:]; profile["schema"]=2
+            await scope.set(profile); return cards,profile
+
     async def collection_records(self,user_id):
         profile=await self.player_profile(user_id)
         records=[(key,int(count)) for key,count in profile.get("collection",{}).items() if key in CARDS and int(count)>0]
@@ -194,6 +215,7 @@ class MTG(commands.Cog):
             await self._save_unlocked(game)
         return game
     async def _save_unlocked(self,game):
+        await self._award_solo_pack_unlocked(game)
         raw=game.to_raw(); raw["channel_id"]=self.channels.get(game.game_id,0); raw["message_id"]=getattr(game,"message_id",0)
         games=await self.config.games(); games[str(game.game_id)]=raw; await self.config.games.set(games)
     async def save(self,game):
@@ -409,6 +431,7 @@ class MTG(commands.Cog):
         if g.finished:
             result, winner, defeated, detail=match_result(g,names)
             e.description=f"**{result}: {winner}**\n{defeated}\nReason: {detail}."
+            if any(event.get("action")=="pack_reward" for event in g.history): e.description+="\nReward: **1 unopened pack**"
         e.set_footer(text="Experimental supported-card subset · hands are private")
         return e
     async def game_message(self,game):
@@ -447,7 +470,7 @@ class MTG(commands.Cog):
         events=list(reversed(game.history)); pages=max(1,math.ceil(len(events)/HistoryPaginationView.page_size)); page=max(0,min(page,pages-1))
         start=page*HistoryPaginationView.page_size; visible=events[start:start+HistoryPaginationView.page_size]
         names={user:str(self.bot.get_user(user).display_name if self.bot.get_user(user) else user).replace("\n"," ")[:32] for user in game.order}
-        labels={"game_created":"Game created","keep":"Kept hand","mulligan":"Mulligan","play":"Played or cast a card","pass":"Passed priority","auto_pass":"Auto-passed empty priority","attack":"Declared attackers","ai_attack":"Declared attackers","attack_none":"Declared no attacks","block":"Declared blockers","ai_block":"Declared blockers","auto_no_blocks":"Declared no blocks","block_none":"Declared no blocks","combat_damage":"Combat resolved","concede":"Conceded"}
+        labels={"game_created":"Game created","keep":"Kept hand","mulligan":"Mulligan","play":"Played or cast a card","pass":"Passed priority","auto_pass":"Auto-passed empty priority","attack":"Declared attackers","ai_attack":"Declared attackers","attack_none":"Declared no attacks","block":"Declared blockers","ai_block":"Declared blockers","auto_no_blocks":"Declared no blocks","block_none":"Declared no blocks","combat_damage":"Combat resolved","concede":"Conceded","pack_reward":"Pack earned"}
         lines=[]
         for event in visible:
             actor=names.get(event.get("user"),"Game")
@@ -740,6 +763,18 @@ class MTG(commands.Cog):
         try: deck_id,profile=await self.select_saved_deck(ctx.author.id,deck_name)
         except GameError as error: await ctx.send(str(error)); return
         await ctx.send(f"Selected **{profile['decks'][deck_id]['name']}** for future matches.")
+    @mtg.group(name="packs",invoke_without_command=True)
+    async def packs(self,ctx):
+        """View unopened solo-victory packs."""
+        profile=await self.player_profile(ctx.author.id)
+        await ctx.send(f"You have **{int(profile.get('unopened_packs',0))}** unopened MTG pack(s). Each contains 4 commons, 2 uncommons, 1 rare or mythic, and 1 guaranteed land.")
+    @packs.command(name="open")
+    async def packs_open(self,ctx):
+        """Open one earned eight-card pack."""
+        try: cards,profile=await self.open_pack(ctx.author.id)
+        except GameError as error: await ctx.send(str(error)); return
+        counts=Counter(cards); lines=[f"**{CARDS[key].name}** ×{count} · {CARDS[key].rarity.title()} · `{key}`" for key,count in counts.items()]
+        await ctx.send("**Pack opened**\n"+"\n".join(lines)+f"\n\nUnopened packs remaining: **{profile['unopened_packs']}**")
     @mtg.command(name="challenge")
     @commands.guild_only()
     async def challenge(self,ctx,member:discord.Member,*,deck_name:str=None):

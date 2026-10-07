@@ -1,8 +1,19 @@
 import unittest
+import random
 from collections import Counter
 
 from mtg.cards import CARDS, starter
-from mtg.collection import card_identity, resolve_deck
+from mtg.collection import build_pack, card_identity, resolve_deck
+
+
+class PackTests(unittest.TestCase):
+    def test_pack_has_exact_slots_and_guaranteed_land(self):
+        pack=build_pack(CARDS,random.Random(7))
+        self.assertEqual(len(pack),8)
+        self.assertEqual(sum(CARDS[key].land for key in pack),1)
+        self.assertEqual(sum(not CARDS[key].land and CARDS[key].rarity=="common" for key in pack),4)
+        self.assertEqual(sum(not CARDS[key].land and CARDS[key].rarity=="uncommon" for key in pack),2)
+        self.assertIn(CARDS[pack[6]].rarity,("rare","mythic"))
 
 
 class CollectionDeckTests(unittest.TestCase):

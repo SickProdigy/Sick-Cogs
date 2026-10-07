@@ -30,3 +30,21 @@ def resolve_deck(printing_counts, collection, cards):
         sample=next(cards[key] for key in requested if card_identity(cards[key])==identity)
         if not sample.land and count>4: errors.append(f"{sample.name}: maximum 4 copies")
     return resolved,errors
+
+
+def pack_pools(cards):
+    playable=list(cards.values())
+    lands=tuple(card.key for card in playable if card.land)
+    pools={}
+    for rarity in ("common","uncommon","rare","mythic"):
+        pools[rarity]=tuple(card.key for card in playable if not card.land and card.rarity==rarity)
+    return lands,pools
+
+
+def build_pack(cards,rng):
+    """Create 4 commons, 2 uncommons, 1 rare/mythic, and 1 guaranteed land."""
+    lands,pools=pack_pools(cards)
+    if not lands or not pools["common"] or not pools["uncommon"] or not pools["rare"]:
+        raise ValueError("Pack pools are incomplete.")
+    high=pools["mythic"] if pools["mythic"] and rng.randrange(8)==0 else pools["rare"]
+    return [rng.choice(pools["common"]) for _ in range(4)]+[rng.choice(pools["uncommon"]) for _ in range(2)]+[rng.choice(high),rng.choice(lands)]

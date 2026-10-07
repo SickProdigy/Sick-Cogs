@@ -85,6 +85,26 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(game.player(10).deck,"My Deck")
         self.assertIn("mountain",player_keys)
 
+    async def test_solo_victory_awards_once_and_pack_opening_adds_eight_cards(self):
+        import random
+        cog=cog_fixture(); await cog.claim_starter(10,"red")
+        game=Game(44,[10,999],1,ai_user=999,ai_difficulty="easy"); game.winner=10; game.finished_reason="zero life"; game.phase="finished"
+        cog.games={44:game}; cog.channels={44:100}
+        await cog.save(game); await cog.save(game)
+        profile=await cog.player_profile(10)
+        self.assertEqual(profile["unopened_packs"],1)
+        self.assertEqual(profile["rewarded_solo_games"],[44])
+        self.assertEqual(sum(event["action"]=="pack_reward" for event in game.history),1)
+        before=sum(profile["collection"].values()); cards,profile=await cog.open_pack(10,random.Random(4))
+        self.assertEqual((len(cards),profile["unopened_packs"]),(8,0))
+        self.assertEqual(sum(profile["collection"].values()),before+8)
+
+    async def test_multiplayer_and_solo_loss_do_not_award_packs(self):
+        cog=cog_fixture(); await cog.claim_starter(10,"red")
+        versus=Game(1,[10,20],1); versus.winner=10; versus.finished_reason="zero life"; versus.phase="finished"; cog.games={1:versus}; cog.channels={1:1}; await cog.save(versus)
+        loss=Game(2,[10,999],1,ai_user=999,ai_difficulty="easy"); loss.winner=999; loss.finished_reason="zero life"; loss.phase="finished"; cog.games[2]=loss; cog.channels[2]=1; await cog.save(loss)
+        self.assertEqual((await cog.player_profile(10))["unopened_packs"],0)
+
     async def test_concurrent_creates_allow_only_one_game_per_player(self):
         cog = cog_fixture()
         results = await asyncio.gather(
@@ -1055,7 +1075,7 @@ class CommandLayoutTests(unittest.TestCase):
         self.assertIn("buttons",help_text)
 
     def test_player_help_keeps_match_controls_and_special_fallbacks_nested(self):
-        public={"action","card","catalog","challenge","collection","deck","solo","starter","status"}
+        public={"action","card","catalog","challenge","collection","deck","packs","solo","starter","status"}
         match={"attack","block","concede","graveyard","mana","pass","play","special"}
         fallback={"vault","sanctuary","channel","angel","incarnation","hydra","hydraorder","mask","maskpick","activate","forktarget","bodyguard","trample","attackdamage","blockdamage","untap","trigger","wording","orders","kudzu","balance","leak","selection","copy","doppelganger"}
         self.assertEqual(set(MTG.mtg.all_commands),public)
