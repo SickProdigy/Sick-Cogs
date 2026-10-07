@@ -61,7 +61,7 @@ class GMod(commands.Cog):
     """Monitor Garry's Mod servers and publish official Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.1.1"
 
     guild_defaults = {
         "servers": {},

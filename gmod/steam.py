@@ -11,8 +11,12 @@ import aiohttp
 APP_ID = 4000
 API_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
 ANNOUNCEMENTS_URL = f"https://steamcommunity.com/app/{APP_ID}/announcements/"
-USER_AGENT = "Sick-Cogs-GMod/0.1.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-GMod/0.1.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 
+_BB_IMAGE_SRC_RE = re.compile(
+    r"\[img[^\]]*\bsrc=[\"\x27]([^\"\x27]+)[\"\x27][^\]]*\](?:\[/img\])?",
+    re.IGNORECASE | re.DOTALL,
+)
 _BB_IMAGE_RE = re.compile(r"\[img\](.+?)\[/img\]", re.IGNORECASE | re.DOTALL)
 _HTML_IMAGE_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)', re.IGNORECASE)
 _BB_TAG_RE = re.compile(r"\[/?[a-z*][^\]]*\]", re.IGNORECASE)
@@ -64,11 +68,18 @@ def plain_text(contents: str, *, limit: int = 900) -> str:
 
 def image_url(contents: str) -> Optional[str]:
     source = str(contents or "")
-    for pattern in (_BB_IMAGE_RE, _HTML_IMAGE_RE):
+    for pattern in (_BB_IMAGE_SRC_RE, _BB_IMAGE_RE, _HTML_IMAGE_RE):
         for match in pattern.finditer(source):
             value = html.unescape(match.group(1).strip()).replace(
                 "{STEAM_CLAN_IMAGE}",
+                "https://clan.steamstatic.com/images",
+            )
+            value = value.replace(
                 "https://clan.cloudflare.steamstatic.com/images",
+                "https://clan.steamstatic.com/images",
+            ).replace(
+                "https://clan.fastly.steamstatic.com/images",
+                "https://clan.steamstatic.com/images",
             )
             if value.startswith("//"):
                 value = f"https:{value}"

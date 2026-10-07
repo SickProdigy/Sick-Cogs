@@ -1,6 +1,6 @@
 import unittest
 
-from gmod.steam import APP_ID, new_items, plain_text, recent_items
+from gmod.steam import APP_ID, image_url, new_items, plain_text, recent_items
 
 
 class SteamNewsTests(unittest.TestCase):
@@ -10,6 +10,16 @@ class SteamNewsTests(unittest.TestCase):
     def test_plain_text_removes_steam_markup(self):
         source = "[h1]Update[/h1]\n[list][*][b]Fixed[/b] tools &amp; crashes[/list]"
         self.assertEqual(plain_text(source), "Update\n• Fixed tools & crashes")
+
+    def test_image_url_supports_img_src_and_canonicalizes_fastly(self):
+        source = (
+            "[img src=\"https://clan.fastly.steamstatic.com/"
+            "images/123/a.png\"][/img]"
+        )
+        self.assertEqual(
+            image_url(source),
+            "https://clan.steamstatic.com/images/123/a.png",
+        )
 
     def test_new_items_filters_and_orders(self):
         items = [
