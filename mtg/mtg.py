@@ -8,7 +8,7 @@ import discord
 from redbot.core import Config, commands
 from redbot.core.data_manager import cog_data_path
 from .ai import DIFFICULTIES, advance_solo
-from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_battlefield, render_hand
+from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, match_result, render_battlefield, render_hand
 from .cards import BASE_CARDS, CARDS
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
 from .engine import Game, GameError
@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.121.6"
+    __version__="0.121.7"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -293,7 +293,9 @@ class MTG(commands.Cog):
                 _,target=g.find_permanent(int(trigger.target.split(":",1)[1])) if trigger.target and ":" in trigger.target else (None,None)
                 pending_names.append(g.card(target.uid).name if target is not None else "departed target")
             e.add_field(name="Next end-step destruction",value=", ".join(pending_names),inline=False)
-        if g.finished: e.description=f"Winner: **{names[g.winner]}** - {g.finished_reason}." if g.winner else f"Match ended - {g.finished_reason}."
+        if g.finished:
+            result, winner, defeated, detail=match_result(g,names)
+            e.description=f"**{result}: {winner}**\n{defeated}\nReason: {detail}."
         e.set_footer(text="Experimental supported-card subset · hands are private")
         return e
     async def game_message(self,game):
@@ -305,6 +307,8 @@ class MTG(commands.Cog):
             except (ArtError,aiohttp.ClientError,asyncio.TimeoutError,OSError):
                 log.warning("Could not cache public art for %s",card.key,exc_info=True)
         names={user:str(self.bot.get_user(user).display_name if self.bot.get_user(user) else user).replace("\n"," ")[:32] for user in game.order}
+        if game.ai_user is not None:
+            names[game.ai_user]=f"{names[game.ai_user]} ({(game.ai_difficulty or 'easy').title()} AI)"
         try:
             background=__import__("pathlib").Path(__file__).with_name("assets")/"default_playmat.png"
             image=await asyncio.to_thread(render_battlefield,game,names,paths,background)

@@ -108,6 +108,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(private_names)
         self.assertTrue(all(name not in rendered for name in private_names))
 
+    async def test_finished_embed_clearly_names_winner_and_defeated_player(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name="SickProdigy" if user_id==10 else "SGbot"))
+        game=Game(11,[10,20],11,ai_user=20,ai_difficulty="easy")
+        game.winner=10; game.finished_reason="zero life"; game.phase="finished"
+        description=cog.game_embed(game).description
+        self.assertIn("VICTORY: SickProdigy",description)
+        self.assertIn("Defeated SGbot (Easy AI)",description)
+        self.assertIn("SGbot (Easy AI) reached zero life",description)
+
     async def test_public_embed_labels_supported_combat_keywords(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1)

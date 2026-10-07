@@ -160,24 +160,51 @@ def render_hand(cards, paths, page=0, playable_positions=()):
     return output
 
 
+def match_result(game, names):
+    """Return display-ready winner, loser, and reason text for a finished match."""
+    if game.winner is None:
+        reason=(game.finished_reason or "No winner").replace("_", " ").capitalize()
+        return "DRAW", "No winner", "Match ended", reason
+    winner=names.get(game.winner, str(game.winner))
+    loser_user=game.opponent(game.winner)
+    loser=names.get(loser_user, str(loser_user))
+    reason=game.finished_reason or "match ended"
+    if reason=="zero life":
+        detail=f"{loser} reached zero life"
+    elif reason=="empty library":
+        detail=f"{loser} could not draw from an empty library"
+    elif reason in ("concession", "conceded"):
+        detail=f"{loser} conceded"
+    else:
+        detail=f"{loser} lost: {reason}"
+    return "VICTORY", winner, f"Defeated {loser}", detail
+
+
 def render_battlefield(game, names, paths, background_path):
     with Image.open(background_path) as source:
         canvas = source.convert("RGB").resize((1280, 853), Image.Resampling.LANCZOS)
     draw = ImageDraw.Draw(canvas, "RGBA")
     title_font, label_font, small_font = _font(26), _font(18), _font(14)
     draw.rounded_rectangle((390, 362, 890, 491), 18, fill=(8, 12, 11, 215), outline=(222, 185, 82, 230), width=3)
-    phase = game.phase.replace("_", " ").title()
-    draw.text((640, 384), f"Turn {game.turn} - {phase}", fill=(250, 240, 215), font=title_font, anchor="mm")
-    priority = names.get(game.priority_user, "Declaration step") if game.priority_user else "Declaration step"
-    draw.text((640, 425), f"Priority: {priority}", fill=(218, 210, 188), font=label_font, anchor="mm")
-    public_status=[]
-    if game.stack:
-        stack_names = " -> ".join(game.card(spell.uid).name for spell in reversed(game.stack))
-        public_status.append(f"Stack: {stack_names}")
-    if game.extra_turns:
-        public_status.append("Extra turns: "+" -> ".join(names[user] for user in game.extra_turns))
-    if public_status:
-        draw.text((640, 462), " | ".join(public_status), fill=(255, 215, 132), font=small_font, anchor="mm")
+    if game.finished:
+        result, winner, defeated, detail=match_result(game,names)
+        draw.text((640, 380), result, fill=(255, 215, 105), font=_font(30), anchor="mm")
+        draw.text((640, 416), winner, fill=(250, 240, 215), font=title_font, anchor="mm")
+        draw.text((640, 450), defeated, fill=(218, 210, 188), font=label_font, anchor="mm")
+        draw.text((640, 476), detail, fill=(255, 215, 132), font=small_font, anchor="mm")
+    else:
+        phase = game.phase.replace("_", " ").title()
+        draw.text((640, 384), f"Turn {game.turn} - {phase}", fill=(250, 240, 215), font=title_font, anchor="mm")
+        priority = names.get(game.priority_user, "Declaration step") if game.priority_user else "Declaration step"
+        draw.text((640, 425), f"Priority: {priority}", fill=(218, 210, 188), font=label_font, anchor="mm")
+        public_status=[]
+        if game.stack:
+            stack_names = " -> ".join(game.card(spell.uid).name for spell in reversed(game.stack))
+            public_status.append(f"Stack: {stack_names}")
+        if game.extra_turns:
+            public_status.append("Extra turns: "+" -> ".join(names[user] for user in game.extra_turns))
+        if public_status:
+            draw.text((640, 462), " | ".join(public_status), fill=(255, 215, 132), font=small_font, anchor="mm")
 
     def draw_player(user, top):
         player = game.players[user]

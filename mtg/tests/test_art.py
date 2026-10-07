@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from mtg.art import MAX_CACHE_FILES, ScryfallArtCache, render_battlefield, render_hand
+from mtg.art import MAX_CACHE_FILES, ScryfallArtCache, match_result, render_battlefield, render_hand
 from mtg.engine import Game, Permanent
 from mtg.cards import CARDS
 
@@ -36,6 +36,14 @@ class ArtTests(unittest.TestCase):
         with Image.open(output) as image:
             self.assertEqual(image.getpixel((126,41)),(222,185,82))
             self.assertEqual(image.getpixel((362,41)),(151,103,219))
+
+    def test_finished_match_result_names_winner_loser_and_cause(self):
+        game=Game(1,[10,20],1,ai_user=20,ai_difficulty="easy")
+        game.winner=10; game.finished_reason="zero life"; game.phase="finished"
+        self.assertEqual(
+            match_result(game,{10:"SickProdigy",20:"SGbot (Easy AI)"}),
+            ("VICTORY","SickProdigy","Defeated SGbot (Easy AI)","SGbot (Easy AI) reached zero life"),
+        )
 
     def test_public_battlefield_render_is_bounded_png(self):
         game=Game(1,[10,20],1)
