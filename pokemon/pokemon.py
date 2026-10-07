@@ -20,7 +20,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":None,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1,"concurrency_owner_override":False,"timer_owner_override":False}
-USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{},"menu_style":"retro"}
+USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{},"menu_style":"retro","vip_reward_month":None}
 MART_ITEMS={
     "poke_ball":("Poké Ball","balls",50),
     "great_ball":("Great Ball","great_ball",150),
@@ -29,10 +29,12 @@ MART_ITEMS={
     "revive":("Revive","revive",400),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
-GLOBAL={"schema":15,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{}}
+GLOBAL={"schema":16,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
+VIP_MAX_COLLECTION=500
+VIP_CACHE_SECONDS=300
 CENTER_TREATMENT_SECONDS=5
 TRADE_TIMEOUT_SECONDS=900
 SERVER_TIMER_MINUTES=(1,10080)
@@ -112,6 +114,11 @@ def rarity_tier(species):
 
 def first_pokedex_registration(conf,species_id):
     return int(species_id) not in {int(value) for value in conf.get("pokedex_caught",[]) if str(value).isdigit()}
+
+def store_caught_pokemon(conf,pokemon,capacity):
+    if any(raw.get("instance_id")==pokemon.instance_id for raw in conf.get("collection",[])):return True
+    if len(conf.get("collection",[]))>=capacity:return False
+    conf.setdefault("collection",[]).append(pokemon.raw());return True
 
 def mart_item_key(value):
     key=str(value).casefold().replace("-","_").replace(" ","_")
@@ -212,11 +219,11 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.53.0";__author__="SickProdigy"
+    __version__="0.54.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
-        self.battles={};self.locks={};self.activity={};self.recent_users={};self.recent_content={};self.catalog=PokemonCatalog(cog_data_path(self)/"catalog.json",Path(__file__).with_name("gen1.json"));self.renderer=BattleRenderer(cog_data_path(self)/"sprites");self.cleanup_loop.start()
+        self.battles={};self.locks={};self.activity={};self.recent_users={};self.recent_content={};self.vip_cache={};self.catalog=PokemonCatalog(cog_data_path(self)/"catalog.json",Path(__file__).with_name("gen1.json"));self.renderer=BattleRenderer(cog_data_path(self)/"sprites");self.cleanup_loop.start()
     async def cog_load(self):
         try:self.catalog.load()
         except CatalogError:log.exception("Pokémon catalog cache could not be loaded")
@@ -377,9 +384,44 @@ class Pokemon(commands.Cog):
             await self.config.minimum_encounter_timeout.set(minimum);await self.config.maximum_encounter_timeout.set(maximum);await self.config.encounter_timeout.set(default)
             for guild_id in (await self.config.all_guilds()):await self.config.guild_from_id(int(guild_id)).encounter_timeout.set(None)
             await self.config.schema.set(15)
+        if schema<16:
+            for user_id,data in (await self.config.all_users()).items():
+                data.setdefault("vip_reward_month",None);await self.config.user_from_id(int(user_id)).set(data)
+            await self.config.schema.set(16)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
+
+    async def is_vip(self,user_id,policy=None):
+        policy=policy or await self.config.all();guild_id=policy.get("vip_guild_id");role_id=policy.get("vip_role_id")
+        if not guild_id or not role_id:return False
+        now=datetime.now(timezone.utc).timestamp();key=(int(user_id),int(guild_id),int(role_id));cached=getattr(self,"vip_cache",{}).get(key)
+        if cached and now-cached[0]<VIP_CACHE_SECONDS:return cached[1]
+        guild=self.bot.get_guild(int(guild_id));member=guild.get_member(int(user_id)) if guild else None
+        if guild and member is None:
+            try:member=await guild.fetch_member(int(user_id))
+            except (discord.NotFound,discord.Forbidden,discord.HTTPException):member=None
+        result=bool(member and any(int(role.id)==int(role_id) for role in member.roles));self.vip_cache[key]=(now,result);return result
+
+
+    @staticmethod
+    def apply_vip_monthly(conf,eligible,pack,now=None):
+        if not eligible:return False
+        month=(now or datetime.now(timezone.utc)).strftime("%Y-%m")
+        if conf.get("vip_reward_month")==month:return False
+        grant_supply_items(conf,{key:max(0,int(value)) for key,value in pack.items()});conf["vip_reward_month"]=month;return True
+
+    async def vip_capacity(self,user_id,policy=None):
+        return VIP_MAX_COLLECTION if await self.is_vip(user_id,policy) else MAX_COLLECTION
+
+    async def cog_before_invoke(self,ctx):
+        if not ctx.command or ctx.command.qualified_name.split()[0]!="pokemon":return
+        policy=await self.config.all();eligible=await self.is_vip(ctx.author.id,policy)
+        if not eligible:return
+        async with self.lock(("user",ctx.author.id)):
+            section=self.config.user(ctx.author);conf=await section.all();awarded=self.apply_vip_monthly(conf,True,policy.get("vip_monthly_pack",GLOBAL["vip_monthly_pack"]))
+            if awarded:await section.set(conf)
+        if awarded:await ctx.send("Your monthly SickGaming VIP Pokémon supplies have arrived: "+reward_summary(policy.get("vip_monthly_pack",GLOBAL["vip_monthly_pack"]))+".")
     @staticmethod
     def trade_collection_after(conf,outgoing_id,incoming_raw):
         incoming_id=incoming_raw["instance_id"];updated=dict(conf)
@@ -610,7 +652,7 @@ class Pokemon(commands.Cog):
     async def rendered_trainer_card(self,user,conf):
         style=conf.get("trainer_card_style","retro")
         if style not in {"retro","gold"}:style="retro"
-        embed=trainer_profile_embed(user,conf,MAX_COLLECTION)
+        capacity=await self.vip_capacity(user.id);embed=trainer_profile_embed(user,conf,capacity)
         try:
             image=await self.renderer.trainer_card(user.display_name,conf,style);embed.set_image(url="attachment://trainer-card.png")
             return embed,[discord.File(image,filename="trainer-card.png")]
@@ -957,9 +999,8 @@ class Pokemon(commands.Cog):
                 await i.response.send_message("Switch Pokémon first." if battle.needs_switch else "This encounter is over.",ephemeral=True);return
             if battle.battle_kind=="gym":
                 await i.response.send_message("Poké Balls cannot be used in a Gym battle.",ephemeral=True);return
-            conf=await self.config.user(i.user).all();tx_key=f"{eid}:{battle.rolls}";tx=conf["transactions"].get(tx_key,{})
-            if len(conf["collection"])>=MAX_COLLECTION and not tx.get("settled"):
-                await i.response.send_message(f"Your {MAX_BOXES} boxes are full.",ephemeral=True);return
+            policy=await self.config.all();eligible=await self.is_vip(i.user.id,policy);capacity=VIP_MAX_COLLECTION if eligible else MAX_COLLECTION
+            conf=await self.config.user(i.user).all();self.apply_vip_monthly(conf,eligible,policy.get("vip_monthly_pack",GLOBAL["vip_monthly_pack"]));tx_key=f"{eid}:{battle.rolls}";tx=conf["transactions"].get(tx_key,{})
             ball_names={"poke_ball":"Poké Balls","great_ball":"Great Balls","ultra_ball":"Ultra Balls"}
             if ball_key not in ball_names:await i.response.send_message("That Poké Ball is unavailable.",ephemeral=True);return
             if self.ball_inventory(conf,ball_key)<1 and not tx.get("ball_charged"):await i.response.send_message(f"You have no {ball_names[ball_key]}.",ephemeral=True);return
@@ -971,7 +1012,7 @@ class Pokemon(commands.Cog):
             if caught:
                 self.apply_battle_party(conf,battle)
                 identity=f"catch-{battle.user_id}-{eid}";pokemon=battle.caught(identity)
-                if not any(p["instance_id"]==identity for p in conf["collection"]):conf["collection"].append(pokemon.raw())
+                stored=store_caught_pokemon(conf,pokemon,capacity)
                 seen={int(value) for value in conf.get("pokedex_seen",[])}
                 caught_ids={int(value) for value in conf.get("pokedex_caught",[])}
                 first_registration=first_pokedex_registration(conf,pokemon.species_id)
@@ -979,8 +1020,9 @@ class Pokemon(commands.Cog):
                 conf["pokedex_seen"]=sorted(seen);conf["pokedex_caught"]=sorted(caught_ids)
                 rewards=self.record_battle_result(conf,battle)
                 if rewards:battle.result=(battle.result or "")+" Reward: "+"; ".join(rewards)+"."
-                if len(conf["party"])<6 and identity not in conf["party"]:conf["party"].append(identity)
-                tx["settled"]=True;tx["caught_id"]=identity;conf["transactions"][tx_key]=tx
+                if stored and len(conf["party"])<6 and identity not in conf["party"]:conf["party"].append(identity)
+                if not stored:battle.result=(battle.result or "")+f" Collection full at {capacity}; the catch counted toward your records, but the Pokémon was not stored."
+                tx["settled"]=True;tx["caught_id"]=identity if stored else None;conf["transactions"][tx_key]=tx
             if battle.state!="active" and not caught:
                 rewards=self.record_battle_result(conf,battle)
                 if rewards:battle.result=(battle.result or "")+" Reward: "+"; ".join(rewards)+"."
@@ -1097,7 +1139,7 @@ class Pokemon(commands.Cog):
         return sorted(conf.get("collection",[]),key=lambda raw:((raw.get("nickname") or SPECIES[raw["species_id"]].name).casefold(),raw["species_id"],raw["instance_id"]))
 
     async def rendered_collection(self,user,page=1,manage=True):
-        conf=await self.config.user(user).all();ordered=self.sorted_collection(conf);total=len(ordered)
+        conf=await self.config.user(user).all();capacity=await self.vip_capacity(user.id);ordered=self.sorted_collection(conf);total=len(ordered)
         pages=max(1,(total+COLLECTION_PAGE_SIZE-1)//COLLECTION_PAGE_SIZE);page=max(1,min(int(page),pages));start=(page-1)*COLLECTION_PAGE_SIZE
         party_slots={identity:index+1 for index,identity in enumerate(conf.get("party",[])[:6])};raw_items=[dict(raw) for raw in ordered[start:start+COLLECTION_PAGE_SIZE]]
         for raw in raw_items:raw["party_slot"]=party_slots.get(raw.get("instance_id"))
@@ -1109,7 +1151,7 @@ class Pokemon(commands.Cog):
             lines.append(f"{number}. {party}{marker}{raw.get('nickname') or species.name} · Lv. {raw['level']}")
         trainer=getattr(user,"display_name",getattr(user,"name",str(user)))
         embed=discord.Embed(title=f"{trainer}'s Collection · {page}/{pages}",description="\n".join(lines) or "Empty",color=discord.Color.gold())
-        embed.set_footer(text=f"{total}/{MAX_COLLECTION} Pokémon" + (" · Select one below to manage your party" if manage else " · Use these numbers when proposing a trade"))
+        embed.set_footer(text=f"{total}/{capacity} Pokémon" + (" · Select one below to manage your party" if manage else " · Use these numbers when proposing a trade"))
         try:
             image=await self.renderer.collection_card(items,page,pages,total,trainer,[raw.get("party_slot") for raw in raw_items]);embed.set_image(url="attachment://collection.png")
             files=[discord.File(image,filename="collection.png")]
@@ -1780,6 +1822,27 @@ class Pokemon(commands.Cog):
                     remaining=max(0,round((last+timedelta(seconds=cooldown)-datetime.now(timezone.utc)).total_seconds())) if last else 0
                     if remaining:await ctx.send(f"The activity spawn cooldown is active for another {remaining}s.");return
             await self.spawn(channel,force_shiny=force_shiny)
+    @pokemon_owner_set.command(name="viprole")
+    async def vip_role(self,ctx,guild_id:int=None,role_id:int=None):
+        """Set or show the trusted guild and role for global VIP benefits."""
+        if guild_id is None or role_id is None:
+            current_guild=await self.config.vip_guild_id();current_role=await self.config.vip_role_id();await ctx.send(f"VIP guild ID: **{current_guild or 'not set'}** · role ID: **{current_role or 'not set'}**");return
+        guild=self.bot.get_guild(guild_id);role=guild.get_role(role_id) if guild else None
+        if guild is None or role is None:await ctx.send("The bot must be in that guild and the role ID must exist there.");return
+        await self.config.vip_guild_id.set(guild_id);await self.config.vip_role_id.set(role_id);self.vip_cache.clear();await ctx.send(f"Global Pokémon VIP benefits now use **{guild.name}** and the **{role.name}** role.")
+
+    @pokemon_owner_set.command(name="vipclear")
+    async def vip_clear(self,ctx):
+        """Disable the trusted VIP role without removing prior rewards or Pokémon."""
+        await self.config.vip_guild_id.set(None);await self.config.vip_role_id.set(None);self.vip_cache.clear();await ctx.send("Pokémon VIP benefits are disabled. Existing collections and delivered supplies were not removed.")
+
+    @pokemon_owner_set.command(name="vippack")
+    async def vip_pack(self,ctx,balls:int,great_balls:int,ultra_balls:int,potions:int,revives:int):
+        """Set the monthly VIP supply pack."""
+        values=(balls,great_balls,ultra_balls,potions,revives)
+        if any(value<0 or value>1000 for value in values) or not any(values):await ctx.send("Use five amounts from 0–1000, with at least one item.");return
+        pack=dict(zip(("balls","great_ball","ultra_ball","potion","revive"),values));await self.config.vip_monthly_pack.set(pack);await ctx.send("Monthly Pokémon VIP pack: "+reward_summary(pack)+".")
+
     @pokemon_owner_set.command(name="martprice")
     async def mart_price(self,ctx,item:str,price:int):
         """Set a bot-wide Poké Mart item price."""
@@ -1817,6 +1880,7 @@ class Pokemon(commands.Cog):
             f"Activity-mode floors: **{policy.get('minimum_threshold',8)} points** · **{policy.get('minimum_cooldown',120)}s cooldown**\n"
             f"Concurrency limits: server-admin ceiling **{max(1,min(5,int(policy.get('maximum_concurrency',5))))}** (owner-set range **1–5**) · per-server owner override **1–5**\n"
             f"Allowed generations: **{generations}** · Rarity: **{policy.get('rarity_profile','friendly')}** · Special species: **{'enabled' if policy.get('allow_special_species') else 'event-only'}**\n"
+            f"VIP benefits: guild **{policy.get('vip_guild_id') or 'not set'}** · role **{policy.get('vip_role_id') or 'not set'}** · capacity **{MAX_COLLECTION}/{VIP_MAX_COLLECTION}** · monthly {reward_summary(policy.get('vip_monthly_pack',GLOBAL['vip_monthly_pack']))}\n"
             f"Default Pokédex style: **{resolve_style(policy.get('pokedex_default_style','retro')).label}**\n"
             f"Poké Mart prices: {price_text}"
         )
