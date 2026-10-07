@@ -16,7 +16,7 @@ from pokemon.models import Battle,OwnedPokemon
 from pokemon.pokemon import GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView
+from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView, TradeView, GymChallengeView
 
 
 class StoredValue:
@@ -285,8 +285,8 @@ class GymProgressionTests(unittest.TestCase):
         self.assertIn("1/8",profile.fields[0].name)
         self.assertIn("Misty",profile.footer.text)
         self.assertEqual(badge_case(["boulder"]).count("◻️"),7)
-        status=gym_status_embed(user,conf)
-        self.assertIn("Misty",status.fields[1].value)
+        status=gym_status_embed(user,conf,"!poke gym challenge")
+        self.assertIn("Misty",status.fields[1].value);self.assertIn("!poke gym challenge",status.footer.text)
 
 
 class PokedexTests(unittest.TestCase):
@@ -698,6 +698,18 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await cog.sync_battle_player(current)
         stored=OwnedPokemon.from_raw(section.value["collection"][0])
         self.assertEqual((stored.current_hp,stored.status),(3,"poison"))
+
+    async def test_gym_status_uses_server_prefix_and_challenge_button(self):
+        conf={"badges":[],"collection":[],"party":[]};section=StoredSection(conf);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section)
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42),clean_prefix="!",send=AsyncMock())
+        await Pokemon.gym.callback(cog,ctx)
+        sent=ctx.send.await_args.kwargs;self.assertIn("!poke gym challenge",sent["embed"].footer.text);self.assertEqual(sent["view"].challenge.label,"Challenge Brock")
+
+    async def test_gym_challenge_view_is_trainer_scoped(self):
+        view=GymChallengeView(SimpleNamespace(),42,"Brock")
+        self.assertEqual(view.challenge.label,"Challenge Brock")
+        denied=SimpleNamespace(user=SimpleNamespace(id=7),response=SimpleNamespace(send_message=AsyncMock()))
+        self.assertFalse(await view.interaction_check(denied));denied.response.send_message.assert_awaited_once_with("This Gym challenge belongs to another trainer.",ephemeral=True)
 
     async def test_gym_challenge_starts_next_restart_safe_battle(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()

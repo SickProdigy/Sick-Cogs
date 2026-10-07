@@ -58,7 +58,7 @@ def badge_case(raw):
     return " ".join(gym.symbol if gym.key in badges else "◻️" for gym in KANTO_GYMS)
 
 
-def gym_status_embed(user,conf):
+def gym_status_embed(user,conf,challenge_command="[p]poke gym challenge"):
     badges=earned_badges(conf.get("badges",[]));upcoming=next_gym(badges)
     embed=discord.Embed(title="Kanto Gym Challenge",color=discord.Color.gold())
     names=", ".join(GYMS[key].badge for key in badges) or "No badges earned yet."
@@ -67,7 +67,7 @@ def gym_status_embed(user,conf):
     if upcoming:
         team=" · ".join(f"{SPECIES[species_id].name} Lv. {level}" for species_id,level in upcoming.team)
         embed.add_field(name="Next challenge",value=f"{upcoming.leader} · {upcoming.city}\n{team}",inline=True)
-        embed.set_footer(text="Use the Pokémon gym challenge command when your party is ready.")
+        embed.set_footer(text=f"Use {challenge_command} when your party is ready, or press Challenge {upcoming.leader} below.")
     else:
         embed.add_field(name="Journey",value="All eight Kanto badges earned.",inline=True)
         embed.set_footer(text="You completed the Kanto Gym challenge.")

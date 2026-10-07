@@ -69,6 +69,18 @@ class MainMenuView(discord.ui.View):
         await interaction.response.send_message("This Pokémon menu belongs to another trainer.",ephemeral=True);return False
 
 
+class GymChallengeView(discord.ui.View):
+    def __init__(self,cog,user_id,leader):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;self.challenge.label=f"Challenge {leader}"[:80]
+
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This Gym challenge belongs to another trainer.",ephemeral=True);return False
+
+    @discord.ui.button(label="Challenge Gym Leader",emoji="⚔️",style=discord.ButtonStyle.danger)
+    async def challenge(self,interaction,button):await self.cog.gym_challenge_interaction(interaction)
+
+
 class CenterCollectView(discord.ui.View):
     def __init__(self,user_id):
         super().__init__(timeout=180);self.user_id=user_id
