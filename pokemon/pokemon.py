@@ -29,7 +29,7 @@ MART_ITEMS={
     "revive":("Revive","revive",400),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
-GLOBAL={"schema":14,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":3,"minimum_timer":60,"next_trade":1,"trades":{}}
+GLOBAL={"schema":14,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":60,"next_trade":1,"trades":{}}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
@@ -80,7 +80,7 @@ def active_guild_encounters(encounters,guild_id):
 def effective_concurrency(conf,policy):
     selected=max(1,min(5,int(conf.get("max_active_encounters",1))))
     if conf.get("concurrency_owner_override"):return selected
-    return min(selected,max(1,min(5,int(policy.get("maximum_concurrency",3)))))
+    return min(selected,max(1,min(5,int(policy.get("maximum_concurrency",5)))))
 
 def effective_timer_minutes(conf,policy):
     requested=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(conf.get("timer_minutes",DEFAULT_SERVER_TIMER_MINUTES))))
@@ -205,7 +205,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.51.3";__author__="SickProdigy"
+    __version__="0.52.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1784,11 +1784,12 @@ class Pokemon(commands.Cog):
         price_text=" · ".join(f"{MART_ITEMS[key][0]}: **{prices[key]:,}**" for key in MART_ITEMS)
         await ctx.send(
             f"**Pokémon bot-wide policy**\n"
+            f"Fresh-install defaults: admin timer floor **{GLOBAL['minimum_timer']}m** · wild lifetime **{GLOBAL['encounter_timeout']//60}m** · Center cooldown **{GLOBAL['center_cooldown']//60}m** · admin concurrency ceiling **{GLOBAL['maximum_concurrency']}**\n"
             f"Timer limits: server administrators **{minimum_timer}–{SERVER_TIMER_MINUTES[1]:,}m** · bot-owner override **{OWNER_TIMER_MINUTES[0]}–{OWNER_TIMER_MINUTES[1]:,}m**\n"
-            f"Wild encounter lifetime: **{max(60,int(policy.get('encounter_timeout',900)))//60}m** · owner range **1–1,440m**\n"
-            f"Free Center cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m** · owner range **1–1,440m**\n"
+            f"Global wild encounter lifetime: current **{max(60,int(policy.get('encounter_timeout',900)))//60}m** · owner-set range **1–1,440m** (new encounters on every server)\n"
+            f"Global free-Center cooldown: current **{max(60,int(policy.get('center_cooldown',1800)))//60}m** · owner-set range **1–1,440m**\n"
             f"Activity-mode floors: **{policy.get('minimum_threshold',8)} points** · **{policy.get('minimum_cooldown',120)}s cooldown**\n"
-            f"Administrator concurrency ceiling: **{max(1,min(5,int(policy.get('maximum_concurrency',3))))}** · owner override range **1–5**\n"
+            f"Concurrency limits: server-admin ceiling **{max(1,min(5,int(policy.get('maximum_concurrency',5))))}** (owner-set range **1–5**) · per-server owner override **1–5**\n"
             f"Allowed generations: **{generations}** · Rarity: **{policy.get('rarity_profile','friendly')}** · Special species: **{'enabled' if policy.get('allow_special_species') else 'event-only'}**\n"
             f"Default Pokédex style: **{resolve_style(policy.get('pokedex_default_style','retro')).label}**\n"
             f"Poké Mart prices: {price_text}"
