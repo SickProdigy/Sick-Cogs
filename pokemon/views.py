@@ -68,6 +68,20 @@ class MainMenuView(discord.ui.View):
         await interaction.response.send_message("This Pokémon menu belongs to another trainer.",ephemeral=True);return False
 
 
+class CenterCollectView(discord.ui.View):
+    def __init__(self,user_id):
+        super().__init__(timeout=180);self.user_id=user_id
+
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This healed party belongs to another trainer.",ephemeral=True);return False
+
+    @discord.ui.button(label="Collect Party",emoji="✨",style=discord.ButtonStyle.success,custom_id="pokemon:center:collect")
+    async def collect(self,interaction,button):
+        name=getattr(interaction.user,"display_name","Trainer")
+        await interaction.response.edit_message(content=f"**{name}** collected their fully restored party.",view=None)
+
+
 class CollectionPokemonSelect(discord.ui.Select):
     def __init__(self,cog,user_id,items):
         options=[]

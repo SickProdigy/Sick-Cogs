@@ -16,7 +16,7 @@ from pokemon.models import Battle,OwnedPokemon
 from pokemon.pokemon import GUILD, MART_ITEMS, PACE, Pokemon, active_guild_encounters, effective_concurrency, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView
+from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, CenterCollectView
 
 
 class StoredValue:
@@ -604,13 +604,16 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         boxed=OwnedPokemon.create("boxed",7,10,seed=4);boxed.current_hp=1
         section=StoredSection({"collection":[party.raw(),boxed.raw()],"party":["party"],"items":{},"center_last_at":None})
         center=StoredValue(55)
-        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(
+        message=SimpleNamespace(edit=AsyncMock());cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(
             user=lambda user:section,
             guild=lambda guild:SimpleNamespace(center_channel=center),
             center_cooldown=StoredValue(1800),
-        )
-        ctx=SimpleNamespace(author=SimpleNamespace(id=42),guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=55),send=AsyncMock())
-        await Pokemon.pokemon_center.callback(cog,ctx)
+        );cog.rendered_center=AsyncMock(side_effect=lambda user,party,complete=False:(discord.Embed(title="Complete" if complete else "Healing"),[]))
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42,display_name="Trainer"),guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=55),send=AsyncMock(return_value=message))
+        with patch("pokemon.pokemon.asyncio.sleep",new=AsyncMock()) as sleep:
+            await Pokemon.pokemon_center.callback(cog,ctx)
+        sleep.assert_awaited_once_with(5);self.assertEqual(cog.rendered_center.await_count,2)
+        self.assertIsInstance(message.edit.await_args.kwargs["view"],CenterCollectView)
         healed=OwnedPokemon.from_raw(section.value["collection"][0]);still_boxed=OwnedPokemon.from_raw(section.value["collection"][1])
         self.assertEqual(healed.current_hp,Battle.stat(healed,"hp"))
         self.assertEqual(healed.status,"")
