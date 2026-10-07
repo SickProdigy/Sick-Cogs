@@ -655,6 +655,12 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         edited=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=edited));cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel)
         await cog.expire_trades(datetime.fromisoformat(record["expires_at"])+timedelta(seconds=1));self.assertEqual(trades.value["1"]["state"],"expired");edited.edit.assert_awaited_once_with(content="This Pokémon trade offer expired.",view=None)
 
+    async def test_trade_delivery_failure_releases_reservations(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        offered=OwnedPokemon.create("offered",4,5,seed=1).raw();requested=OwnedPokemon.create("requested",7,6,seed=2).raw();sections={10:StoredSection({"collection":[offered],"party":["offered"]}),20:StoredSection({"collection":[requested],"party":["requested"]})};trades=StoredValue({});cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades,next_trade=StoredValue(1),user=lambda user:sections[user.id]);author=SimpleNamespace(id=10,display_name="Red",mention="<@10>",bot=False);member=SimpleNamespace(id=20,display_name="Blue",mention="<@20>",bot=False);ctx=SimpleNamespace(author=author,guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=2),send=AsyncMock(side_effect=RuntimeError("delivery failed")))
+        with self.assertRaises(RuntimeError):await Pokemon.trade.callback(cog,ctx,member,1,1)
+        self.assertEqual(trades.value["1"]["state"],"delivery_failed");self.assertFalse(Pokemon.trade_reserved(trades.value,"offered"));self.assertFalse(Pokemon.trade_reserved(trades.value,"requested"))
+
     async def test_trade_collection_browser_is_read_only_and_trainer_scoped(self):
         member=SimpleNamespace(id=20,display_name="Blue");section=StoredSection({"collection":[{"instance_id":"one"}]});cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section);cog.rendered_collection=AsyncMock(return_value=(discord.Embed(title="Collection"),[],1,2,[]));ctx=SimpleNamespace(author=SimpleNamespace(id=10),send=AsyncMock())
         await Pokemon.trade_collection.callback(cog,ctx,member,1);sent=ctx.send.await_args.kwargs;view=sent["view"];self.assertIsInstance(view,TradeCollectionView);self.assertTrue(view.previous.disabled);self.assertFalse(view.next.disabled);cog.rendered_collection.assert_awaited_once_with(member,1,manage=False)
