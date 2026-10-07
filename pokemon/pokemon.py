@@ -15,7 +15,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,CenterCollectView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -33,6 +33,7 @@ GLOBAL={"schema":12,"next_encounter":1,"encounters":{},"pokedex_default_style":"
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
+CENTER_TREATMENT_SECONDS=5
 COLLECTION_PAGE_SIZE=9
 PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
 SPECIAL_SPECIES={144,145,146,150,151}
@@ -194,7 +195,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.46.1";__author__="SickProdigy"
+    __version__="0.47.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -518,6 +519,15 @@ class Pokemon(commands.Cog):
             return embed,[discord.File(image,filename="trainer-card.png")]
         except RenderError:
             log.exception("Trainer card rendering failed");return embed,[]
+
+    async def rendered_center(self,user,party,complete=False):
+        trainer=getattr(user,"display_name",getattr(user,"name","Trainer"));title="Your party is fully restored!" if complete else "Healing your Pokémon…"
+        description="Collect your refreshed party when you are ready." if complete else f"The restoration cycle takes about {CENTER_TREATMENT_SECONDS} seconds."
+        embed=discord.Embed(title=title,description=description,color=discord.Color.green() if complete else discord.Color.gold())
+        try:
+            image=await self.renderer.pokemon_center(party,trainer,complete);embed.set_image(url="attachment://pokemon-center.png");return embed,[discord.File(image,filename="pokemon-center.png")]
+        except RenderError:
+            log.exception("Pokémon Center rendering failed");return embed,[]
 
     async def rendered_main_menu(self,user,conf):
         style=conf.get("menu_style","retro")
@@ -1177,24 +1187,26 @@ class Pokemon(commands.Cog):
         """Heal your party at this server’s Pokémon Center."""
         center=await self.config.guild(ctx.guild).center_channel()
         if not center:await ctx.send("This server has not configured a Pokémon Center.");return
-        if ctx.channel.id!=int(center):await ctx.send(f"Visit <#{center}> to use this server's Pokémon Center.");return
+        if ctx.channel.id!=int(center):await ctx.send(f"Visit <#{center}> to use this server’s Pokémon Center.");return
         async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all();last=conf.get("center_last_at")
-            now=datetime.now(timezone.utc)
+            conf=await self.config.user(ctx.author).all();last=conf.get("center_last_at");now=datetime.now(timezone.utc)
             if last:
                 try:remaining=max(60,int(await self.config.center_cooldown()))-(now-datetime.fromisoformat(last)).total_seconds()
                 except (TypeError,ValueError):remaining=0
                 if remaining>0:
-                    seconds=int(remaining)+1;minutes,seconds=divmod(seconds,60)
-                    wait=f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
-                    await ctx.send(f"The Pokémon Center will be ready again in {wait}.");return
-            party=set(conf["party"]);healed=0
-            for raw in conf["collection"]:
-                if raw["instance_id"] not in party:continue
-                pokemon=OwnedPokemon.from_raw(raw);pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status="";pokemon.status_turns=0
-                pokemon.move_pp={key:MOVES[key].pp for key in pokemon.moves};raw.update(pokemon.raw());healed+=1
+                    seconds=int(remaining)+1;minutes,seconds=divmod(seconds,60);wait=f"{minutes}m {seconds}s" if minutes else f"{seconds}s";await ctx.send(f"The Pokémon Center will be ready again in {wait}.");return
+            owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};party=[]
+            for identity in conf.get("party",[])[:6]:
+                raw=owned.get(identity)
+                if not raw:continue
+                pokemon=OwnedPokemon.from_raw(raw);pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status="";pokemon.status_turns=0;pokemon.move_pp={key:MOVES[key].pp for key in pokemon.moves};raw.update(pokemon.raw());party.append(pokemon)
+            if not party:await ctx.send("Choose a starter and prepare a party first.");return
             conf["center_last_at"]=now.isoformat();await self.config.user(ctx.author).set(conf)
-        await ctx.send(f"Your party is fully restored. ({healed} Pokémon)")
+        embed,files=await self.rendered_center(ctx.author,party,False);message=await ctx.send(embed=embed,files=files)
+        await asyncio.sleep(CENTER_TREATMENT_SECONDS)
+        embed,files=await self.rendered_center(ctx.author,party,True)
+        try:await message.edit(embed=embed,attachments=files,view=CenterCollectView(ctx.author.id))
+        except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
 
     async def selected_pokedex_style(self,user):
         preference=await self.config.user(user).pokedex_style()
