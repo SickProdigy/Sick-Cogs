@@ -10,7 +10,7 @@ from redbot.core import Config,bank,commands
 from redbot.core.data_manager import cog_data_path
 from .catalog import CatalogError,PokemonCatalog
 from .catalog_versions import CATALOG_VERSIONS
-from .data import EVOLUTIONS,MOVES,SPECIES,experience_to_next,generation_for,moves_for_level,sprite
+from .data import EVOLUTIONS,MOVES,SPECIES,direct_moves_for_level,experience_to_next,generation_for,move_source_species,moves_for_level,sprite
 from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
@@ -224,9 +224,17 @@ def authentic_moves_raw(raw):
     pokemon.move_pp={key:min(MOVES[key].pp,max(0,int(old_pp.get(key,MOVES[key].pp)))) for key in pokemon.moves}
     return pokemon.raw()
 
+def repair_underleveled_evolution_moves(raw):
+    pokemon=OwnedPokemon.from_raw(raw)
+    if move_source_species(pokemon.species_id,pokemon.level)==pokemon.species_id:return raw
+    if tuple(pokemon.moves)!=direct_moves_for_level(pokemon.species_id,pokemon.level):return raw
+    old_pp=dict(pokemon.move_pp);pokemon.moves=moves_for_level(pokemon.species_id,pokemon.level)
+    pokemon.move_pp={key:min(MOVES[key].pp,max(0,int(old_pp.get(key,MOVES[key].pp)))) for key in pokemon.moves}
+    return pokemon.raw()
+
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.56.1";__author__="SickProdigy"
+    __version__="0.57.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -395,6 +403,16 @@ class Pokemon(commands.Cog):
             for user_id,data in (await self.config.all_users()).items():
                 data.setdefault("vip_reward_month",None);await self.config.user_from_id(int(user_id)).set(data)
             await self.config.schema.set(16)
+        if schema<17:
+            for user_id,data in (await self.config.all_users()).items():
+                data["collection"]=[repair_underleveled_evolution_moves(raw) for raw in data.get("collection",[])]
+                await self.config.user_from_id(int(user_id)).set(data)
+            encounters=await self.config.encounters()
+            for raw in encounters.values():
+                battle=raw.get("battle")
+                if not battle:continue
+                battle["player"]=repair_underleveled_evolution_moves(battle["player"]);battle["party"]=[repair_underleveled_evolution_moves(item) for item in battle.get("party",[])]
+            await self.config.encounters.set(encounters);await self.config.schema.set(17)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())

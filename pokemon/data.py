@@ -111,10 +111,20 @@ def effectiveness(move_type,defender_types):
     value=1.0
     for kind in defender_types:value*=TYPE.get((move_type,kind),1.0)
     return value
-def moves_for_level(species_id,level):
+def direct_moves_for_level(species_id,level):
     species=SPECIES[species_id]
     learned=[move for learned_level,move in species.learnset if learned_level<=level]
     return tuple((learned or list(species.moves))[-4:])
+
+def move_source_species(species_id,level):
+    current=int(species_id);level=int(level)
+    while True:
+        source=next((source for source,(target,required) in EVOLUTIONS.items() if target==current and level<required),None)
+        if source is None:return current
+        current=source
+
+def moves_for_level(species_id,level):
+    return direct_moves_for_level(move_source_species(species_id,level),level)
 
 
 def total_experience(level,growth_rate="medium"):

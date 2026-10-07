@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image
 from pokemon.catching import BALLS,attempt_catch,calculate_catch_value
 from pokemon.catalog_versions import CATALOG_VERSIONS,DIMENSIONS
-from pokemon.data import EVOLUTIONS,SPECIES,effectiveness,experience_to_next,total_experience
+from pokemon.data import EVOLUTIONS,SPECIES,effectiveness,experience_to_next,moves_for_level,total_experience
 from pokemon.models import Battle,BattleError,OwnedPokemon
 from pokemon.renderer import BattleRenderer,ENCOUNTER_BACKDROPS,KANTO_COVERS,RETRO
 from pokemon.rulesets import STANDARD,TYPE_CHARTS
@@ -317,6 +317,11 @@ class BattleTests(unittest.TestCase):
         self.assertEqual((levels,evolved,pokemon.level),(1,None,9))
         self.assertIn("ember",learned)
         self.assertIn("ember",pokemon.moves)
+    def test_underleveled_evolved_species_inherits_pre_evolution_moves(self):
+        self.assertEqual(moves_for_level(78,3),("ember",))
+        self.assertEqual(moves_for_level(78,30),("ember","tail_whip"))
+        self.assertIn("fire_spin",moves_for_level(78,40))
+
     def test_level_evolution(self):
         pokemon=OwnedPokemon.create("evolve",10,6,seed=4)
         pokemon.experience=experience_to_next(10,6)-1
