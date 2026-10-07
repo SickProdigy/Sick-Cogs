@@ -136,7 +136,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertGreater(spawn_weight(very_rare),spawn_weight(very_rare,"challenging"))
 
     def test_global_policy_clamps_server_pace_and_generations(self):
-        self.assertEqual(GLOBAL["maximum_concurrency"],5)
+        self.assertEqual((GLOBAL["minimum_timer"],GLOBAL["maximum_concurrency"]),(15,5))
         policy={"minimum_threshold":12,"minimum_cooldown":240}
         self.assertEqual(bounded_pace(5,9,60,policy),(12,12,240))
         self.assertEqual(bounded_pace(18,30,300,policy),(18,30,300))
@@ -864,7 +864,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         policy={"encounter_timeout":120,"center_cooldown":1800,"minimum_threshold":8,"minimum_cooldown":120,"maximum_concurrency":3,"minimum_timer":30,"allowed_generations":[1],"rarity_profile":"friendly","allow_special_species":False,"pokedex_default_style":"retro","mart_prices":{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400}}
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(all=AsyncMock(return_value=policy));ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.global_status.callback(cog,ctx);text=ctx.send.await_args.args[0]
-        for expected in ("Pokémon bot-wide policy","Fresh-install defaults: admin timer floor **60m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Global wild encounter lifetime: current **2m**","Global free-Center cooldown: current **30m**","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokédex style: **Retro**","Poké Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
+        for expected in ("Pokémon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Global wild encounter lifetime: current **2m**","Global free-Center cooldown: current **30m**","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokédex style: **Retro**","Poké Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
         self.assertNotIn("current server",text.casefold());self.assertNotIn("spawn channels",text.casefold())
 
     async def test_sub_hour_timer_uses_owner_command_group(self):
