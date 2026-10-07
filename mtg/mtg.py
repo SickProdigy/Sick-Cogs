@@ -22,11 +22,20 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.120.13"
+    __version__="0.120.14"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
         self.storage_lock=asyncio.Lock(); self.cleanup_task=None; self.session=None; self.art_cache=None
+    def advance_automatic(self,game):
+        changed=False
+        for _ in range(100):
+            ai_changed=advance_solo(game)
+            pass_changed=game.auto_pass_empty_priority()
+            changed=changed or ai_changed or pass_changed
+            if not ai_changed and not pass_changed: break
+        return changed
+
     async def cog_load(self):
         self.session=aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
         self.art_cache=ScryfallArtCache(cog_data_path(self)/"art_cache",self.session)
@@ -68,7 +77,7 @@ class MTG(commands.Cog):
             other="green" if deck=="red" else "red"
             game=Game(gid,users,decks={human:deck,ai:other},ai_user=ai,ai_difficulty=difficulty)
             game.message_id=0; self.games[gid]=game; self.channels[gid]=channel
-            advance_solo(game)
+            self.advance_automatic(game)
             await self._save_unlocked(game)
         return game
     async def _save_unlocked(self,game):
@@ -80,7 +89,7 @@ class MTG(commands.Cog):
         resumed=[]
         for game in list(self.games.values()):
             async with self.lock(game.game_id):
-                if advance_solo(game):
+                if self.advance_automatic(game):
                     await self.save(game); resumed.append(game)
         return resumed
     async def cleanup_expired(self):
@@ -355,7 +364,7 @@ class MTG(commands.Cog):
             await interaction.response.send_message("This private hand is unavailable.",ephemeral=True); return
         async with self.lock(game.game_id):
             try:
-                game.mulligan(interaction.user.id,keep); game.record(interaction.user.id,"keep" if keep else "mulligan"); advance_solo(game); await self.save(game)
+                game.mulligan(interaction.user.id,keep); game.record(interaction.user.id,"keep" if keep else "mulligan"); self.advance_automatic(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
         await interaction.response.defer()
@@ -368,7 +377,7 @@ class MTG(commands.Cog):
             await interaction.response.send_message("This private hand is unavailable.",ephemeral=True); return
         async with self.lock(game.game_id):
             try:
-                game.pass_priority(interaction.user.id); game.record(interaction.user.id,"pass"); advance_solo(game); await self.save(game)
+                game.pass_priority(interaction.user.id); game.record(interaction.user.id,"pass"); self.advance_automatic(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
         await interaction.response.defer()
@@ -382,7 +391,7 @@ class MTG(commands.Cog):
         async with self.lock(game.game_id):
             try:
                 card=game.hand(interaction.user.id)[position-1]
-                game.play(interaction.user.id,position,target,x_value); game.record(interaction.user.id,"play"); advance_solo(game); await self.save(game)
+                game.play(interaction.user.id,position,target,x_value); game.record(interaction.user.id,"play"); self.advance_automatic(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
         await interaction.response.edit_message(content=f"Played **{card.name}**.",attachments=[],view=None)
@@ -417,7 +426,7 @@ class MTG(commands.Cog):
         game=self.games.get(game_id)
         if not game: await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
         async with self.lock(game.game_id):
-            try: game.choose_natural_selection(interaction.user.id,order,shuffle); game.record(interaction.user.id,"natural_selection_shuffle" if shuffle else "natural_selection_order"); advance_solo(game); await self.save(game)
+            try: game.choose_natural_selection(interaction.user.id,order,shuffle); game.record(interaction.user.id,"natural_selection_shuffle" if shuffle else "natural_selection_order"); self.advance_automatic(game); await self.save(game)
             except (GameError,ValueError) as error: await interaction.response.send_message(str(error),ephemeral=True); return
         await interaction.response.edit_message(content="Natural Selection completed.",view=None); await self.refresh_message(game)
 
@@ -455,7 +464,7 @@ class MTG(commands.Cog):
                 elif effect=="word_choose": game.choose_word_command(interaction.user.id,position); action="word_of_command_choice"
                 elif effect=="mask_choose": game.choose_illusionary_mask(interaction.user.id,position); action="illusionary_mask_choice"
                 else: game.choose_private_hand(interaction.user.id,position); action="private_discard" if effect=="discard_choice" else "private_hand_view"
-                game.record(interaction.user.id,action); advance_solo(game); await self.save(game)
+                game.record(interaction.user.id,action); self.advance_automatic(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
         message=("Illusionary Mask choice completed." if effect=="mask_choose" else "Word of Command choice completed." if effect=="word_choose" else "Card discarded." if position is not None else "Hand view completed.")
@@ -467,7 +476,7 @@ class MTG(commands.Cog):
             await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
         async with self.lock(game.game_id):
             try:
-                game.choose_discard_destination(interaction.user.id,to_library); game.record(interaction.user.id,"library_of_leng_top" if to_library else "library_of_leng_graveyard"); advance_solo(game); await self.save(game)
+                game.choose_discard_destination(interaction.user.id,to_library); game.record(interaction.user.id,"library_of_leng_top" if to_library else "library_of_leng_graveyard"); self.advance_automatic(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
         await interaction.response.edit_message(content="Discard destination chosen.",view=None); await self.refresh_message(game)
@@ -478,7 +487,7 @@ class MTG(commands.Cog):
             await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
         async with self.lock(game.game_id):
             try:
-                game.choose_library(interaction.user.id,position); game.record(interaction.user.id,"search_library"); advance_solo(game); await self.save(game)
+                game.choose_library(interaction.user.id,position); game.record(interaction.user.id,"search_library"); self.advance_automatic(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
         await interaction.response.edit_message(content="Library search completed; the chosen card was added to your hand.",view=None)
@@ -489,7 +498,7 @@ class MTG(commands.Cog):
             await i.response.send_message("This match is unavailable.",ephemeral=True); return
         async with self.lock(game.game_id):
             try:
-                action(game); game.record(i.user.id,label); advance_solo(game); await self.save(game)
+                action(game); game.record(i.user.id,label); self.advance_automatic(game); await self.save(game)
             except (GameError,IndexError,ValueError) as e: await i.response.send_message(str(e),ephemeral=True); return
             await i.response.defer()
             embed,file=await self.game_message(game)
@@ -499,7 +508,7 @@ class MTG(commands.Cog):
         except GameError as e: await ctx.send(str(e)); return
         async with self.lock(game.game_id):
             try:
-                action(game); game.record(ctx.author.id,label); advance_solo(game); await self.save(game)
+                action(game); game.record(ctx.author.id,label); self.advance_automatic(game); await self.save(game)
             except (GameError,IndexError,ValueError) as e: await ctx.send(str(e)); return
         await self.refresh_message(game)
         await ctx.message.add_reaction("✅")
@@ -537,7 +546,7 @@ class MTG(commands.Cog):
         try: game=self.find(ctx.author.id)
         except GameError as e: await ctx.send(str(e)); return
         async with self.lock(game.game_id):
-            if advance_solo(game): await self.save(game)
+            if self.advance_automatic(game): await self.save(game)
         embed,file=await self.game_message(game)
         if file: await ctx.send(embed=embed,file=file)
         else: await ctx.send(embed=embed)

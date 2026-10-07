@@ -31,6 +31,24 @@ class TurnTests(unittest.TestCase):
         g.pass_priority(10); g.pass_priority(20)
         g.pass_priority(10); g.pass_priority(20)
         self.assertEqual(g.active_user,20); self.assertEqual(g.turn,2)
+    def test_smart_priority_skips_only_empty_action_windows(self):
+        game=ready(); game.phase="precombat_main"; game.priority_user=10
+        game.player(10).hand=[]; game.player(20).hand=[]; game.player(10).battlefield=[]; game.player(20).battlefield=[]
+        self.assertTrue(game.auto_pass_empty_priority())
+        self.assertEqual((game.phase,game.priority_user),("attackers",None))
+        self.assertTrue(any(event["action"]=="auto_pass" for event in game.history))
+
+    def test_smart_priority_stops_for_playable_land_and_ready_mana(self):
+        game=ready(); game.phase="precombat_main"; game.priority_user=10
+        game.player(10).hand=[]; land=game.next_uid; game.next_uid+=1; game.cards[land]="mountain"; game.player(10).hand=[land]
+        self.assertFalse(game.auto_pass_empty_priority()); self.assertEqual(game.priority_user,10)
+        game.player(10).hand=[]; game.priority_user=20; game.player(20).hand=[]; mana=game.next_uid; game.next_uid+=1; game.cards[mana]="mountain"; game.player(20).battlefield=[Permanent(mana,"mountain",owner=20,sick=False)]
+        self.assertFalse(game.auto_pass_empty_priority()); self.assertEqual(game.priority_user,20)
+
+    def test_smart_priority_never_skips_combat_declarations(self):
+        game=ready(); game.phase="attackers"; game.priority_user=None
+        self.assertFalse(game.auto_pass_empty_priority()); self.assertEqual((game.phase,game.priority_user),("attackers",None))
+
     def test_round_trip_preserves_hidden_state(self):
         g=ready(); restored=Game.from_raw(g.to_raw())
         self.assertEqual(restored.to_raw(),g.to_raw())

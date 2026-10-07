@@ -815,6 +815,40 @@ class Game:
 
     def can_pay(self,user,card,x_value=0):
         return self._mana_payment(self.player(user),card,x_value) is not None
+
+    def has_priority_action(self,user):
+        if self.finished or self.priority_user!=user:
+            return False
+        if self.turn_start_pending_user is not None or self.sanctuary_draw_pending or self.phase in ("untap","cleanup_discard","camouflage"):
+            return True
+        if self.stack and self.stack[-1].decision_pending:
+            return True
+        player=self.player(user)
+        if player.mana_pool:
+            return True
+        main_phase=user==self.active_user and self.phase in ("precombat_main","postcombat_main") and not self.stack
+        for uid in player.hand:
+            card=self.card(uid)
+            if card.land:
+                if main_phase and self.can_play_land(user): return True
+                continue
+            timing=card.kind=="Instant" or main_phase
+            if timing and self.can_pay(user,card,0): return True
+        for position,permanent in enumerate(player.battlefield,1):
+            card=self.card(permanent.uid)
+            mana_ready=not permanent.tapped and bool(self.current_mana_choices(permanent)) and not (self.is_creature(permanent) and permanent.sick and not card.haste and "haste" not in self.current_keywords(permanent))
+            activation_cost,activation_effect,activation_tap,_=self._activation_profile(permanent)
+            activation_ready=bool(activation_cost or activation_effect) and not (activation_tap and permanent.tapped)
+            if mana_ready or activation_ready: return True
+        return False
+
+    def auto_pass_empty_priority(self):
+        changed=False
+        for _ in range(20):
+            user=self.priority_user
+            if user is None or self.has_priority_action(user): break
+            self.pass_priority(user); self.record(user,"auto_pass","No legal priority action."); changed=True
+        return changed
     def max_payable_x(self,user,card):
         if "{X}" not in card.mana_cost: return 0
         value=0
