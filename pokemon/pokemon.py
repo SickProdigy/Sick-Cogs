@@ -19,7 +19,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1,"concurrency_owner_override":False}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1,"concurrency_owner_override":False,"timer_owner_override":False}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{},"menu_style":"retro"}
 MART_ITEMS={
     "poke_ball":("Poké Ball","balls",50),
@@ -29,13 +29,14 @@ MART_ITEMS={
     "revive":("Revive","revive",400),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
-GLOBAL={"schema":13,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":3,"next_trade":1,"trades":{}}
+GLOBAL={"schema":14,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":3,"minimum_timer":60,"next_trade":1,"trades":{}}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
 CENTER_TREATMENT_SECONDS=5
 TRADE_TIMEOUT_SECONDS=900
-SERVER_TIMER_MINUTES=(60,10080)
+SERVER_TIMER_MINUTES=(1,10080)
+DEFAULT_SERVER_TIMER_MINUTES=60
 OWNER_TIMER_MINUTES=(1,10080)
 COLLECTION_PAGE_SIZE=9
 PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
@@ -80,6 +81,12 @@ def effective_concurrency(conf,policy):
     selected=max(1,min(5,int(conf.get("max_active_encounters",1))))
     if conf.get("concurrency_owner_override"):return selected
     return min(selected,max(1,min(5,int(policy.get("maximum_concurrency",3)))))
+
+def effective_timer_minutes(conf,policy):
+    requested=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(conf.get("timer_minutes",DEFAULT_SERVER_TIMER_MINUTES))))
+    if conf.get("timer_owner_override",False):return requested
+    floor=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(policy.get("minimum_timer",DEFAULT_SERVER_TIMER_MINUTES))))
+    return max(requested,floor)
 
 def jittered_spawn_due(now,minutes,rng=None):
     rng=rng or random.SystemRandom()
@@ -198,7 +205,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.48.2";__author__="SickProdigy"
+    __version__="0.49.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -265,7 +272,7 @@ class Pokemon(commands.Cog):
         now=now or datetime.now(timezone.utc);policy=await self.config.all()
         for guild_id,conf in (await self.config.all_guilds()).items():
             if not conf.get("enabled") or conf.get("spawn_mode","timed")!="timed" or not conf.get("channels"):continue
-            section=self.config.guild_from_id(int(guild_id));minutes=max(1,int(conf.get("timer_minutes",60)))
+            section=self.config.guild_from_id(int(guild_id));minutes=effective_timer_minutes(conf,policy)
             try:due=datetime.fromisoformat(conf.get("next_spawn_at") or "")
             except (TypeError,ValueError):due=None
             if due is None:
@@ -350,7 +357,12 @@ class Pokemon(commands.Cog):
             await self.config.schema.set(12)
         if schema<13:
             await self.config.trades.set({});await self.config.next_trade.set(1)
-        if schema<=13:await self.config.schema.set(13)
+        if schema<14:
+            minimum=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(await self.config.minimum_timer())));await self.config.minimum_timer.set(minimum)
+            for guild_id,data in (await self.config.all_guilds()).items():
+                data.setdefault("timer_owner_override",int(data.get("timer_minutes",DEFAULT_SERVER_TIMER_MINUTES))<DEFAULT_SERVER_TIMER_MINUTES)
+                await self.config.guild_from_id(int(guild_id)).set(data)
+        if schema<=14:await self.config.schema.set(14)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
@@ -485,7 +497,7 @@ class Pokemon(commands.Cog):
         await self.config.guild(channel.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1))
         spawned_at=datetime.now(timezone.utc);section=self.config.guild(channel.guild)
         await section.last_spawn_at.set(spawned_at.isoformat())
-        if conf.get("spawn_mode","timed")=="timed":await section.next_spawn_at.set(jittered_spawn_due(spawned_at,max(1,int(conf.get("timer_minutes",60)))).isoformat())
+        if conf.get("spawn_mode","timed")=="timed":await section.next_spawn_at.set(jittered_spawn_due(spawned_at,effective_timer_minutes(conf,policy)).isoformat())
     async def claim(self,i,eid):
         async with self.lock(("user",i.user.id)), self.lock(("encounter",eid)), self.lock("encounters"):
             if any(b.user_id==i.user.id and b.state=="active" for b in self.battles.values()):
@@ -602,8 +614,13 @@ class Pokemon(commands.Cog):
         if style not in {"retro","modern"}:style="retro"
         trainer=getattr(user,"display_name",getattr(user,"name","Trainer"))
         embed=discord.Embed(title=f"{trainer}’s Pokémon Menu",description=f"**{style.title()} style** · Choose an option below.",color=discord.Color.green() if style=="retro" else discord.Color.blurple())
+        avatar_data=None
+        avatar=getattr(user,"display_avatar",None)
+        if avatar:
+            try:avatar_data=await avatar.with_size(128).read()
+            except (discord.HTTPException,OSError):log.debug("Trainer avatar unavailable for main menu",exc_info=True)
         try:
-            image=await self.renderer.main_menu(trainer,conf,style);embed.set_image(url="attachment://pokemon-menu.png")
+            image=await self.renderer.main_menu(trainer,conf,style,avatar_data=avatar_data);embed.set_image(url="attachment://pokemon-menu.png")
             return embed,[discord.File(image,filename="pokemon-menu.png")]
         except RenderError:
             log.exception("Pokémon main-menu rendering failed");return embed,[]
@@ -1089,14 +1106,19 @@ class Pokemon(commands.Cog):
         async with self.lock(("user",interaction.user.id)):
             conf=await self.config.user(interaction.user).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])}
             if identity not in owned:await interaction.response.edit_message(content="That Pokémon is no longer in your collection.",view=None);return
-            party=list(conf.get("party",[]));name=owned[identity].get("nickname") or SPECIES[owned[identity]["species_id"]].name
+            party=[value for value in conf.get("party",[]) if value in owned];name=owned[identity].get("nickname") or SPECIES[owned[identity]["species_id"]].name
             if target==identity:await interaction.response.edit_message(content=f"**{name}** already occupies that slot.",view=None);return
-            party=[value for value in party if value!=identity]
+            source=party.index(identity) if identity in party else None
             if target is None:
+                if source is not None:await interaction.response.edit_message(content=f"**{name}** is already in your party.",view=None);return
                 if len(party)>=6:await interaction.response.edit_message(content="Your party is full. Choose a slot to replace.",view=None);return
                 party.append(identity);message=f"Added **{name}** to party slot {len(party)}."
             elif target in party:
-                slot=party.index(target);party[slot]=identity;message=f"Placed **{name}** in party slot {slot+1}."
+                slot=party.index(target)
+                if source is None:party[slot]=identity;message=f"Placed **{name}** in party slot {slot+1}."
+                else:
+                    displaced=owned[target].get("nickname") or SPECIES[owned[target]["species_id"]].name
+                    party[source],party[slot]=party[slot],party[source];message=f"Moved **{name}** to party slot {slot+1}; **{displaced}** moved to slot {source+1}."
             else:await interaction.response.edit_message(content="That party slot is no longer available.",view=None);return
             conf["party"]=party;await self.config.user(interaction.user).set(conf)
         await interaction.response.edit_message(content=message,view=None)
@@ -1488,7 +1510,7 @@ class Pokemon(commands.Cog):
         if not already:channels.append(channel.id)
         await section.channels.set(channels);await section.enabled.set(True)
         if await section.spawn_mode()=="timed" and not await section.next_spawn_at():
-            minutes=max(1,int(await section.timer_minutes()));await section.next_spawn_at.set(jittered_spawn_due(datetime.now(timezone.utc),minutes).isoformat())
+            conf=await section.all();policy=await self.config.all();minutes=effective_timer_minutes(conf,policy);await section.next_spawn_at.set(jittered_spawn_due(datetime.now(timezone.utc),minutes).isoformat())
         if already and was_enabled:message=f"Wild encounters were already enabled in {channel.mention}."
         elif already:message=f"Wild encounters re-enabled in {channel.mention}."
         else:message=f"Wild encounters enabled in {channel.mention}."
@@ -1526,7 +1548,7 @@ class Pokemon(commands.Cog):
         channels=", ".join(f"<#{value}>" for value in conf.get("channels",[])) or "None"
         center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None";active=await self.guild_encounters(ctx.guild.id,conf);slot_limit=effective_concurrency(conf,policy)
         if mode=="timed":
-            minutes=max(1,int(conf.get("timer_minutes",60)));due_text="Scheduling now"
+            minutes=effective_timer_minutes(conf,policy);due_text="Scheduling now"
             try:due=datetime.fromisoformat(conf.get("next_spawn_at") or "")
             except (TypeError,ValueError):due=None
             if due:due_text=f"<t:{int(due.timestamp())}:R>"
@@ -1560,13 +1582,13 @@ class Pokemon(commands.Cog):
         if mode not in {"timed","activity"}:await ctx.send("Choose timed or activity.");return
         section=self.config.guild(ctx.guild);await section.spawn_mode.set(mode)
         if mode=="timed":
-            minutes=max(1,int(await section.timer_minutes()));due=jittered_spawn_due(datetime.now(timezone.utc),minutes);await section.next_spawn_at.set(due.isoformat())
+            conf=await section.all();policy=await self.config.all();minutes=effective_timer_minutes(conf,policy);due=jittered_spawn_due(datetime.now(timezone.utc),minutes);await section.next_spawn_at.set(due.isoformat())
             await ctx.send(f"Timed encounters enabled around every {minutes} minutes with jitter. The next encounter is <t:{int(due.timestamp())}:R>.")
         else:
             await section.next_spawn_at.set(None);await ctx.send("Activity-based encounters enabled. Timed spawning is paused.")
 
-    async def set_spawn_timer(self,ctx,minutes):
-        section=self.config.guild(ctx.guild);await section.timer_minutes.set(minutes)
+    async def set_spawn_timer(self,ctx,minutes,owner_override=False):
+        section=self.config.guild(ctx.guild);await section.timer_minutes.set(minutes);await section.timer_owner_override.set(owner_override)
         if await section.spawn_mode()=="timed":
             due=jittered_spawn_due(datetime.now(timezone.utc),minutes);await section.next_spawn_at.set(due.isoformat())
             await ctx.send(f"Timed encounters set around every {minutes} minutes with jitter. The next encounter is <t:{int(due.timestamp())}:R>.")
@@ -1574,15 +1596,22 @@ class Pokemon(commands.Cog):
 
     @pokemon_set.command(name="timer")
     async def spawn_timer(self,ctx,minutes:int):
-        """Set this server’s jittered timer from 60 minutes to one week."""
-        if not SERVER_TIMER_MINUTES[0]<=minutes<=SERVER_TIMER_MINUTES[1]:await ctx.send("Use 60–10080 minutes.");return
-        await self.set_spawn_timer(ctx,minutes)
+        """Set this server’s jittered timer within the bot-owner floor."""
+        minimum=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(await self.config.minimum_timer())))
+        if not minimum<=minutes<=SERVER_TIMER_MINUTES[1]:await ctx.send(f"Use {minimum}–{SERVER_TIMER_MINUTES[1]} minutes.");return
+        await self.set_spawn_timer(ctx,minutes,owner_override=False)
+
+    @pokemon_owner_set.command(name="timermin",aliases=["minimumtimer"])
+    async def minimum_spawn_timer(self,ctx,minutes:int):
+        """Set the fastest timer ordinary server administrators may choose."""
+        if not SERVER_TIMER_MINUTES[0]<=minutes<=SERVER_TIMER_MINUTES[1]:await ctx.send("Use 1–10080 minutes.");return
+        await self.config.minimum_timer.set(minutes);await ctx.send(f"Server administrators may now set encounter timers from {minutes}–{SERVER_TIMER_MINUTES[1]} minutes.")
 
     @pokemon_owner_set.command(name="timer")
     async def owner_spawn_timer(self,ctx,minutes:int):
         """Override this server’s jittered timer from 1 minute to one week."""
         if not OWNER_TIMER_MINUTES[0]<=minutes<=OWNER_TIMER_MINUTES[1]:await ctx.send("Use 1–10080 minutes.");return
-        await self.set_spawn_timer(ctx,minutes)
+        await self.set_spawn_timer(ctx,minutes,owner_override=True)
 
     @pokemon_set.command(name="concurrency",aliases=["slots"])
     async def spawn_concurrency(self,ctx,limit:int):
@@ -1667,7 +1696,7 @@ class Pokemon(commands.Cog):
                 try:last=datetime.fromisoformat(conf["last_spawn_at"])
                 except (TypeError,ValueError):last=None
                 if conf.get("spawn_mode","timed")=="timed":
-                    due=last+timedelta(minutes=max(1,int(conf.get("timer_minutes",60)))) if last else None
+                    due=last+timedelta(minutes=effective_timer_minutes(conf,policy)) if last else None
                     remaining=max(0,round((due-datetime.now(timezone.utc)).total_seconds())) if due else 0
                     if remaining:await ctx.send(f"The server spawn timer is active for another {remaining}s.");return
                 else:
@@ -1701,11 +1730,11 @@ class Pokemon(commands.Cog):
     @pokemon_owner_set.command(name="globalstatus",aliases=["settings","status"])
     async def global_status(self,ctx):
         """Show all bot-wide Pokémon policies and owner limits."""
-        policy=await self.config.all();prices=mart_prices(policy.get("mart_prices",{}));generations=", ".join(map(str,policy.get("allowed_generations",[1])))
+        policy=await self.config.all();minimum_timer=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(policy.get("minimum_timer",DEFAULT_SERVER_TIMER_MINUTES))));prices=mart_prices(policy.get("mart_prices",{}));generations=", ".join(map(str,policy.get("allowed_generations",[1])))
         price_text=" · ".join(f"{MART_ITEMS[key][0]}: **{prices[key]:,}**" for key in MART_ITEMS)
         await ctx.send(
             f"**Pokémon bot-wide policy**\n"
-            f"Timer limits: server administrators **{SERVER_TIMER_MINUTES[0]}–{SERVER_TIMER_MINUTES[1]:,}m** · bot-owner override **{OWNER_TIMER_MINUTES[0]}–{OWNER_TIMER_MINUTES[1]:,}m**\n"
+            f"Timer limits: server administrators **{minimum_timer}–{SERVER_TIMER_MINUTES[1]:,}m** · bot-owner override **{OWNER_TIMER_MINUTES[0]}–{OWNER_TIMER_MINUTES[1]:,}m**\n"
             f"Wild encounter lifetime: **{max(60,int(policy.get('encounter_timeout',900)))//60}m** · owner range **1–1,440m**\n"
             f"Free Center cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m** · owner range **1–1,440m**\n"
             f"Activity-mode floors: **{policy.get('minimum_threshold',8)} points** · **{policy.get('minimum_cooldown',120)}s cooldown**\n"
