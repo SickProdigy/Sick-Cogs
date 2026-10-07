@@ -1010,14 +1010,14 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await Pokemon.spawn_timer.callback(cog,ctx,59)
         ctx.send.assert_awaited_once_with("Use 60–10080 minutes.")
 
-        timer=StoredValue(60);next_spawn=StoredValue(None);mode=StoredValue("timed");override=StoredValue(False);section=SimpleNamespace(timer_minutes=timer,next_spawn_at=next_spawn,spawn_mode=mode,timer_owner_override=override)
-        cog.config=SimpleNamespace(guild=lambda guild:section,minimum_timer=minimum)
+        timer=StoredValue(60);next_spawn=StoredValue(None);mode=StoredValue("timed");override=StoredValue(False);section=SimpleNamespace(timer_minutes=timer,next_spawn_at=next_spawn,spawn_mode=mode,timer_owner_override=override,all=AsyncMock(side_effect=lambda:{"timer_minutes":timer.value,"timer_owner_override":override.value}))
+        cog.config=SimpleNamespace(guild=lambda guild:section,minimum_timer=minimum,all=AsyncMock(return_value={"minimum_timer":30}))
         owner_ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
         await Pokemon.minimum_spawn_timer.callback(cog,owner_ctx,30);self.assertEqual(minimum.value,30);owner_ctx.send.reset_mock()
         await Pokemon.spawn_timer.callback(cog,owner_ctx,30);self.assertEqual((timer.value,override.value),(30,False));owner_ctx.send.reset_mock()
         await Pokemon.owner_spawn_timer.callback(cog,owner_ctx,5)
         self.assertEqual((timer.value,override.value),(5,True));self.assertIsNotNone(next_spawn.value)
-        self.assertIn("every 5 minutes",owner_ctx.send.await_args.args[0])
+        self.assertIn("Bot-owner override for this server",owner_ctx.send.await_args.args[0]);self.assertIn("from **30m** to **5m**",owner_ctx.send.await_args.args[0]);self.assertIn("Other servers and bot-wide timer limits are unchanged",owner_ctx.send.await_args.args[0])
 
     def test_effective_encounter_timeout_inherits_and_clamps(self):
         policy={"encounter_timeout":600,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900}

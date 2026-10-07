@@ -1889,11 +1889,12 @@ class Pokemon(commands.Cog):
             await section.next_spawn_at.set(None);await ctx.send("Activity-based encounters enabled. Timed spawning is paused.")
 
     async def set_spawn_timer(self,ctx,minutes,owner_override=False):
-        section=self.config.guild(ctx.guild);await section.timer_minutes.set(minutes);await section.timer_owner_override.set(owner_override)
+        section=self.config.guild(ctx.guild);before=await section.all();policy=await self.config.all();previous=effective_timer_minutes(before,policy);await section.timer_minutes.set(minutes);await section.timer_owner_override.set(owner_override)
+        scope="Bot-owner override for this server" if owner_override else "This server";change=f"changed from **{previous}m** to **{minutes}m**" if previous!=minutes else f"remains **{minutes}m**";suffix=" Other servers and bot-wide timer limits are unchanged." if owner_override else ""
         if await section.spawn_mode()=="timed":
             due=jittered_spawn_due(datetime.now(timezone.utc),minutes);await section.next_spawn_at.set(due.isoformat())
-            await ctx.send(f"Timed encounters set around every {minutes} minutes with jitter. The next encounter is <t:{int(due.timestamp())}:R>.")
-        else:await ctx.send(f"Saved a {minutes}-minute jittered timer. It will apply when timed mode is enabled.")
+            await ctx.send(f"{scope}: the jittered encounter timer {change}. The next encounter is <t:{int(due.timestamp())}:R>.{suffix}")
+        else:await ctx.send(f"{scope}: the saved jittered encounter timer {change}. It will apply when timed mode is enabled.{suffix}")
 
     @pokemon_set.command(name="timer")
     async def spawn_timer(self,ctx,minutes:int):
