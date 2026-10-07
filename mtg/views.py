@@ -5,6 +5,21 @@ from .art import HAND_PAGE_SIZE
 from .ai import TARGETED_EFFECTS, _target
 from .engine import GameError
 
+class HistoryPaginationView(discord.ui.View):
+    page_size=15
+    def __init__(self,cog,game_id,user_id,page,pages):
+        super().__init__(timeout=180); self.cog,self.game_id,self.user_id,self.page,self.pages=cog,game_id,user_id,page,pages
+        self.previous.disabled=page<=0; self.next.disabled=page>=pages-1
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id: return True
+        await interaction.response.send_message("This game history belongs to another player.",ephemeral=True); return False
+    @discord.ui.button(label="Newer",style=discord.ButtonStyle.secondary)
+    async def previous(self,interaction,button):
+        await interaction.response.defer(); await self.cog.send_history(interaction,self.game_id,self.page-1,editing=True)
+    @discord.ui.button(label="Older",style=discord.ButtonStyle.secondary)
+    async def next(self,interaction,button):
+        await interaction.response.defer(); await self.cog.send_history(interaction,self.game_id,self.page+1,editing=True)
+
 class ChallengeDeckSelect(discord.ui.Select):
     def __init__(self,challenge):
         self.challenge=challenge
@@ -180,24 +195,25 @@ class ForkTargetSelect(discord.ui.Select):
         await self.cog.act(i,self.game_id,lambda g:g.choose_fork_target(i.user.id),"fork_keep_targets")
 
 class AttackSelect(discord.ui.Select):
-    def __init__(self,cog,game_id,game):
-        self.cog,self.game_id=cog,game_id
+    def __init__(self,cog,game_id,game,private=False):
+        self.cog,self.game_id,self.private=cog,game_id,private
         player=game.player(game.active_user)
         options=[discord.SelectOption(label=f"{position}. {game.card(permanent.uid).name}"[:100],description="Declare as an attacker",value=str(position)) for position,permanent in enumerate(player.battlefield,1) if game.can_attack_permanent(permanent)][:25]
         super().__init__(placeholder="Choose attackers",min_values=1,max_values=len(options),options=options,custom_id=f"mtg:{game_id}:declare_attackers")
     async def callback(self,interaction):
-        await self.cog.act(interaction,self.game_id,lambda game:game.declare_attackers(interaction.user.id,[int(value) for value in self.values]),"attack")
+        await (self.cog.combat_hand_interaction(interaction,self.game_id,lambda game:game.declare_attackers(interaction.user.id,[int(value) for value in self.values]),"attack") if self.private else self.cog.act(interaction,self.game_id,lambda game:game.declare_attackers(interaction.user.id,[int(value) for value in self.values]),"attack"))
 
 class NoAttackButton(discord.ui.Button):
-    def __init__(self,cog,game_id):
+    def __init__(self,cog,game_id,private=False):
         super().__init__(label="No attacks",style=discord.ButtonStyle.secondary,custom_id=f"mtg:{game_id}:no_attacks")
-        self.cog,self.game_id=cog,game_id
+        self.cog,self.game_id,self.private=cog,game_id,private
     async def callback(self,interaction):
-        await self.cog.act(interaction,self.game_id,lambda game:game.declare_attackers(interaction.user.id,[]),"attack_none")
+        action=lambda game:game.declare_attackers(interaction.user.id,[])
+        await (self.cog.combat_hand_interaction(interaction,self.game_id,action,"attack_none") if self.private else self.cog.act(interaction,self.game_id,action,"attack_none"))
 
 class BlockSelect(discord.ui.Select):
-    def __init__(self,cog,game_id,game):
-        self.cog,self.game_id=cog,game_id
+    def __init__(self,cog,game_id,game,private=False):
+        self.cog,self.game_id,self.private=cog,game_id,private
         defender=game.player(game.opponent(game.active_user)); options=[]
         for attacker_position,attacker_uid in enumerate(game.attackers,1):
             attacker=game.find_permanent(attacker_uid)[1]
@@ -209,14 +225,15 @@ class BlockSelect(discord.ui.Select):
         super().__init__(placeholder="Choose blocker assignments",min_values=1,max_values=min(25,len(options)),options=options[:25],custom_id=f"mtg:{game_id}:declare_blockers")
     async def callback(self,interaction):
         pairs=[tuple(int(part) for part in value.split(":")) for value in self.values]
-        await self.cog.act(interaction,self.game_id,lambda game:game.declare_blockers(interaction.user.id,pairs),"block")
+        await (self.cog.combat_hand_interaction(interaction,self.game_id,lambda game:game.declare_blockers(interaction.user.id,pairs),"block") if self.private else self.cog.act(interaction,self.game_id,lambda game:game.declare_blockers(interaction.user.id,pairs),"block"))
 
 class NoBlockButton(discord.ui.Button):
-    def __init__(self,cog,game_id):
+    def __init__(self,cog,game_id,private=False):
         super().__init__(label="No blocks",style=discord.ButtonStyle.secondary,custom_id=f"mtg:{game_id}:no_blocks")
-        self.cog,self.game_id=cog,game_id
+        self.cog,self.game_id,self.private=cog,game_id,private
     async def callback(self,interaction):
-        await self.cog.act(interaction,self.game_id,lambda game:game.declare_blockers(interaction.user.id,[]),"block_none")
+        action=lambda game:game.declare_blockers(interaction.user.id,[])
+        await (self.cog.combat_hand_interaction(interaction,self.game_id,action,"block_none") if self.private else self.cog.act(interaction,self.game_id,action,"block_none"))
 
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
@@ -289,6 +306,10 @@ class GameView(discord.ui.View):
     async def hand(self,i,b):
         await i.response.defer(ephemeral=True,thinking=True)
         await self.cog.send_hand(i,self.game_id,0,editing=False)
+    @discord.ui.button(label="History",style=discord.ButtonStyle.secondary,custom_id="history")
+    async def history(self,i,b):
+        await i.response.defer(ephemeral=True,thinking=True)
+        await self.cog.send_history(i,self.game_id,0,editing=False)
     @discord.ui.button(label="Search library",style=discord.ButtonStyle.secondary,custom_id="search")
     async def search(self,i,b):
         await i.response.defer(ephemeral=True,thinking=True)
@@ -401,6 +422,14 @@ class HandPaginationView(discord.ui.View):
         if game and game.phase=="opening" and not game.player(user_id).kept:
             self.add_item(OpeningHandButton(self,True)); self.add_item(OpeningHandButton(self,False))
         elif entries: self.add_item(HandPlaySelect(self,entries))
+        if game and game.phase=="attackers" and game.active_user==user_id:
+            eligible=[permanent for permanent in game.player(user_id).battlefield if game.can_attack_permanent(permanent)]
+            if eligible: self.add_item(AttackSelect(cog,game_id,game,True))
+            self.add_item(NoAttackButton(cog,game_id,True))
+        if game and game.phase=="blockers" and game.opponent(game.active_user)==user_id:
+            defender=game.player(user_id); pairs=sum(game.can_block(attacker_uid,blocker.uid)[0] for attacker_uid in game.attackers for blocker in defender.battlefield)
+            if 0<pairs<=25: self.add_item(BlockSelect(cog,game_id,game,True))
+            self.add_item(NoBlockButton(cog,game_id,True))
         if game and game.phase!="opening" and game.priority_user==user_id and game.phase not in ("untap","cleanup_discard","camouflage") and game.turn_start_pending_user is None and not game.sanctuary_draw_pending and not (game.stack and game.stack[-1].decision_pending):
             self.add_item(HandPassButton(self))
         self.previous.disabled=page<=0

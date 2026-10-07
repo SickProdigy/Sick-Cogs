@@ -12,7 +12,7 @@ from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_battlefield,
 from .cards import BASE_CARDS, CARDS
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
 from .engine import Game, GameError
-from .views import CatalogDetailView, CatalogView, ChallengeView, GameView, HandPaginationView, LibrarySearchView, NaturalSelectionView, PrivateHandDecisionView
+from .views import CatalogDetailView, CatalogView, ChallengeView, GameView, HandPaginationView, HistoryPaginationView, LibrarySearchView, NaturalSelectionView, PrivateHandDecisionView
 
 log=logging.getLogger("red.sick-cogs.MTG")
 CONFIG_IDENTIFIER=813604927115
@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.121.0"
+    __version__="0.121.1"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -320,6 +320,27 @@ class MTG(commands.Cog):
             embed,file=await self.game_message(game)
             await message.edit(embed=embed,attachments=[file] if file else [],view=None if game.finished else GameView(self,game.game_id))
         except (discord.HTTPException,AttributeError): pass
+    async def send_history(self,interaction,game_id,page,editing=False):
+        game=self.games.get(game_id)
+        if not game or interaction.user.id not in game.order:
+            content="This game history is unavailable."
+            if editing: await interaction.edit_original_response(content=content,view=None)
+            else: await interaction.followup.send(content,ephemeral=True)
+            return
+        events=list(reversed(game.history)); pages=max(1,math.ceil(len(events)/HistoryPaginationView.page_size)); page=max(0,min(page,pages-1))
+        start=page*HistoryPaginationView.page_size; visible=events[start:start+HistoryPaginationView.page_size]
+        names={user:str(self.bot.get_user(user).display_name if self.bot.get_user(user) else user).replace("\n"," ")[:32] for user in game.order}
+        labels={"game_created":"Game created","keep":"Kept hand","mulligan":"Mulligan","play":"Played or cast a card","pass":"Passed priority","auto_pass":"Auto-passed empty priority","attack":"Declared attackers","attack_none":"Declared no attacks","block":"Declared blockers","block_none":"Declared no blocks","concede":"Conceded"}
+        lines=[]
+        for event in visible:
+            actor=names.get(event.get("user"),"Game")
+            turn=event.get("turn","?"); phase=str(event.get("phase","unknown")).replace("_"," ").title(); action=labels.get(event.get("action"),str(event.get("action","Action")).replace("_"," ").title())
+            lines.append(f"**#{event.get('seq', '?')} · Turn {turn} · {phase}** — {actor}: {action}")
+        content=f"**Game {game_id} history · newest first · page {page+1}/{pages}**\n"+("\n".join(lines) if lines else "No actions have been recorded yet.")
+        view=HistoryPaginationView(self,game_id,interaction.user.id,page,pages)
+        if editing: await interaction.edit_original_response(content=content,view=view)
+        else: await interaction.followup.send(content,view=view,ephemeral=True)
+
     async def send_hand(self,interaction,game_id,page,editing=False):
         game=self.games.get(game_id)
         if not game or interaction.user.id not in game.order:
@@ -338,6 +359,9 @@ class MTG(commands.Cog):
         fallback_text="\n".join(f"**{start+n}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for n,card in enumerate(visible,1)) or "Your hand is empty."
         view=HandPaginationView(self,game_id,interaction.user.id,page,pages)
         if game.phase=="opening": guidance="You kept this hand. Waiting for the other player." if game.player(interaction.user.id).kept else "Choose **Keep hand** or **Mulligan** below."
+        elif game.phase=="attackers" and game.active_user==interaction.user.id: guidance="**Your turn — choose attackers below**, or choose **No attacks**."
+        elif game.phase=="blockers" and game.opponent(game.active_user)==interaction.user.id: guidance="**You are defending — choose blockers below**, or choose **No blocks**."
+        elif game.phase in ("attackers","blockers"): guidance="Waiting for the other player to complete the combat declaration."
         elif game.priority_user!=interaction.user.id: guidance="You do not currently have priority. Return to the public game table for the required action."
         elif view.playable_count: guidance="Use the private menu below to play or cast a currently legal card."
         else: guidance="You have no cards you can legally play right now. Return to the public table and use **Pass priority** or the required combat control."
@@ -384,6 +408,17 @@ class MTG(commands.Cog):
         await interaction.delete_original_response()
         await self.refresh_message(game)
 
+    async def combat_hand_interaction(self,interaction,game_id,action,label):
+        game=self.games.get(game_id)
+        if not game or interaction.user.id not in game.order:
+            await interaction.response.send_message("This private hand is unavailable.",ephemeral=True); return
+        async with self.lock(game.game_id):
+            try:
+                action(game); game.record(interaction.user.id,label); self.advance_automatic(game); await self.save(game)
+            except (GameError,IndexError,ValueError) as error:
+                await interaction.response.send_message(str(error),ephemeral=True); return
+        await interaction.response.defer(); await interaction.delete_original_response(); await self.refresh_message(game)
+
     async def play_hand_interaction(self,interaction,game_id,position,target=None,x_value=None):
         game=self.games.get(game_id)
         if not game or interaction.user.id not in game.order:
@@ -394,7 +429,8 @@ class MTG(commands.Cog):
                 game.play(interaction.user.id,position,target,x_value); game.record(interaction.user.id,"play"); self.advance_automatic(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
-        await interaction.response.edit_message(content=f"Played **{card.name}**.",attachments=[],view=None)
+        await interaction.response.defer()
+        await interaction.delete_original_response()
         await self.refresh_message(game)
 
     async def send_library_search(self,interaction,game_id,page,editing=False):

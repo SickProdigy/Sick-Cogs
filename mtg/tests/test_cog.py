@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from mtg.engine import Game, GameError, Permanent
 from mtg.mtg import MATCH_TIMEOUT_SECONDS, MTG
-from mtg.views import ChallengeView, GameView, HandPaginationView
+from mtg.views import ChallengeView, GameView, HandPaginationView, HistoryPaginationView
 
 
 class ConfigValue:
@@ -890,10 +890,16 @@ class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
         attack_view=GameView(cog,1)
         self.assertTrue(any(getattr(item,"custom_id","").endswith(":declare_attackers") for item in attack_view.children))
         self.assertTrue(any(getattr(item,"custom_id","").endswith(":no_attacks") for item in attack_view.children))
+        private_attack=HandPaginationView(cog,1,10,0,1)
+        self.assertTrue(any(getattr(item,"placeholder",None)=="Choose attackers" for item in private_attack.children))
+        self.assertTrue(any(getattr(item,"label",None)=="No attacks" for item in private_attack.children))
         game.declare_attackers(10,[1]); game.phase="blockers"; game.priority_user=None
         block_view=GameView(cog,1)
         self.assertTrue(any(getattr(item,"custom_id","").endswith(":declare_blockers") for item in block_view.children))
         self.assertTrue(any(getattr(item,"custom_id","").endswith(":no_blocks") for item in block_view.children))
+        private_block=HandPaginationView(cog,1,20,0,1)
+        self.assertTrue(any(getattr(item,"placeholder",None)=="Choose blocker assignments" for item in private_block.children))
+        self.assertTrue(any(getattr(item,"label",None)=="No blocks" for item in private_block.children))
 
     async def test_private_hand_explains_when_no_card_is_playable(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.phase="precombat_main"; game.active_index=1; game.priority_user=10; cog.games={1:game}
@@ -905,13 +911,25 @@ class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
     async def test_hand_land_selection_uses_play_action_and_refreshes_table(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.phase="precombat_main"; game.priority_user=10; cog.games={1:game}; cog.channels={1:1}
         position=next(index for index,card in enumerate(game.hand(10),1) if card.land)
-        interaction=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock()))
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(send_message=AsyncMock(),defer=AsyncMock()),delete_original_response=AsyncMock())
         await cog.play_hand_interaction(interaction,1,position)
         self.assertTrue(game.player(10).land_played)
-        interaction.response.edit_message.assert_awaited_once()
+        interaction.response.defer.assert_awaited_once()
+        interaction.delete_original_response.assert_awaited_once()
         cog.refresh_message.assert_awaited_once_with(game)
 
 class CommandInteractionRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_history_button_opens_private_paginated_turn_actions(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=f"Player {user_id}"))
+        game=Game(1,[10,20],1); game.turn=2; game.phase="precombat_main"; game.record(10,"play"); cog.games={1:game}
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock()))
+        await cog.send_history(interaction,1,0)
+        content=interaction.followup.send.await_args.args[0]; kwargs=interaction.followup.send.await_args.kwargs
+        self.assertIn("Turn 2",content); self.assertIn("Player 10: Played or cast a card",content)
+        self.assertTrue(kwargs["ephemeral"]); self.assertIsInstance(kwargs["view"],HistoryPaginationView)
+        self.assertTrue(any(item.custom_id.endswith(":history") for item in GameView(cog,1).children))
+
+
     async def test_missing_match_is_reported_instead_of_raising(self):
         cog=cog_fixture(); ctx=SimpleNamespace(author=SimpleNamespace(id=10),send=AsyncMock())
         action=Mock()

@@ -172,7 +172,7 @@ class Game:
     def finished(self): return self.phase=="finished"
     def record(self,user,action,detail=""):
         self.updated_at=int(time.time())
-        event={"seq":len(self.history)+1,"at":self.updated_at,"user":user,"action":action}
+        event={"seq":len(self.history)+1,"at":self.updated_at,"user":user,"action":action,"turn":self.turn,"phase":self.phase}
         if detail: event["detail"]=detail
         self.history.append(event)
     def is_expired(self,now,timeout): return not self.finished and int(now)-self.updated_at>=timeout
