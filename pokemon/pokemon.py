@@ -205,7 +205,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.50.1";__author__="SickProdigy"
+    __version__="0.50.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -408,6 +408,12 @@ class Pokemon(commands.Cog):
                 await offerer_section.set(offerer);await recipient_section.set(recipient)
                 record["state"]="completed";record["completed_at"]=datetime.now(timezone.utc).isoformat();trades[str(trade_id)]=record;await self.config.trades.set(trades);return record
 
+    async def close_trade_message(self,record,content):
+        channel=self.bot.get_channel(int(record.get("channel_id",0)))
+        if not channel or not record.get("message_id"):return
+        try:message=await channel.fetch_message(int(record["message_id"]));await message.edit(content=content,view=None)
+        except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
+
     async def expire_trades(self,now=None):
         now=now or datetime.now(timezone.utc);expired=[]
         async with self.lock("trades"):
@@ -418,11 +424,7 @@ class Pokemon(commands.Cog):
                 except (KeyError,TypeError,ValueError):due=now
                 if due<=now:raw["state"]="expired";expired.append(dict(raw))
             if expired:await self.config.trades.set(trades)
-        for raw in expired:
-            channel=self.bot.get_channel(int(raw.get("channel_id",0)))
-            if channel and raw.get("message_id"):
-                try:message=await channel.fetch_message(int(raw["message_id"]));await message.edit(content="This Pokémon trade offer expired.",view=None)
-                except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
+        for raw in expired:await self.close_trade_message(raw,"This Pokémon trade offer expired.")
 
     async def guild_encounters(self,guild_id,conf=None):
         try:return active_guild_encounters(await self.config.encounters(),guild_id)
@@ -1183,7 +1185,7 @@ class Pokemon(commands.Cog):
             if not record or record.get("state")!="offered":await ctx.send("That trade is no longer pending.");return
             if ctx.author.id not in {int(record["offerer_id"]),int(record["recipient_id"])}:await ctx.send("That trade belongs to other trainers.");return
             record["state"]="cancelled";trades[str(trade_id)]=record;await self.config.trades.set(trades)
-        await ctx.send(f"Trade #{trade_id} cancelled.")
+        await self.close_trade_message(record,f"Trade #{trade_id} was cancelled.");await ctx.send(f"Trade #{trade_id} cancelled.")
 
     async def accept_trade(self,interaction,trade_id):
         try:record=await self.settle_trade(trade_id)
@@ -1866,11 +1868,11 @@ class Pokemon(commands.Cog):
         """Disable wild encounters in this server."""
         await self.config.guild(ctx.guild).enabled.set(False);await ctx.send("Wild encounters disabled.")
     async def reset_player_data(self,user_id):
-        await self.recover_trades();removed=[]
+        await self.recover_trades();removed=[];cancelled=[]
         async with self.lock("trades"),self.lock(("user",user_id)),self.lock("encounters"):
             trades=await self.config.trades()
             for raw in trades.values():
-                if raw.get("state")=="offered" and user_id in {int(raw.get("offerer_id",0)),int(raw.get("recipient_id",0))}:raw["state"]="cancelled_deleted_user"
+                if raw.get("state")=="offered" and user_id in {int(raw.get("offerer_id",0)),int(raw.get("recipient_id",0))}:raw["state"]="cancelled_deleted_user";cancelled.append(dict(raw))
             await self.config.trades.set(trades);await self.config.user_from_id(user_id).clear()
             encounters=await self.config.encounters()
             for key in list(encounters):
@@ -1879,6 +1881,7 @@ class Pokemon(commands.Cog):
                     removed.append(dict(raw));encounters.pop(key);self.battles.pop(int(key),None)
             await self.config.encounters.set(encounters)
         for raw in removed:await self.clear_guild(int(raw["guild_id"]),int(raw.get("battle",{}).get("encounter_id",0)))
+        for raw in cancelled:await self.close_trade_message(raw,"This Pokémon trade was cancelled because a trainer's data was deleted.")
         return removed
 
     async def red_delete_data_for_user(self,*,requester,user_id):
