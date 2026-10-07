@@ -226,7 +226,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.54.2";__author__="SickProdigy"
+    __version__="0.55.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -430,6 +430,18 @@ class Pokemon(commands.Cog):
             if awarded:await section.set(conf)
         if awarded:await ctx.send("Your monthly SickGaming VIP Pokémon supplies have arrived: "+reward_summary(vip_pack_values(policy.get("vip_monthly_pack")))+".")
     @staticmethod
+    def gift_collections_after(offerer,recipient,offered_raw):
+        identities={raw["instance_id"] for raw in offered_raw};updated_offer=dict(offerer);updated_recipient=dict(recipient)
+        updated_offer["collection"]=[dict(raw) for raw in offerer.get("collection",[]) if raw.get("instance_id") not in identities]
+        owned={raw["instance_id"] for raw in updated_offer["collection"]};updated_offer["party"]=[identity for identity in offerer.get("party",[]) if identity in owned][:PARTY_SIZE]
+        if not updated_offer["party"] and updated_offer["collection"]:updated_offer["party"]=[updated_offer["collection"][0]["instance_id"]]
+        recipient_collection=[dict(raw) for raw in recipient.get("collection",[])];present={raw.get("instance_id") for raw in recipient_collection}
+        recipient_collection.extend(dict(raw) for raw in offered_raw if raw["instance_id"] not in present);updated_recipient["collection"]=recipient_collection
+        recipient_owned={raw["instance_id"] for raw in recipient_collection};updated_recipient["party"]=[identity for identity in recipient.get("party",[]) if identity in recipient_owned][:PARTY_SIZE]
+        if not updated_recipient["party"] and offered_raw:updated_recipient["party"]=[offered_raw[0]["instance_id"]]
+        return updated_offer,updated_recipient
+
+    @staticmethod
     def trade_collection_after(conf,outgoing_id,incoming_raw):
         incoming_id=incoming_raw["instance_id"];updated=dict(conf)
         collection=[dict(raw) for raw in conf.get("collection",[]) if raw.get("instance_id") not in {outgoing_id,incoming_id}]
@@ -443,7 +455,11 @@ class Pokemon(commands.Cog):
 
     @staticmethod
     def trade_reserved(trades,instance_id,exclude=None):
-        return any(str(key)!=str(exclude) and raw.get("state") in {"offered","settling"} and instance_id in {raw.get("offered_id"),raw.get("requested_id")} for key,raw in trades.items())
+        for key,raw in trades.items():
+            if str(key)==str(exclude) or raw.get("state") not in {"offered","settling"}:continue
+            reserved=set(raw.get("offered_ids",[]))|{raw.get("offered_id"),raw.get("requested_id")}
+            if instance_id in reserved:return True
+        return False
 
     async def recover_trades(self):
         trades=await self.config.trades()
@@ -459,15 +475,23 @@ class Pokemon(commands.Cog):
             first=min(int(record["offerer_id"]),int(record["recipient_id"]));second=max(int(record["offerer_id"]),int(record["recipient_id"]))
             async with self.lock(("user",first)),self.lock(("user",second)):
                 offerer_section=self.config.user_from_id(int(record["offerer_id"]));recipient_section=self.config.user_from_id(int(record["recipient_id"]))
-                offerer=await offerer_section.all();recipient=await recipient_section.all()
+                offerer=await offerer_section.all();recipient=await recipient_section.all();gift=record.get("kind")=="gift"
                 if record.get("state")=="offered":
-                    offered=next((dict(raw) for raw in offerer.get("collection",[]) if raw.get("instance_id")==record["offered_id"]),None)
-                    requested=next((dict(raw) for raw in recipient.get("collection",[]) if raw.get("instance_id")==record["requested_id"]),None)
-                    if not offered or not requested:record["state"]="invalid";trades[str(trade_id)]=record;await self.config.trades.set(trades);return record
                     if self.trainer_in_active_battle(int(record["offerer_id"])) or self.trainer_in_active_battle(int(record["recipient_id"])):raise ValueError("Finish both trainers’ active battles before accepting the trade.")
-                    record["offered_pokemon"]=offered;record["requested_pokemon"]=requested;record["state"]="settling";trades[str(trade_id)]=record;await self.config.trades.set(trades)
-                offered=dict(record["offered_pokemon"]);requested=dict(record["requested_pokemon"])
-                offerer=self.trade_collection_after(offerer,record["offered_id"],requested);recipient=self.trade_collection_after(recipient,record["requested_id"],offered)
+                    if gift:
+                        offered_ids=list(record.get("offered_ids",[]));owned={raw.get("instance_id"):dict(raw) for raw in offerer.get("collection",[])};offered=[owned.get(identity) for identity in offered_ids]
+                        if not offered_ids or any(raw is None for raw in offered) or len(offerer.get("collection",[]))-len(offered_ids)<1:record["state"]="invalid";trades[str(trade_id)]=record;await self.config.trades.set(trades);return record
+                        capacity=await self.vip_capacity(int(record["recipient_id"]));needed=sum(1 for raw in offered if not any(item.get("instance_id")==raw["instance_id"] for item in recipient.get("collection",[])))
+                        if len(recipient.get("collection",[]))+needed>capacity:raise ValueError(f"The receiving trainer does not have {needed} free collection slot(s).")
+                        record["offered_pokemon"]=offered
+                    else:
+                        offered=next((dict(raw) for raw in offerer.get("collection",[]) if raw.get("instance_id")==record["offered_id"]),None);requested=next((dict(raw) for raw in recipient.get("collection",[]) if raw.get("instance_id")==record["requested_id"]),None)
+                        if not offered or not requested:record["state"]="invalid";trades[str(trade_id)]=record;await self.config.trades.set(trades);return record
+                        record["offered_pokemon"]=offered;record["requested_pokemon"]=requested
+                    record["state"]="settling";trades[str(trade_id)]=record;await self.config.trades.set(trades)
+                if gift:offerer,recipient=self.gift_collections_after(offerer,recipient,[dict(raw) for raw in record["offered_pokemon"]])
+                else:
+                    offered=dict(record["offered_pokemon"]);requested=dict(record["requested_pokemon"]);offerer=self.trade_collection_after(offerer,record["offered_id"],requested);recipient=self.trade_collection_after(recipient,record["requested_id"],offered)
                 await offerer_section.set(offerer);await recipient_section.set(recipient)
                 record["state"]="completed";record["completed_at"]=datetime.now(timezone.utc).isoformat();trades[str(trade_id)]=record;await self.config.trades.set(trades);return record
 
@@ -1210,6 +1234,12 @@ class Pokemon(commands.Cog):
 
     @staticmethod
     def trade_embed(record,final=False):
+        if record.get("kind")=="gift":
+            title="Pokémon gift delivered!" if final else "Pokémon Gift Offer";symbols={"male":"♂","female":"♀","genderless":"—"};lines=[]
+            for item in record.get("offered_details",[]):lines.append(f"• **{'Shiny ' if item.get('shiny') else ''}{item['name']} · {symbols.get(item.get('gender'),'?')} · Lv.{item['level']}**")
+            description=f"**{record['offerer_name']}** is giving {len(lines)} Pokémon to **{record['recipient_name']}**:\n"+"\n".join(lines)
+            if not final:description+="\n\nOnly the receiving trainer can accept. Either trainer can cancel. This gift expires in 15 minutes."
+            embed=discord.Embed(title=title,description=description,color=discord.Color.green() if final else discord.Color.gold());embed.set_footer(text=f"Gift #{record['trade_id']}");return embed
         title="Trade completed!" if final else "Pokémon Trade Offer"
         symbols={"male":"♂","female":"♀","genderless":"—"};offered=("Shiny " if record.get("offered_shiny") else "")+record["offered_name"];requested=("Shiny " if record.get("requested_shiny") else "")+record["requested_name"]
         description=(f"**{record['offerer_name']}** offers **{offered} · {symbols.get(record.get('offered_gender'),'?')} · Lv.{record['offered_level']}**\n" f"for **{record['recipient_name']}’s {requested} · {symbols.get(record.get('requested_gender'),'?')} · Lv.{record['requested_level']}**")
@@ -1236,6 +1266,33 @@ class Pokemon(commands.Cog):
             trade_id=int(await self.config.next_trade());await self.config.next_trade.set(trade_id+1);now=datetime.now(timezone.utc)
             record={"trade_id":trade_id,"state":"offered","offerer_id":ctx.author.id,"recipient_id":member.id,"offerer_name":ctx.author.display_name,"recipient_name":member.display_name,"offered_id":offered["instance_id"],"requested_id":requested["instance_id"],"offered_name":offered.get("nickname") or SPECIES[offered["species_id"]].name,"requested_name":requested.get("nickname") or SPECIES[requested["species_id"]].name,"offered_level":int(offered["level"]),"requested_level":int(requested["level"]),"offered_gender":offered.get("gender","unknown"),"requested_gender":requested.get("gender","unknown"),"offered_shiny":bool(offered.get("shiny",False)),"requested_shiny":bool(requested.get("shiny",False)),"created_at":now.isoformat(),"expires_at":(now+timedelta(seconds=TRADE_TIMEOUT_SECONDS)).isoformat(),"guild_id":ctx.guild.id,"channel_id":ctx.channel.id,"message_id":None}
             trades[str(trade_id)]=record;await self.config.trades.set(trades)
+        view=TradeView(self,trade_id,ctx.author.id,member.id)
+        try:message=await ctx.send(content=member.mention,embed=self.trade_embed(record),view=view,allowed_mentions=discord.AllowedMentions(users=True,roles=False,everyone=False))
+        except Exception:
+            async with self.lock("trades"):
+                trades=await self.config.trades();current=trades.get(str(trade_id))
+                if current and current.get("state")=="offered":current["state"]="delivery_failed";trades[str(trade_id)]=current;await self.config.trades.set(trades)
+            raise
+        async with self.lock("trades"):
+            trades=await self.config.trades();current=trades.get(str(trade_id))
+            if current and current.get("state")=="offered":current["message_id"]=message.id;trades[str(trade_id)]=current;await self.config.trades.set(trades)
+
+    @trade.command(name="give",aliases=["gift"])
+    async def trade_give(self,ctx,member:discord.Member,*slots:int):
+        """Offer one to three Pokémon as a confirmed gift."""
+        if member.id==ctx.author.id:await ctx.send("Choose another trainer.");return
+        if member.bot:await ctx.send("Bots cannot receive Pokémon.");return
+        if not 1<=len(slots)<=3 or len(set(slots))!=len(slots):await ctx.send("Use `pokemon trade give @trainer <number> [number] [number]` with one to three different collection numbers.");return
+        first=min(ctx.author.id,member.id);second=max(ctx.author.id,member.id)
+        async with self.lock("trades"),self.lock(("user",first)),self.lock(("user",second)):
+            if self.trainer_in_active_battle(ctx.author.id) or self.trainer_in_active_battle(member.id):await ctx.send("Finish both trainers’ active battles before creating a gift.");return
+            offerer=await self.config.user(ctx.author).all();ordered=self.sorted_collection(offerer)
+            if any(slot<1 or slot>len(ordered) for slot in slots):await ctx.send("One of those collection numbers is unavailable. Check `pokemon collection`.");return
+            if len(ordered)-len(slots)<1:await ctx.send("You must keep at least one Pokémon.");return
+            offered=[ordered[slot-1] for slot in slots];trades=await self.config.trades()
+            if any(self.trade_reserved(trades,raw["instance_id"]) for raw in offered):await ctx.send("One of those Pokémon is already reserved in another trade or gift.");return
+            trade_id=int(await self.config.next_trade());await self.config.next_trade.set(trade_id+1);now=datetime.now(timezone.utc);details=[{"name":raw.get("nickname") or SPECIES[raw["species_id"]].name,"level":int(raw["level"]),"gender":raw.get("gender","unknown"),"shiny":bool(raw.get("shiny",False))} for raw in offered]
+            record={"trade_id":trade_id,"kind":"gift","state":"offered","offerer_id":ctx.author.id,"recipient_id":member.id,"offerer_name":ctx.author.display_name,"recipient_name":member.display_name,"offered_ids":[raw["instance_id"] for raw in offered],"offered_details":details,"created_at":now.isoformat(),"expires_at":(now+timedelta(seconds=TRADE_TIMEOUT_SECONDS)).isoformat(),"guild_id":ctx.guild.id,"channel_id":ctx.channel.id,"message_id":None};trades[str(trade_id)]=record;await self.config.trades.set(trades)
         view=TradeView(self,trade_id,ctx.author.id,member.id)
         try:message=await ctx.send(content=member.mention,embed=self.trade_embed(record),view=view,allowed_mentions=discord.AllowedMentions(users=True,roles=False,everyone=False))
         except Exception:

@@ -240,6 +240,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemon trade",player_names)
         self.assertIn("pokemon trade cancel",player_names)
         self.assertIn("pokemon trade collection",player_names)
+        self.assertIn("pokemon trade give",player_names)
         self.assertIn("pokemon mart",player_names)
         self.assertIn("pokemon achievements",player_names)
         self.assertIn("pokemon research",player_names)
@@ -367,6 +368,12 @@ class PokedexTests(unittest.TestCase):
         session=PokedexSession(1,{25},{25},style="compact",selected_id=25)
         self.assertIn("Pikachu",render_pokedex(session).title)
 
+
+    def test_gift_transfer_is_idempotent_and_repairs_both_parties(self):
+        first=OwnedPokemon.create("first",1,5,seed=1).raw();second=OwnedPokemon.create("second",4,5,seed=2).raw();keeper=OwnedPokemon.create("keeper",7,5,seed=3).raw();recipient_mon=OwnedPokemon.create("recipient",25,5,seed=4).raw()
+        offerer={"collection":[first,second,keeper],"party":["first","second"]};recipient={"collection":[recipient_mon],"party":["recipient"]}
+        offerer,recipient=Pokemon.gift_collections_after(offerer,recipient,[first,second]);self.assertEqual([raw["instance_id"] for raw in offerer["collection"]],["keeper"]);self.assertEqual(offerer["party"],["keeper"]);self.assertEqual(len(recipient["collection"]),3)
+        offerer,recipient=Pokemon.gift_collections_after(offerer,recipient,[first,second]);self.assertEqual(len(recipient["collection"]),3)
 
     def test_trade_transfer_repairs_party_and_reservations_are_exact(self):
         outgoing=OwnedPokemon.create("outgoing",4,5,seed=1).raw();incoming=OwnedPokemon.create("incoming",7,6,seed=2).raw();spare=OwnedPokemon.create("spare",1,4,seed=3).raw()
@@ -653,6 +660,17 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         encounter_minimum=StoredValue(60);encounter_maximum=StoredValue(900);encounter_default=StoredValue(120)
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,minimum_timer=timer_minimum,minimum_encounter_timeout=encounter_minimum,maximum_encounter_timeout=encounter_maximum,encounter_timeout=encounter_default,all_guilds=AsyncMock(return_value={}),all_users=AsyncMock(return_value={}))
         await cog._migrate();timer_minimum.set.assert_awaited_once_with(60);self.assertEqual(schema.set.await_args_list[-1].args,(16,));self.assertEqual((encounter_minimum.value,encounter_maximum.value,encounter_default.value),(60,900,120))
+
+    async def test_gift_settlement_moves_up_to_three_without_payment(self):
+        gifts=[OwnedPokemon.create(f"gift-{index}",species,5,seed=index).raw() for index,species in enumerate((1,4,7),1)];keeper=OwnedPokemon.create("keeper",25,5,seed=9).raw();offerer=StoredSection({"collection":gifts+[keeper],"party":[raw["instance_id"] for raw in gifts]});recipient=StoredSection({"collection":[],"party":[]})
+        record={"trade_id":4,"kind":"gift","state":"offered","offerer_id":10,"recipient_id":20,"offered_ids":[raw["instance_id"] for raw in gifts]};trades=StoredValue({"4":record});sections={10:offerer,20:recipient};cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.vip_capacity=AsyncMock(return_value=246);cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:sections[uid])
+        settled=await cog.settle_trade(4);self.assertEqual(settled["state"],"completed");self.assertEqual([raw["instance_id"] for raw in offerer.value["collection"]],["keeper"]);self.assertEqual(len(recipient.value["collection"]),3);self.assertEqual(recipient.value["party"],["gift-1"])
+        self.assertIsNone(await cog.settle_trade(4));self.assertEqual(len(recipient.value["collection"]),3)
+
+    async def test_gift_acceptance_rechecks_recipient_capacity(self):
+        gift=OwnedPokemon.create("gift",1,5,seed=1).raw();held=OwnedPokemon.create("held",4,5,seed=2).raw();offerer=StoredSection({"collection":[gift,held],"party":["gift"]});recipient=StoredSection({"collection":[held],"party":["held"]});record={"trade_id":5,"kind":"gift","state":"offered","offerer_id":10,"recipient_id":20,"offered_ids":["gift"]};trades=StoredValue({"5":record});sections={10:offerer,20:recipient};cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.vip_capacity=AsyncMock(return_value=1);cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:sections[uid])
+        with self.assertRaisesRegex(ValueError,"free collection slot"):await cog.settle_trade(5)
+        self.assertEqual(trades.value["5"]["state"],"offered");self.assertEqual(len(offerer.value["collection"]),2)
 
     async def test_trade_settlement_is_idempotent_and_recovers_partial_save(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
