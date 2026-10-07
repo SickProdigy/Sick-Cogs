@@ -241,6 +241,8 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemonownerset globalconcurrency",owner_names)
         self.assertIn("pokemonownerset concurrency",owner_names)
         self.assertIn("pokemonownerset timer",owner_names)
+        self.assertIs(Pokemon.pokemon_owner_set.get_command("globalstatus"),Pokemon.pokemon_owner_set.get_command("settings"))
+        self.assertIs(Pokemon.pokemon_owner_set.get_command("globalstatus"),Pokemon.pokemon_owner_set.get_command("status"))
         self.assertNotIn("pokemonset centercooldown",admin_names)
         self.assertIn("pokemonownerset centercooldown",owner_names)
         self.assertNotIn("pokemonset rarity",admin_names)
@@ -802,6 +804,13 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await Pokemon.global_concurrency.callback(cog,ctx,2)
         self.assertEqual(ceiling.value,2)
         ctx.send.assert_awaited_once_with("Server administrators may now configure up to 2 simultaneous encounters.")
+
+    async def test_global_status_reports_only_complete_bot_wide_policy(self):
+        policy={"encounter_timeout":120,"center_cooldown":1800,"minimum_threshold":8,"minimum_cooldown":120,"maximum_concurrency":3,"allowed_generations":[1],"rarity_profile":"friendly","allow_special_species":False,"pokedex_default_style":"retro","mart_prices":{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400}}
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(all=AsyncMock(return_value=policy));ctx=SimpleNamespace(send=AsyncMock())
+        await Pokemon.global_status.callback(cog,ctx);text=ctx.send.await_args.args[0]
+        for expected in ("Pokémon bot-wide policy","server administrators **60–10,080m**","bot-owner override **1–10,080m**","Wild encounter lifetime: **2m**","Free Center cooldown: **30m**","Activity-mode floors: **8 points**","Administrator concurrency ceiling: **3**","Allowed generations: **1**","Default Pokédex style: **Retro**","Poké Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
+        self.assertNotIn("current server",text.casefold());self.assertNotIn("spawn channels",text.casefold())
 
     async def test_sub_hour_timer_uses_owner_command_group(self):
         cog=Pokemon.__new__(Pokemon);ctx=SimpleNamespace(send=AsyncMock())

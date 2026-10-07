@@ -35,6 +35,8 @@ MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
 CENTER_TREATMENT_SECONDS=5
 TRADE_TIMEOUT_SECONDS=900
+SERVER_TIMER_MINUTES=(60,10080)
+OWNER_TIMER_MINUTES=(1,10080)
 COLLECTION_PAGE_SIZE=9
 PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
 SPECIAL_SPECIES={144,145,146,150,151}
@@ -196,7 +198,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.48.1";__author__="SickProdigy"
+    __version__="0.48.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1573,13 +1575,13 @@ class Pokemon(commands.Cog):
     @pokemon_set.command(name="timer")
     async def spawn_timer(self,ctx,minutes:int):
         """Set this server’s jittered timer from 60 minutes to one week."""
-        if not 60<=minutes<=10080:await ctx.send("Use 60–10080 minutes.");return
+        if not SERVER_TIMER_MINUTES[0]<=minutes<=SERVER_TIMER_MINUTES[1]:await ctx.send("Use 60–10080 minutes.");return
         await self.set_spawn_timer(ctx,minutes)
 
     @pokemon_owner_set.command(name="timer")
     async def owner_spawn_timer(self,ctx,minutes:int):
         """Override this server’s jittered timer from 1 minute to one week."""
-        if not 1<=minutes<=10080:await ctx.send("Use 1–10080 minutes.");return
+        if not OWNER_TIMER_MINUTES[0]<=minutes<=OWNER_TIMER_MINUTES[1]:await ctx.send("Use 1–10080 minutes.");return
         await self.set_spawn_timer(ctx,minutes)
 
     @pokemon_set.command(name="concurrency",aliases=["slots"])
@@ -1696,11 +1698,22 @@ class Pokemon(commands.Cog):
         await self.config.pokedex_default_style.set(style)
         await ctx.send(f"Default Pokédex style set to **{POKEDEX_STYLES[style].label}**.")
 
-    @pokemon_owner_set.command(name="globalstatus")
+    @pokemon_owner_set.command(name="globalstatus",aliases=["settings","status"])
     async def global_status(self,ctx):
-        """Show the bot-wide encounter policy."""
-        policy=await self.config.all()
-        await ctx.send(f"Encounter lifetime: {policy['encounter_timeout']//60}m\nMinimum threshold/cooldown: {policy['minimum_threshold']} points/{policy['minimum_cooldown']}s\nAllowed generations: {', '.join(map(str,policy['allowed_generations']))}\nRarity: {policy['rarity_profile']}\nSpecial species: {'enabled' if policy['allow_special_species'] else 'event-only'}\nAdministrator concurrency ceiling: {policy.get('maximum_concurrency',3)}")
+        """Show all bot-wide Pokémon policies and owner limits."""
+        policy=await self.config.all();prices=mart_prices(policy.get("mart_prices",{}));generations=", ".join(map(str,policy.get("allowed_generations",[1])))
+        price_text=" · ".join(f"{MART_ITEMS[key][0]}: **{prices[key]:,}**" for key in MART_ITEMS)
+        await ctx.send(
+            f"**Pokémon bot-wide policy**\n"
+            f"Timer limits: server administrators **{SERVER_TIMER_MINUTES[0]}–{SERVER_TIMER_MINUTES[1]:,}m** · bot-owner override **{OWNER_TIMER_MINUTES[0]}–{OWNER_TIMER_MINUTES[1]:,}m**\n"
+            f"Wild encounter lifetime: **{max(60,int(policy.get('encounter_timeout',900)))//60}m** · owner range **1–1,440m**\n"
+            f"Free Center cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m** · owner range **1–1,440m**\n"
+            f"Activity-mode floors: **{policy.get('minimum_threshold',8)} points** · **{policy.get('minimum_cooldown',120)}s cooldown**\n"
+            f"Administrator concurrency ceiling: **{max(1,min(5,int(policy.get('maximum_concurrency',3))))}** · owner override range **1–5**\n"
+            f"Allowed generations: **{generations}** · Rarity: **{policy.get('rarity_profile','friendly')}** · Special species: **{'enabled' if policy.get('allow_special_species') else 'event-only'}**\n"
+            f"Default Pokédex style: **{resolve_style(policy.get('pokedex_default_style','retro')).label}**\n"
+            f"Poké Mart prices: {price_text}"
+        )
 
     @pokemon_owner_set.command(name="encountertime")
     async def encounter_time(self,ctx,minutes:int):
