@@ -11,7 +11,8 @@ import aiohttp
 APP_ID = 4000
 API_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
 ANNOUNCEMENTS_URL = f"https://steamcommunity.com/app/{APP_ID}/announcements/"
-USER_AGENT = "Sick-Cogs-GMod/0.1.1 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-GMod/1.0.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+OFFICIAL_FEED_NAME = "steam_community_announcements"
 
 _BB_IMAGE_SRC_RE = re.compile(
     r"\[img[^\]]*\bsrc=[\"\x27]([^\"\x27]+)[\"\x27][^\]]*\](?:\[/img\])?",
@@ -27,6 +28,10 @@ _BLANK_RE = re.compile(r"\n{3,}")
 
 class SteamNewsError(RuntimeError):
     pass
+
+
+def is_official_news(item: Dict[str, Any]) -> bool:
+    return str(item.get("feedname") or "").casefold() == OFFICIAL_FEED_NAME
 
 
 def item_id(item: Dict[str, Any]) -> str:
@@ -109,4 +114,8 @@ class SteamNewsClient:
         items = payload.get("appnews", {}).get("newsitems", []) if isinstance(payload, dict) else []
         if not isinstance(items, list):
             raise SteamNewsError("Steam News returned an invalid response.")
-        return [item for item in items if isinstance(item, dict) and item_id(item)]
+        return [
+            item
+            for item in items
+            if isinstance(item, dict) and item_id(item) and is_official_news(item)
+        ]

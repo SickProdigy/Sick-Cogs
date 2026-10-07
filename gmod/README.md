@@ -1,7 +1,7 @@
 # GMod
 
 GMod provides safe Garry's Mod server status cards and optional announcement channels for server
-state changes and official Garry's Mod Steam news. Version 0.1.0 intentionally has no RCON, console,
+state changes and official Garry's Mod Steam news. Version 1.0.0 intentionally has no RCON, console,
 ban, kick, file, or Workshop-management surface.
 
 ## Add a public server

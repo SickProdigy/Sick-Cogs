@@ -61,7 +61,7 @@ class GMod(commands.Cog):
     """Monitor Garry's Mod servers and publish official Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.1"
+    __version__ = "1.0.0"
 
     guild_defaults = {
         "servers": {},
@@ -350,7 +350,13 @@ class GMod(commands.Cog):
     @commands.group(name="gmod", invoke_without_command=True)
     @commands.guild_only()
     async def gmod(self, ctx, server: Optional[str] = None):
-        """Show Garry's Mod server status."""
+        """Show Garry's Mod server status and browse official updates.
+
+        Quick setup for server administrators and owners:
+        `[p]gmodset add main play.example.com 27015`
+        `[p]gmodset updateschannel #updates`
+        `[p]gmodset updates start`
+        """
         await ctx.invoke(self.gmod_status, server=server)
 
     @gmod.command(name="status")

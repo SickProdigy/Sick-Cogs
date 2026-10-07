@@ -11,5 +11,5 @@
   "short": "GMod server status and official update announcements",
   "tags": ["gmod", "garrys-mod", "source", "steam", "status", "notifications"],
   "type": "COG",
-  "version": "0.1.1"
+  "version": "1.0.0"
 }

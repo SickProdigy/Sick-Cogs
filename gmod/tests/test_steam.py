@@ -1,9 +1,21 @@
 import unittest
 
-from gmod.steam import APP_ID, image_url, new_items, plain_text, recent_items
+from gmod.gmod import GMod
+
+from gmod.steam import APP_ID, image_url, is_official_news, new_items, plain_text, recent_items
 
 
 class SteamNewsTests(unittest.TestCase):
+    def test_public_help_includes_quick_setup(self):
+        help_text = GMod.gmod.help
+        self.assertIn("[p]gmodset add main", help_text)
+        self.assertIn("[p]gmodset updateschannel #updates", help_text)
+        self.assertIn("[p]gmodset updates start", help_text)
+
+    def test_official_feed_filter_excludes_third_party_news(self):
+        self.assertTrue(is_official_news({"feedname": "steam_community_announcements"}))
+        self.assertFalse(is_official_news({"feedname": "PC Gamer"}))
+
     def test_uses_garrys_mod_app_id(self):
         self.assertEqual(APP_ID, 4000)
 
