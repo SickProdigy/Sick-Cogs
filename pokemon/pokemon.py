@@ -38,6 +38,8 @@ PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
 SPECIAL_SPECIES={144,145,146,150,151}
 COLLECTION_REWARDS={5:{"balls":5},10:{"great_ball":5},25:{"ultra_ball":3},50:{"balls":10,"great_ball":5,"ultra_ball":5},100:{"balls":20,"great_ball":10,"ultra_ball":10}}
 VICTORY_REWARDS={5:{"potion":5},10:{"revive":3},25:{"potion":10,"revive":5},50:{"potion":15,"revive":8},100:{"potion":25,"revive":12}}
+ENCOUNTER_REWARDS={10:{"balls":3},25:{"balls":5},50:{"great_ball":3},100:{"great_ball":5},250:{"ultra_ball":3},500:{"ultra_ball":5}}
+TYPE_REWARDS={3:{"balls":2},5:{"great_ball":1},10:{"ultra_ball":1}}
 RARITY_PROFILES={
     "friendly":{"common":100,"uncommon":65,"rare":35,"very_rare":15},
     "standard":{"common":100,"uncommon":45,"rare":18,"very_rare":5},
@@ -554,9 +556,17 @@ class Pokemon(commands.Cog):
     @staticmethod
     def grant_achievement_rewards(conf):
         claimed=set(conf.setdefault("achievement_rewards",[]));awarded=[];items=conf.setdefault("items",{})
-        unique_caught=len({int(value) for value in conf.get("pokedex_caught",[])})
+        caught_species={int(value) for value in conf.get("pokedex_caught",[])}
+        unique_caught=len(caught_species)
+        type_totals={}
+        for species_id in caught_species:
+            species=SPECIES.get(species_id)
+            if not species:continue
+            for pokemon_type in set(species.types):type_totals[pokemon_type]=type_totals.get(pokemon_type,0)+1
         victories=sum(int(value.get("defeated",0)) for value in conf.get("pokedex_stats",{}).values())
-        for group,total,rewards in (("collection",unique_caught,COLLECTION_REWARDS),("victories",victories,VICTORY_REWARDS)):
+        encounters=sum(int(value.get("battled",0)) for value in conf.get("pokedex_stats",{}).values())
+        groups=(("collection",unique_caught,COLLECTION_REWARDS),("victories",victories,VICTORY_REWARDS),("encounters",encounters,ENCOUNTER_REWARDS))
+        for group,total,rewards in groups:
             for target,reward in rewards.items():
                 key=f"{group}:{target}"
                 if total<target or key in claimed:continue
@@ -566,6 +576,16 @@ class Pokemon(commands.Cog):
                     else:items[item]=int(items.get(item,0))+amount;label=item.replace("_"," ").title()+("s" if amount!=1 else "")
                     parts.append(f"{amount} {label}")
                 claimed.add(key);awarded.append(f"{group.title()} goal {target}: "+", ".join(parts))
+        for pokemon_type,total in sorted(type_totals.items()):
+            for target,reward in TYPE_REWARDS.items():
+                key=f"type:{pokemon_type}:{target}"
+                if total<target or key in claimed:continue
+                parts=[]
+                for item,amount in reward.items():
+                    if item=="balls":conf["balls"]=int(conf.get("balls",0))+amount;label="Poké Balls"
+                    else:items[item]=int(items.get(item,0))+amount;label=item.replace("_"," ").title()+("s" if amount!=1 else "")
+                    parts.append(f"{amount} {label}")
+                claimed.add(key);awarded.append(f"{pokemon_type.title()} specialist {target}: "+", ".join(parts))
         conf["achievement_rewards"]=sorted(claimed);conf["items"]=items
         return awarded
 
