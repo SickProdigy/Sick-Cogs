@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from mtg.art import MAX_CACHE_FILES, ScryfallArtCache, match_result, render_battlefield, render_hand
+from mtg.art import MAX_CACHE_FILES, ScryfallArtCache, available_mana, match_result, render_battlefield, render_hand
 from mtg.engine import Game, Permanent
 from mtg.cards import CARDS
 
@@ -44,6 +44,15 @@ class ArtTests(unittest.TestCase):
             match_result(game,{10:"SickProdigy",20:"SGbot (Easy AI)"}),
             ("VICTORY","SickProdigy","Defeated SGbot (Easy AI)","SGbot (Easy AI) reached zero life"),
         )
+
+    def test_available_mana_includes_pool_and_ready_sources(self):
+        game=Game(1,[10,20],1)
+        mountain=next(uid for uid in game.cards if game.card(uid).name=="Mountain")
+        game.players[10].battlefield=[Permanent(mountain,"mountain",sick=False)]
+        game.players[10].mana_pool={"R":1}
+        self.assertEqual(available_mana(game,10),{"R":2})
+        game.players[10].battlefield[0].tapped=True
+        self.assertEqual(available_mana(game,10),{"R":1})
 
     def test_public_battlefield_render_is_bounded_png(self):
         game=Game(1,[10,20],1)

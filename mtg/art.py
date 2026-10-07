@@ -180,6 +180,54 @@ def match_result(game, names):
     return "VICTORY", winner, f"Defeated {loser}", detail
 
 
+MANA_COLORS={
+    "W":(244,238,200), "U":(70,145,210), "B":(88,76,104),
+    "R":(205,72,50), "G":(70,145,82), "C":(165,165,155),
+}
+
+
+def available_mana(game, user):
+    """Return mana that is floating or available from simple ready sources."""
+    player=game.player(user); amounts=dict(player.mana_pool)
+    for permanent in player.battlefield:
+        card=game.card(permanent.uid); choices=game.current_mana_choices(permanent)
+        ready=(not permanent.tapped and choices and card.mana_amount==1 and not card.mana_activation_cost
+               and not card.sacrifice_for_mana and (not game.is_creature(permanent) or not permanent.sick
+               or card.haste or "haste" in game.current_keywords(permanent)))
+        if ready and len(choices)==1:
+            output=game._mana_output(permanent,choices[0])
+            for symbol,count in output.items(): amounts[symbol]=amounts.get(symbol,0)+count
+        elif ready:
+            choice="/".join(choices)
+            amounts[choice]=amounts.get(choice,0)+1
+    return {symbol:count for symbol,count in amounts.items() if count}
+
+
+def _draw_card_back(draw, box):
+    x0,y0,x1,y1=box
+    draw.rounded_rectangle(box,8,fill=(25,18,14,255),outline=(213,180,105,255),width=2)
+    draw.rounded_rectangle((x0+5,y0+5,x1-5,y1-5),6,fill=(82,38,25,255),outline=(198,122,54,255),width=2)
+    draw.ellipse((x0+15,y0+25,x1-15,y1-25),fill=(29,45,62,255),outline=(225,163,65,255),width=3)
+    draw.ellipse((x0+25,y0+39,x1-25,y1-39),fill=(152,68,35,255),outline=(232,193,104,255),width=2)
+
+
+def _draw_mana_indicator(draw, game, user, center):
+    x,y=center; mana=available_mana(game,user)
+    draw.text((x,y-40),"MANA",fill=(248,235,202),font=_font(11),anchor="mm")
+    if not mana:
+        draw.ellipse((x-22,y-22,x+22,y+22),fill=(18,22,21,235),outline=(150,139,112,255),width=2)
+        draw.text((x,y),"0",fill=(210,202,184),font=_font(17),anchor="mm")
+        return
+    entries=list(sorted(mana.items()))[:3]
+    offset=(len(entries)-1)*15
+    for index,(symbol,count) in enumerate(entries):
+        cy=y-offset+index*30; color=MANA_COLORS.get(symbol.split("/")[0],MANA_COLORS["C"])
+        draw.ellipse((x-22,cy-13,x+22,cy+13),fill=(*color,235),outline=(244,221,157,255),width=2)
+        ink=(20,20,18) if symbol in ("W","C") else (255,248,225)
+        label=f"{symbol} {count}" if len(symbol)<=3 else str(count)
+        draw.text((x,cy),label,fill=ink,font=_font(12),anchor="mm")
+
+
 def render_battlefield(game, names, paths, background_path):
     with Image.open(background_path) as source:
         canvas = source.convert("RGB").resize((1280, 853), Image.Resampling.LANCZOS)
@@ -211,12 +259,22 @@ def render_battlefield(game, names, paths, background_path):
         y0 = 34 if top else 626
         y_cards = 92 if top else 666
         draw.rounded_rectangle((194, y0, 1086, y0 + 190), 16, fill=(7, 10, 9, 150), outline=(200, 174, 112, 180), width=2)
-        pool=" ".join(f"{symbol}{count}" for symbol,count in sorted(player.mana_pool.items())) or "-"
-        summary = (
-            f"{names[user]}  |  Life {player.life}  |  Hand {len(player.hand)}  |  "
-            f"Library {len(player.library)}  |  Graveyard {len(player.graveyard)}  |  Mana {pool}  |  Exile {len(player.exile)}"
-        )
+        summary=f"{names[user]}  |  Life {player.life}  |  Hand {len(player.hand)}"
         draw.text((214, y0 + 12), summary, fill=(249, 241, 220), font=label_font)
+        deck_x,zone_x,mana_x=(1122,68,1104) if top else (76,1114,176)
+        deck_center=deck_x+41; zone_center=zone_x+49
+        deck_box=(deck_x,y0+55,deck_x+82,y0+176)
+        _draw_card_back(draw,deck_box)
+        draw.rounded_rectangle((deck_x-8,y0+8,deck_x+90,y0+51),8,fill=(7,10,9,225),outline=(200,174,112,210),width=2)
+        draw.text((deck_center,y0+19),"DECK",fill=(249,241,220),font=_font(11),anchor="mm")
+        draw.text((deck_center,y0+38),str(len(player.library)),fill=(255,215,105),font=label_font,anchor="mm")
+        _draw_mana_indicator(draw,game,user,(mana_x,y0+116))
+        draw.rounded_rectangle((zone_x,y0+45,zone_x+98,y0+176),10,fill=(7,10,9,205),outline=(200,174,112,190),width=2)
+        draw.text((zone_center,y0+63),"GRAVEYARD",fill=(225,216,194),font=_font(10),anchor="mm")
+        draw.text((zone_center,y0+88),str(len(player.graveyard)),fill=(255,215,105),font=label_font,anchor="mm")
+        draw.line((zone_x+11,y0+108,zone_x+87,y0+108),fill=(160,142,103,190),width=1)
+        draw.text((zone_center,y0+126),"EXILE",fill=(225,216,194),font=_font(10),anchor="mm")
+        draw.text((zone_center,y0+151),str(len(player.exile)),fill=(255,215,105),font=label_font,anchor="mm")
         permanents = player.battlefield[:8]
         for index, permanent in enumerate(permanents, 1):
             x = 214 + (index - 1) * 108
