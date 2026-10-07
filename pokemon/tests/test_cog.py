@@ -675,6 +675,11 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         record={"state":"offered","offerer_id":10,"recipient_id":20,"channel_id":2,"message_id":99};trades=StoredValue({"1":record});section=StoredSection({"collection":[]});encounters=StoredValue({});edited=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=edited));cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel);cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:section,encounters=encounters)
         await cog.reset_player_data(10);self.assertEqual(trades.value["1"]["state"],"cancelled_deleted_user");self.assertEqual(section.value,{});edited.edit.assert_awaited_once_with(content="This Pokémon trade was cancelled because a trainer's data was deleted.",view=None)
 
+    async def test_player_deletion_terminally_cancels_unrecovered_settlement(self):
+        settling={"state":"settling","offerer_id":10,"recipient_id":20,"offered_id":"a","requested_id":"b","offered_pokemon":{"instance_id":"a"},"requested_pokemon":{"instance_id":"b"}};trades=StoredValue({"2":settling});section=StoredSection({"collection":[{"instance_id":"a"}]});encounters=StoredValue({});cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.bot=SimpleNamespace(get_channel=lambda channel_id:None);cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:section,encounters=encounters);cog.recover_trades=AsyncMock()
+        await cog.reset_player_data(10);self.assertEqual(trades.value["2"]["state"],"cancelled_deleted_user");self.assertEqual(section.value,{});cog.recover_trades.assert_awaited_once()
+        await Pokemon.recover_trades(cog);self.assertEqual(section.value,{})
+
     async def test_configured_center_restores_party_only(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
         party=OwnedPokemon.create("party",4,10,seed=3);party.current_hp=0;party.status="burn";party.move_pp={key:0 for key in party.moves}

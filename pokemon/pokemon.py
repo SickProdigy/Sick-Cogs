@@ -205,7 +205,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.51.2";__author__="SickProdigy"
+    __version__="0.51.3";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1886,7 +1886,7 @@ class Pokemon(commands.Cog):
         async with self.lock("trades"),self.lock(("user",user_id)),self.lock("encounters"):
             trades=await self.config.trades()
             for raw in trades.values():
-                if raw.get("state")=="offered" and user_id in {int(raw.get("offerer_id",0)),int(raw.get("recipient_id",0))}:raw["state"]="cancelled_deleted_user";cancelled.append(dict(raw))
+                if raw.get("state") in {"offered","settling"} and user_id in {int(raw.get("offerer_id",0)),int(raw.get("recipient_id",0))}:raw["state"]="cancelled_deleted_user";cancelled.append(dict(raw))
             await self.config.trades.set(trades);await self.config.user_from_id(user_id).clear()
             encounters=await self.config.encounters()
             for key in list(encounters):
