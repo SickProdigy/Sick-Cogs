@@ -219,6 +219,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemonset battleexpiry",admin_names)
         self.assertIn("pokemonset encountertime",admin_names)
         self.assertIn("pokemonset martprice",admin_names)
+        self.assertIn("pokemonset centercooldown",admin_names)
         self.assertIn("pokemonset rarity",admin_names)
         self.assertIn("pokemonset catalogsync",admin_names)
         self.assertIn("pokemonset resetplayer",admin_names)
@@ -533,6 +534,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(
             user=lambda user:section,
             guild=lambda guild:SimpleNamespace(center_channel=center),
+            center_cooldown=StoredValue(1800),
         )
         ctx=SimpleNamespace(author=SimpleNamespace(id=42),guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=55),send=AsyncMock())
         await Pokemon.pokemon_center.callback(cog,ctx)
@@ -541,6 +543,14 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(healed.status,"")
         self.assertTrue(all(value>0 for value in healed.move_pp.values()))
         self.assertEqual(still_boxed.current_hp,1)
+        await Pokemon.pokemon_center.callback(cog,ctx)
+        self.assertIn("ready again in 30m",ctx.send.await_args.args[0])
+
+    async def test_owner_can_adjust_center_cooldown(self):
+        cooldown=StoredValue(1800);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(center_cooldown=cooldown);ctx=SimpleNamespace(send=AsyncMock())
+        await Pokemon.center_cooldown.callback(cog,ctx,45)
+        self.assertEqual(cooldown.value,2700)
+        ctx.send.assert_awaited_once_with("Free Pokémon Center healing now has a 45-minute per-user cooldown.")
 
     async def test_finished_battle_persists_hp_and_status(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()

@@ -29,7 +29,7 @@ MART_ITEMS={
     "revive":("Revive","revive",400),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
-GLOBAL={"schema":8,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()}}
+GLOBAL={"schema":8,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
@@ -1022,9 +1022,12 @@ class Pokemon(commands.Cog):
             conf=await self.config.user(ctx.author).all();last=conf.get("center_last_at")
             now=datetime.now(timezone.utc)
             if last:
-                try:remaining=300-(now-datetime.fromisoformat(last)).total_seconds()
+                try:remaining=max(60,int(await self.config.center_cooldown()))-(now-datetime.fromisoformat(last)).total_seconds()
                 except (TypeError,ValueError):remaining=0
-                if remaining>0:await ctx.send(f"The Pokémon Center will be ready again in {int(remaining)+1}s.");return
+                if remaining>0:
+                    seconds=int(remaining)+1;minutes,seconds=divmod(seconds,60)
+                    wait=f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
+                    await ctx.send(f"The Pokémon Center will be ready again in {wait}.");return
             party=set(conf["party"]);healed=0
             for raw in conf["collection"]:
                 if raw["instance_id"] not in party:continue
@@ -1188,6 +1191,14 @@ class Pokemon(commands.Cog):
         await self.config.guild(ctx.guild).center_channel.set(None)
         await ctx.send("This server's Pokémon Center was removed.")
 
+    @pokemon_set.command(name="centercooldown")
+    @commands.is_owner()
+    async def center_cooldown(self,ctx,minutes:int):
+        """Set the bot-wide free Pokémon Center cooldown."""
+        if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes.");return
+        await self.config.center_cooldown.set(minutes*60)
+        await ctx.send(f"Free Pokémon Center healing now has a {minutes}-minute per-user cooldown.")
+
     @pokemon_set.command(name="status",aliases=["settings"])
     async def spawn_status(self,ctx):
         """Show channels, schedule, and effective server settings."""
@@ -1210,7 +1221,7 @@ class Pokemon(commands.Cog):
         enabled=conf.get("enabled",False);encounter_minutes=int(policy.get("encounter_timeout",900))//60;battle_minutes=int(conf.get("battle_timeout",1800))//60
         rarity=policy.get("rarity_profile","friendly");specials="enabled" if policy.get("allow_special_species") else "event-only";expired_cards=conf.get("expired_card_mode","delete")
         await ctx.send(
-            f"**Pokémon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}**\nSpawn channels: {channels}\nPokémon Center: {center}\n"
+            f"**Pokémon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}**\nSpawn channels: {channels}\nPokémon Center: {center} · Free-heal cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m**\n"
             f"{progress}\nNext spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** · Battle lifetime: **{battle_minutes}m**\n"
             f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nExpired unattended cards: **{expired_cards}**\nCatalog species: **{len(SPECIES)}**"
         )
