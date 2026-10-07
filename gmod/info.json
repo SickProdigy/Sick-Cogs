@@ -1,0 +1,15 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Monitor Garry's Mod servers with safe A2S queries and publish official Steam announcements.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores per-server public GMod connection settings, bounded cached status data, announcement settings, and Steam announcement IDs. It does not store member data or RCON credentials.",
+  "hidden": false,
+  "install_msg": "Add a server with `[p]gmodset add <name> <host> [query-port]`. Configure optional status transitions with `[p]gmodset statuschannel`, and ARK-style official Steam posts with `[p]gmodset updateschannel` followed by `[p]gmodset updates start`. Private/LAN destinations require explicit bot-owner approval.",
+  "min_bot_version": "3.5.0",
+  "permissions": ["embed_links"],
+  "requirements": [],
+  "short": "GMod server status and official update announcements",
+  "tags": ["gmod", "garrys-mod", "source", "steam", "status", "notifications"],
+  "type": "COG",
+  "version": "1.0.0"
+}
