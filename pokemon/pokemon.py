@@ -20,7 +20,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1,"concurrency_owner_override":False}
-USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[]}
+USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{}}
 MART_ITEMS={
     "poke_ball":("Poké Ball","balls",50),
     "great_ball":("Great Ball","great_ball",150),
@@ -29,7 +29,7 @@ MART_ITEMS={
     "revive":("Revive","revive",400),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball"}
-GLOBAL={"schema":10,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":3}
+GLOBAL={"schema":11,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":3}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
@@ -40,6 +40,11 @@ COLLECTION_REWARDS={5:{"balls":5},10:{"great_ball":5},25:{"ultra_ball":3},50:{"b
 VICTORY_REWARDS={5:{"potion":5},10:{"revive":3},25:{"potion":10,"revive":5},50:{"potion":15,"revive":8},100:{"potion":25,"revive":12}}
 ENCOUNTER_REWARDS={10:{"balls":3},25:{"balls":5},50:{"great_ball":3},100:{"great_ball":5},250:{"ultra_ball":3},500:{"ultra_ball":5}}
 TYPE_REWARDS={3:{"balls":2},5:{"great_ball":1},10:{"ultra_ball":1}}
+DAILY_RESEARCH_TASKS=(
+    ("encounters",3,{"balls":2},"Complete 3 encounters"),
+    ("victories",2,{"potion":2},"Defeat 2 Pokémon"),
+    ("catches",1,{"great_ball":1},"Catch 1 Pokémon"),
+)
 RARITY_PROFILES={
     "friendly":{"common":100,"uncommon":65,"rare":35,"very_rare":15},
     "standard":{"common":100,"uncommon":45,"rare":18,"very_rare":5},
@@ -104,6 +109,35 @@ def grant_mart_item(conf,key,quantity):
     else:
         items=conf.setdefault("items",{});items[storage]=int(items.get(storage,0))+quantity;conf["items"]=items
 
+def achievement_totals(conf):
+    caught_species={int(value) for value in conf.get("pokedex_caught",[]) if str(value).isdigit()}
+    types={}
+    for species_id in caught_species:
+        species=SPECIES.get(species_id)
+        if not species:continue
+        for pokemon_type in set(species.types):types[pokemon_type]=types.get(pokemon_type,0)+1
+    stats=conf.get("pokedex_stats",{})
+    return {
+        "collection":len(caught_species),
+        "victories":sum(int(value.get("defeated",0)) for value in stats.values()),
+        "encounters":sum(int(value.get("battled",0)) for value in stats.values()),
+        "catches":sum(int(value.get("caught",0)) for value in stats.values()),
+        "types":types,
+    }
+
+def grant_supply_items(conf,reward):
+    items=conf.setdefault("items",{});parts=[]
+    for item,amount in reward.items():
+        if item=="balls":conf["balls"]=int(conf.get("balls",0))+amount;label="Poké Balls"
+        else:items[item]=int(items.get(item,0))+amount;label=item.replace("_"," ").title()+("s" if amount!=1 else "")
+        parts.append(f"{amount} {label}")
+    conf["items"]=items
+    return parts
+
+def reward_summary(reward):
+    labels={"balls":"Poké Balls","great_ball":"Great Balls","ultra_ball":"Ultra Balls","potion":"Potions","revive":"Revives"}
+    return ", ".join(f"{amount} {labels.get(item,item.replace(chr(95),chr(32)).title())}" for item,amount in reward.items())
+
 def spawn_weight(species,profile="friendly"):
     weights=RARITY_PROFILES.get(profile,RARITY_PROFILES["friendly"])
     return weights[rarity_tier(species)]
@@ -160,7 +194,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.44.0";__author__="SickProdigy"
+    __version__="0.45.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -298,6 +332,10 @@ class Pokemon(commands.Cog):
             await self.config.schema.set(9)
         if schema<10:
             await self.config.schema.set(10)
+        if schema<11:
+            for user_id,data in (await self.config.all_users()).items():
+                data.setdefault("daily_research",{});await self.config.user_from_id(int(user_id)).set(data)
+            await self.config.schema.set(11)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
@@ -586,49 +624,51 @@ class Pokemon(commands.Cog):
 
     @staticmethod
     def grant_achievement_rewards(conf):
-        claimed=set(conf.setdefault("achievement_rewards",[]));awarded=[];items=conf.setdefault("items",{})
-        caught_species={int(value) for value in conf.get("pokedex_caught",[])}
-        unique_caught=len(caught_species)
-        type_totals={}
-        for species_id in caught_species:
-            species=SPECIES.get(species_id)
-            if not species:continue
-            for pokemon_type in set(species.types):type_totals[pokemon_type]=type_totals.get(pokemon_type,0)+1
-        victories=sum(int(value.get("defeated",0)) for value in conf.get("pokedex_stats",{}).values())
-        encounters=sum(int(value.get("battled",0)) for value in conf.get("pokedex_stats",{}).values())
-        groups=(("collection",unique_caught,COLLECTION_REWARDS),("victories",victories,VICTORY_REWARDS),("encounters",encounters,ENCOUNTER_REWARDS))
+        claimed=set(conf.setdefault("achievement_rewards",[]));awarded=[];totals=achievement_totals(conf)
+        groups=(("collection",totals["collection"],COLLECTION_REWARDS),("victories",totals["victories"],VICTORY_REWARDS),("encounters",totals["encounters"],ENCOUNTER_REWARDS))
         for group,total,rewards in groups:
             for target,reward in rewards.items():
                 key=f"{group}:{target}"
                 if total<target or key in claimed:continue
-                parts=[]
-                for item,amount in reward.items():
-                    if item=="balls":conf["balls"]=int(conf.get("balls",0))+amount;label="Poké Balls"
-                    else:items[item]=int(items.get(item,0))+amount;label=item.replace("_"," ").title()+("s" if amount!=1 else "")
-                    parts.append(f"{amount} {label}")
-                claimed.add(key);awarded.append(f"{group.title()} goal {target}: "+", ".join(parts))
-        for pokemon_type,total in sorted(type_totals.items()):
+                claimed.add(key);awarded.append(f"{group.title()} goal {target}: "+", ".join(grant_supply_items(conf,reward)))
+        for pokemon_type,total in sorted(totals["types"].items()):
             for target,reward in TYPE_REWARDS.items():
                 key=f"type:{pokemon_type}:{target}"
                 if total<target or key in claimed:continue
-                parts=[]
-                for item,amount in reward.items():
-                    if item=="balls":conf["balls"]=int(conf.get("balls",0))+amount;label="Poké Balls"
-                    else:items[item]=int(items.get(item,0))+amount;label=item.replace("_"," ").title()+("s" if amount!=1 else "")
-                    parts.append(f"{amount} {label}")
-                claimed.add(key);awarded.append(f"{pokemon_type.title()} specialist {target}: "+", ".join(parts))
-        conf["achievement_rewards"]=sorted(claimed);conf["items"]=items
+                claimed.add(key);awarded.append(f"{pokemon_type.title()} specialist {target}: "+", ".join(grant_supply_items(conf,reward)))
+        conf["achievement_rewards"]=sorted(claimed)
+        return awarded
+
+    @staticmethod
+    def ensure_daily_research(conf,now=None):
+        now=now or datetime.now(timezone.utc);day=now.date().isoformat();state=conf.get("daily_research",{})
+        if state.get("date")!=day:
+            totals=achievement_totals(conf)
+            state={"date":day,"baseline":{key:totals[key] for key in ("encounters","victories","catches")},"claimed":[]}
+            conf["daily_research"]=state
+        return state
+
+    @classmethod
+    def grant_daily_research(cls,conf,now=None):
+        state=cls.ensure_daily_research(conf,now);totals=achievement_totals(conf);claimed=set(state.get("claimed",[]));awarded=[]
+        baseline=state.get("baseline",{})
+        for key,target,reward,label in DAILY_RESEARCH_TASKS:
+            progress=max(0,totals[key]-int(baseline.get(key,0)))
+            if progress<target or key in claimed:continue
+            claimed.add(key);awarded.append(f"Research — {label}: "+", ".join(grant_supply_items(conf,reward)))
+        state["claimed"]=sorted(claimed);conf["daily_research"]=state
         return awarded
 
     def record_battle_result(self,conf,battle):
         key=str(battle.encounter_id);recorded=list(conf.setdefault("recorded_battles",[]))
         if key in recorded:return []
+        self.ensure_daily_research(conf)
         entry=self.pokedex_stat(conf,battle.wild_species_id);entry["battled"]+=1
         if battle.state=="won":entry["defeated"]+=1
         elif battle.state=="caught":entry["caught"]+=1
         elif battle.state in {"lost","ran","expired"}:entry["escaped"]+=1
         recorded.append(key);conf["recorded_battles"]=recorded[-500:]
-        return self.grant_achievement_rewards(conf)
+        return self.grant_achievement_rewards(conf)+self.grant_daily_research(conf)
 
     async def sync_battle_player(self,battle):
         conf=await self.config.user_from_id(battle.user_id).all()
@@ -968,6 +1008,38 @@ class Pokemon(commands.Cog):
         """View your available medicine and items."""
         conf=await self.config.user(ctx.author).all();items=conf.get("items",{})
         await ctx.send(f"**Poké Balls**\nPoké Ball: **{int(conf.get('balls',0))}** · Great Ball: **{int(items.get('great_ball',0))}** · Ultra Ball: **{int(items.get('ultra_ball',0))}**\n**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**")
+
+    @pokemon.command(name="achievements",aliases=["goals"])
+    async def achievements(self,ctx):
+        """View accomplishment progress and upcoming supply rewards."""
+        conf=await self.config.user(ctx.author).all();totals=achievement_totals(conf);claimed=set(conf.get("achievement_rewards",[]))
+        embed=discord.Embed(title=f"{getattr(ctx.author,'display_name','Trainer')}'s Accomplishments",color=discord.Color.gold())
+        for key,label,rewards in (("collection","Unique collection",COLLECTION_REWARDS),("victories","Victories",VICTORY_REWARDS),("encounters","Completed encounters",ENCOUNTER_REWARDS)):
+            total=totals[key];next_goal=next(((target,reward) for target,reward in rewards.items() if total<target),None)
+            value="All milestones complete." if next_goal is None else f"**{total}/{next_goal[0]}** · Next: {reward_summary(next_goal[1])}"
+            earned=sum(1 for target in rewards if f"{key}:{target}" in claimed)
+            embed.add_field(name=label,value=f"{value}\nClaimed: {earned}/{len(rewards)}",inline=False)
+        type_lines=[]
+        for pokemon_type,total in sorted(totals["types"].items(),key=lambda item:(-item[1],item[0])):
+            next_goal=next(((target,reward) for target,reward in TYPE_REWARDS.items() if total<target),None)
+            if next_goal:type_lines.append(f"**{pokemon_type.title()}** {total}/{next_goal[0]} · {reward_summary(next_goal[1])}")
+            else:type_lines.append(f"**{pokemon_type.title()}** complete")
+        embed.add_field(name="Type specialists",value="\n".join(type_lines) or "Catch Pokémon to begin type-specialist goals.",inline=False)
+        embed.set_footer(text="Rewards are granted automatically when a battle settles.")
+        await ctx.send(embed=embed)
+
+    @pokemon.command(name="research",aliases=["daily"])
+    async def professor_research(self,ctx):
+        """View today’s Professor research tasks and supply rewards."""
+        async with self.lock(("user",ctx.author.id)):
+            conf=await self.config.user(ctx.author).all();state=self.ensure_daily_research(conf);await self.config.user(ctx.author).set(conf)
+        totals=achievement_totals(conf);baseline=state.get("baseline",{});claimed=set(state.get("claimed",[]))
+        embed=discord.Embed(title="Professor Research · Daily Tasks",description="Complete these before the next UTC day. Rewards are delivered automatically.",color=discord.Color.green())
+        for key,target,reward,label in DAILY_RESEARCH_TASKS:
+            progress=min(target,max(0,totals[key]-int(baseline.get(key,0))));done=key in claimed
+            embed.add_field(name=("✅ " if done else "")+label,value=f"**{progress}/{target}** · {reward_summary(reward)}",inline=False)
+        embed.set_footer(text=f"Resets daily at 00:00 UTC · {len(claimed)}/{len(DAILY_RESEARCH_TASKS)} complete")
+        await ctx.send(embed=embed)
 
     @pokemon.command(name="mart")
     @commands.guild_only()

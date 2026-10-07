@@ -219,6 +219,8 @@ class CogPolicyTests(unittest.TestCase):
         self.assertFalse(any(name.startswith("pokemon set") for name in player_names))
         self.assertIn("pokemon center",player_names)
         self.assertIn("pokemon mart",player_names)
+        self.assertIn("pokemon achievements",player_names)
+        self.assertIn("pokemon research",player_names)
         self.assertIn("pokemon buy",player_names)
         self.assertIn("pokemon use potion",player_names)
         self.assertIn("pokemon use revive",player_names)
@@ -519,6 +521,40 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("type:poison:3",conf["achievement_rewards"])
         self.assertEqual(len(rewards),3)
         self.assertEqual(Pokemon.grant_achievement_rewards(conf),[])
+
+    def test_daily_research_rewards_three_bounded_tasks_once(self):
+        conf={"pokedex_stats":{},"pokedex_caught":[],"recorded_battles":[],"achievement_rewards":[],"balls":0,"items":{}}
+        cog=Pokemon.__new__(Pokemon)
+        for encounter_id,state in ((101,"won"),(102,"won"),(103,"caught")):
+            current=battle();current.encounter_id=encounter_id;current.state=state
+            cog.record_battle_result(conf,current)
+        self.assertEqual(conf["balls"],2)
+        self.assertEqual(conf["items"]["potion"],2)
+        self.assertEqual(conf["items"]["great_ball"],1)
+        self.assertEqual(set(conf["daily_research"]["claimed"]),{"encounters","victories","catches"})
+        self.assertEqual(cog.grant_daily_research(conf),[])
+
+    def test_daily_research_resets_with_new_utc_day_baseline(self):
+        conf={"pokedex_stats":{"1":{"battled":4,"defeated":2,"caught":1}}}
+        first=Pokemon.ensure_daily_research(conf,datetime(2026,10,7,tzinfo=timezone.utc))
+        self.assertEqual(first["baseline"],{"encounters":4,"victories":2,"catches":1})
+        first["claimed"]=["encounters"]
+        second=Pokemon.ensure_daily_research(conf,datetime(2026,10,8,tzinfo=timezone.utc))
+        self.assertEqual(second["claimed"],[])
+        self.assertEqual(second["baseline"],{"encounters":4,"victories":2,"catches":1})
+
+    async def test_achievements_and_research_cards_show_progress(self):
+        conf={"pokedex_caught":[1,2,3],"pokedex_stats":{"1":{"battled":2,"defeated":1,"caught":1}},"achievement_rewards":[],"daily_research":{}}
+        section=StoredSection(conf);cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(user=lambda user:section)
+        ctx=SimpleNamespace(author=SimpleNamespace(id=7,display_name="Trainer"),send=AsyncMock())
+        await Pokemon.achievements.callback(cog,ctx)
+        achievement=ctx.send.await_args.kwargs["embed"]
+        self.assertEqual(achievement.title,"Trainer's Accomplishments")
+        self.assertIn("3/5",achievement.fields[0].value)
+        ctx.send.reset_mock();await Pokemon.professor_research.callback(cog,ctx)
+        research=ctx.send.await_args.kwargs["embed"]
+        self.assertEqual(research.title,"Professor Research · Daily Tasks")
+        self.assertEqual(len(research.fields),3)
 
     async def test_battle_potion_consumes_inventory_and_wild_turn(self):
         current=battle();maximum=current.max_hp(current.player);current.player_hp=max(1,maximum-8);current.party_hp[current.player.instance_id]=current.player_hp
