@@ -22,10 +22,22 @@ class ConfigValue:
         self.value = value
 
 
+class UserConfig:
+    def __init__(self,store,user_id): self.store,self.user_id=store,user_id
+    async def all(self):
+        return dict(self.store.setdefault(self.user_id,{"schema":1,"starter":"","collection":{},"decks":{},"active_deck":""}))
+    async def set(self,value): self.store[self.user_id]=value
+    async def clear(self): self.store.pop(self.user_id,None)
+
+class TestConfig(SimpleNamespace):
+    def __init__(self):
+        super().__init__(next_game_id=ConfigValue(1),games=ConfigValue({})); self.users={}
+    def user_from_id(self,user_id): return UserConfig(self.users,int(user_id))
+
 def cog_fixture():
     cog = MTG.__new__(MTG)
     cog.bot = SimpleNamespace(get_channel=lambda channel_id: None)
-    cog.config = SimpleNamespace(next_game_id=ConfigValue(1), games=ConfigValue({}))
+    cog.config = TestConfig()
     cog.games = {}
     cog.locks = {}
     cog.channels = {}
@@ -36,6 +48,23 @@ def cog_fixture():
 
 
 class PersistenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_starter_claim_creates_exact_owned_collection_and_saved_deck(self):
+        cog=cog_fixture(); profile=await cog.claim_starter(10,"red")
+        self.assertEqual(profile["starter"],"red")
+        self.assertEqual(sum(profile["collection"].values()),60)
+        self.assertEqual(sum(count for key,count in profile["collection"].items() if cog.collection_card(key).land),24)
+        self.assertEqual(profile["decks"]["starter-red"]["cards"],profile["collection"])
+        self.assertEqual(profile["active_deck"],"starter-red")
+        with self.assertRaisesRegex(GameError,"already chose"):
+            await cog.claim_starter(10,"green")
+
+    async def test_collection_records_are_printing_aware_and_sorted(self):
+        cog=cog_fixture(); await cog.claim_starter(10,"green")
+        records=await cog.collection_records(10)
+        self.assertEqual(sum(count for _,count in records),60)
+        self.assertEqual(records,sorted(records,key=lambda item:(cog.collection_card(item[0]).name.casefold(),item[0])))
+        self.assertTrue(all(key.startswith("lea:") for key,_ in records))
+
     async def test_concurrent_creates_allow_only_one_game_per_player(self):
         cog = cog_fixture()
         results = await asyncio.gather(
@@ -992,13 +1021,14 @@ class CommandLayoutTests(unittest.TestCase):
 
     def test_root_help_explains_player_entry_points(self):
         help_text=MTG.mtg.help
-        self.assertIn("Browse Alpha cards",help_text)
+        self.assertIn("Collect cards",help_text)
+        self.assertIn("starter",help_text)
         self.assertIn("solo",help_text)
         self.assertIn("challenge",help_text)
         self.assertIn("buttons",help_text)
 
     def test_player_help_keeps_match_controls_and_special_fallbacks_nested(self):
-        public={"action","card","catalog","challenge","solo","status"}
+        public={"action","card","catalog","challenge","collection","solo","starter","status"}
         match={"attack","block","concede","graveyard","mana","pass","play","special"}
         fallback={"vault","sanctuary","channel","angel","incarnation","hydra","hydraorder","mask","maskpick","activate","forktarget","bodyguard","trample","attackdamage","blockdamage","untap","trigger","wording","orders","kudzu","balance","leak","selection","copy","doppelganger"}
         self.assertEqual(set(MTG.mtg.all_commands),public)

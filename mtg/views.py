@@ -5,6 +5,50 @@ from .art import HAND_PAGE_SIZE
 from .ai import TARGETED_EFFECTS, _target
 from .engine import GameError
 
+class CollectionSelect(discord.ui.Select):
+    def __init__(self,browser):
+        self.browser=browser; start=browser.page*browser.page_size
+        options=[]
+        for index,(key,count) in enumerate(browser.records[start:start+browser.page_size],start):
+            card=browser.cog.collection_card(key)
+            options.append(discord.SelectOption(label=f"{card.name} ×{count}"[:100],description=f"{card.type_line} · {card.mana_cost or 'No mana cost'}"[:100],value=str(index)))
+        super().__init__(placeholder="Choose an owned printing",options=options)
+    async def callback(self,interaction):
+        await interaction.response.defer(); await self.browser.cog.show_collection_detail(interaction,self.browser,int(self.values[0]))
+
+class CollectionView(discord.ui.View):
+    page_size=20
+    def __init__(self,cog,user_id,records,page=0):
+        super().__init__(timeout=180); self.cog,self.user_id,self.records,self.page=cog,user_id,records,page
+        self.pages=max(1,(len(records)+self.page_size-1)//self.page_size)
+        self.add_item(CollectionSelect(self)); self.previous.disabled=page<=0; self.next.disabled=page>=self.pages-1
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id: return True
+        await interaction.response.send_message("This collection belongs to another player.",ephemeral=True); return False
+    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary,row=1)
+    async def previous(self,interaction,button):
+        await interaction.response.defer(); await self.cog.show_collection_page(interaction,self.user_id,self.page-1)
+    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=1)
+    async def next(self,interaction,button):
+        await interaction.response.defer(); await self.cog.show_collection_page(interaction,self.user_id,self.page+1)
+
+class CollectionDetailView(discord.ui.View):
+    def __init__(self,browser,index):
+        super().__init__(timeout=180); self.browser,self.index=browser,index
+        self.previous.disabled=index<=0; self.next.disabled=index>=len(browser.records)-1
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.browser.user_id: return True
+        await interaction.response.send_message("This collection belongs to another player.",ephemeral=True); return False
+    @discord.ui.button(label="Previous card",style=discord.ButtonStyle.secondary)
+    async def previous(self,interaction,button):
+        await interaction.response.defer(); await self.browser.cog.show_collection_detail(interaction,self.browser,self.index-1)
+    @discord.ui.button(label="Collection",style=discord.ButtonStyle.primary)
+    async def up(self,interaction,button):
+        await interaction.response.defer(); await self.browser.cog.show_collection_page(interaction,self.browser.user_id,self.browser.page)
+    @discord.ui.button(label="Next card",style=discord.ButtonStyle.secondary)
+    async def next(self,interaction,button):
+        await interaction.response.defer(); await self.browser.cog.show_collection_detail(interaction,self.browser,self.index+1)
+
 class HistoryPaginationView(discord.ui.View):
     page_size=15
     def __init__(self,cog,game_id,user_id,page,pages):

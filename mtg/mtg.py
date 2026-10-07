@@ -2,6 +2,7 @@ import asyncio
 import logging
 import secrets
 import math
+from collections import Counter
 import aiohttp
 from typing import Dict
 import discord
@@ -9,23 +10,25 @@ from redbot.core import Config, commands
 from redbot.core.data_manager import cog_data_path
 from .ai import DIFFICULTIES, advance_solo
 from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, match_result, render_battlefield, render_hand
-from .cards import BASE_CARDS, CARDS
+from .cards import BASE_CARDS, CARDS, starter
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
 from .engine import Game, GameError
-from .views import CatalogDetailView, CatalogView, ChallengeView, GameView, HandPaginationView, HistoryPaginationView, LibrarySearchView, NaturalSelectionView, PrivateHandDecisionView
+from .views import CatalogDetailView, CatalogView, ChallengeView, CollectionDetailView, CollectionView, GameView, HandPaginationView, HistoryPaginationView, LibrarySearchView, NaturalSelectionView, PrivateHandDecisionView
 
 log=logging.getLogger("red.sick-cogs.MTG")
 CONFIG_IDENTIFIER=813604927115
 DEFAULTS={"schema":1,"next_game_id":1,"games":{}}
+DEFAULT_PROFILE={"schema":1,"starter":"","collection":{},"decks":{},"active_deck":""}
 MATCH_TIMEOUT_SECONDS=7*24*60*60
 
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.121.8"
+    __version__="0.122.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
-        self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
+        self.config.register_global(**DEFAULTS); self.config.register_user(**DEFAULT_PROFILE)
+        self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
         self.storage_lock=asyncio.Lock(); self.cleanup_task=None; self.session=None; self.art_cache=None
     def advance_automatic(self,game):
         changed=False
@@ -57,6 +60,43 @@ class MTG(commands.Cog):
     def lock(self,gid): return self.locks.setdefault(gid,asyncio.Lock())
     def human_players(self,game):
         return [user for user in game.order if user != getattr(game,"ai_user",None)]
+    async def player_profile(self,user_id):
+        return await self.config.user_from_id(int(user_id)).all()
+    async def claim_starter(self,user_id,color):
+        color=color.casefold()
+        if color not in ("red","green"): raise GameError("Choose the red or green starter.")
+        async with self.storage_lock:
+            scope=self.config.user_from_id(int(user_id)); profile=await scope.all()
+            if profile.get("starter"): raise GameError(f"You already chose the {profile['starter'].title()} starter.")
+            owned=dict(Counter(starter(color))); deck_id=f"starter-{color}"
+            profile={**DEFAULT_PROFILE,"starter":color,"collection":owned,"decks":{deck_id:{"name":f"{color.title()} Starter","cards":owned,"starter":True}},"active_deck":deck_id}
+            await scope.set(profile)
+        return profile
+    def collection_card(self,key):
+        return CARDS[key]
+    async def collection_records(self,user_id):
+        profile=await self.player_profile(user_id)
+        records=[(key,int(count)) for key,count in profile.get("collection",{}).items() if key in CARDS and int(count)>0]
+        return sorted(records,key=lambda item:(CARDS[item[0]].name.casefold(),item[0]))
+    def collection_embed(self,profile,records,page):
+        start=page*CollectionView.page_size; visible=records[start:start+CollectionView.page_size]
+        lines=[]
+        for key,count in visible:
+            card=CARDS[key]; lines.append(f"**{card.name}** ×{count}\n{card.type_line} · {card.mana_cost or 'No mana cost'} · `{key}`")
+        pages=max(1,math.ceil(len(records)/CollectionView.page_size))
+        embed=discord.Embed(title=f"{profile['starter'].title()} starter collection",description="\n\n".join(lines),color=discord.Color.dark_green())
+        embed.set_footer(text=f"Page {page+1}/{pages} · {sum(count for _,count in records)} cards · {len(records)} distinct printings")
+        return embed
+    async def show_collection_page(self,interaction,user_id,page):
+        profile=await self.player_profile(user_id); records=await self.collection_records(user_id); pages=max(1,math.ceil(len(records)/CollectionView.page_size)); page=max(0,min(page,pages-1))
+        view=CollectionView(self,user_id,records,page)
+        await interaction.edit_original_response(embed=self.collection_embed(profile,records,page),attachments=[],view=view)
+    async def show_collection_detail(self,interaction,browser,index):
+        key,count=browser.records[index]; card=CARDS[key]; source="alpha" if card.set_code=="lea" else "playable"
+        embed,file=await self.card_presentation(source,card); embed.add_field(name="Owned",value=str(count),inline=False)
+        embed.set_footer(text=f"Owned printing {index+1}/{len(browser.records)} · Collection returns to page {browser.page+1}")
+        await interaction.edit_original_response(embed=embed,attachments=[file] if file else [],view=CollectionDetailView(browser,index))
+
     def ensure_players_available(self,*users):
         for game in self.games.values():
             if not game.finished and any(user in self.human_players(game) for user in users):
@@ -563,12 +603,29 @@ class MTG(commands.Cog):
         await ctx.message.add_reaction("✅")
     @commands.group(name="mtg",invoke_without_command=True)
     async def mtg(self,ctx):
-        """Browse Alpha cards and play solo or challenge another player.
+        """Collect cards, build toward custom decks, and play Magic.
 
-        Start with `solo` or `challenge`. Matches use buttons and private hand controls;
-        `action` provides text fallbacks when a control is unavailable.
+        New players choose `starter red` or `starter green`, then use `collection`
+        to browse owned printings. Start a match with `solo` or `challenge`; gameplay
+        uses buttons and private hand controls, with `action` as a text fallback.
         """
         await ctx.send_help()
+    @mtg.command(name="starter")
+    async def starter_choice(self,ctx,color:str):
+        """Choose your permanent red or green starter collection."""
+        try: profile=await self.claim_starter(ctx.author.id,color)
+        except GameError as error: await ctx.send(str(error)); return
+        records=await self.collection_records(ctx.author.id); view=CollectionView(self,ctx.author.id,records,0)
+        await ctx.send(f"You received the **{profile['starter'].title()} Starter**: 60 owned cards and its saved deck.",embed=self.collection_embed(profile,records,0),view=view)
+    @mtg.command(name="collection")
+    async def collection(self,ctx,page:int=1):
+        """Browse your owned cards and printings."""
+        profile=await self.player_profile(ctx.author.id)
+        if not profile.get("starter"):
+            await ctx.send(f"Choose your starter first with `{ctx.clean_prefix}mtg starter red` or `{ctx.clean_prefix}mtg starter green`."); return
+        records=await self.collection_records(ctx.author.id); pages=max(1,math.ceil(len(records)/CollectionView.page_size))
+        if not 1<=page<=pages: await ctx.send(f"Choose a page from 1 to {pages}."); return
+        view=CollectionView(self,ctx.author.id,records,page-1); await ctx.send(embed=self.collection_embed(profile,records,page-1),view=view)
     @mtg.command(name="challenge")
     @commands.guild_only()
     async def challenge(self,ctx,member:discord.Member,deck:str="red"):
@@ -922,3 +979,4 @@ class MTG(commands.Cog):
                 if user_id in [int(x) for x in games[key].get("order",[])]:
                     games.pop(key); gid=int(key); self.games.pop(gid,None); self.channels.pop(gid,None); self.locks.pop(gid,None); changed=True
             if changed: await self.config.games.set(games)
+            await self.config.user_from_id(user_id).clear()
