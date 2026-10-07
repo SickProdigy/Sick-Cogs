@@ -173,9 +173,9 @@ class BattleRenderer:
         try:return await self._render(self._party_card_sync,pokemon,data,trainer_name)
         except (OSError,ValueError) as exc:raise RenderError("Party card rendering failed.") from exc
 
-    async def collection_card(self,pokemon,page,pages,total,trainer_name):
+    async def collection_card(self,pokemon,page,pages,total,trainer_name,party_slots=None):
         data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in pokemon))
-        try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total,trainer_name)
+        try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total,trainer_name,party_slots)
         except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
 
     async def pokedex_registration(self,pokemon,trainer_name):
@@ -376,7 +376,7 @@ class BattleRenderer:
             self._gender_mark(draw,(left+145,top+207),item.gender,(82,62,29))
         return self._save(canvas)
 
-    def _collection_card_sync(self,pokemon,data,page,pages,total,trainer_name):
+    def _collection_card_sync(self,pokemon,data,page,pages,total,trainer_name,party_slots=None):
         canvas=Image.new("RGB",(900,720),(225,217,177));draw=ImageDraw.Draw(canvas)
         for y in range(720):
             ratio=y/719;draw.line((0,y,900,y),fill=(int(240-36*ratio),int(230-40*ratio),int(181-34*ratio)))
@@ -384,6 +384,7 @@ class BattleRenderer:
         trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"
         draw.text((44,34),f"{trainer}'s Collection · {total} POKEMON",fill=(42,70,58),font=ImageFont.load_default(size=28))
         draw.text((735,43),f"PAGE {page}/{pages}",fill=(65,91,78),font=ImageFont.load_default(size=16))
+        party_slots=party_slots or [None]*len(pokemon)
         for index,(item,raw) in enumerate(zip(pokemon,data)):
             col=index%3;row=index//3;left=43+280*col;top=82+198*row;cx=left+127
             draw.rounded_rectangle((left,top,left+254,top+178),14,fill=(221,229,200),outline=(78,105,88),width=3)
@@ -397,6 +398,11 @@ class BattleRenderer:
             mark_x=min(left+239,level_x+int(draw.textlength(level_text,font=level_font))+6)
             self._gender_mark(draw,(mark_x,top+150),item.gender,(65,91,78))
             if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
+            slot=party_slots[index] if index<len(party_slots) else None
+            if slot:
+                label=f"P{slot}";font=ImageFont.load_default(size=14)
+                draw.rounded_rectangle((left+12,top+10,left+48,top+34),7,fill=(54,83,70),outline=(245,239,207),width=2)
+                draw.text((left+20,top+15),label,fill=(245,239,207),font=font)
         return self._save(canvas)
 
     @staticmethod

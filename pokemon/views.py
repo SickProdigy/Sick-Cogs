@@ -107,7 +107,8 @@ class CollectionPokemonSelect(discord.ui.Select):
         options=[]
         for number,item in items:
             species=SPECIES[item["species_id"]];name=item.get("nickname") or species.name
-            options.append(discord.SelectOption(label=f"{number}. {name} · Lv.{item['level']}",value=item["instance_id"]))
+            party=f"P{item['party_slot']} · " if item.get("party_slot") else ""
+            options.append(discord.SelectOption(label=f"{number}. {party}{name} · Lv.{item['level']}",value=item["instance_id"]))
         super().__init__(placeholder="Select a Pokémon for your party…",options=options,row=0)
         self.cog=cog;self.user_id=user_id
     async def callback(self,interaction):

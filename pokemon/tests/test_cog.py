@@ -446,9 +446,10 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         tentacool=OwnedPokemon.create("catch-22",72,5,seed=2);charmander=OwnedPokemon.create("377af4fb",4,1,seed=1)
         conf={"collection":[tentacool.raw(),charmander.raw()],"party":["377af4fb","catch-22"]};section=StoredSection(conf)
         self.assertEqual([raw["instance_id"] for raw in Pokemon.sorted_collection(conf)],["377af4fb","catch-22"])
-        browser=CollectionBrowserView(SimpleNamespace(),42,1,1,[(1,charmander.raw()),(2,tentacool.raw())])
+        charmander_entry=charmander.raw();charmander_entry["party_slot"]=1;tentacool_entry=tentacool.raw();tentacool_entry["party_slot"]=2
+        browser=CollectionBrowserView(SimpleNamespace(),42,1,1,[(1,charmander_entry),(2,tentacool_entry)])
         selector=next(item for item in browser.children if isinstance(item,discord.ui.Select))
-        self.assertEqual([option.label for option in selector.options],["1. Charmander · Lv.1","2. Tentacool · Lv.5"])
+        self.assertEqual([option.label for option in selector.options],["1. P1 · Charmander · Lv.1","2. P2 · Tentacool · Lv.5"])
         self.assertNotIn("377af4fb"," ".join(option.label for option in selector.options))
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section);cog.locks={}
         response=SimpleNamespace(edit_message=AsyncMock());interaction=SimpleNamespace(user=SimpleNamespace(id=42),response=response)
