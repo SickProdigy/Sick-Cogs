@@ -1622,14 +1622,14 @@ class Pokemon(commands.Cog):
                 except (TypeError,ValueError):remaining=0
                 if remaining>0:
                     seconds=int(remaining)+1;minutes,seconds=divmod(seconds,60);wait=f"{minutes}m {seconds}s" if minutes else f"{seconds}s";await ctx.send(f"The Pokémon Center will be ready again in {wait}.");return
-            owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};party=[]
+            owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};before_party=[];party=[]
             for identity in conf.get("party",[])[:6]:
                 raw=owned.get(identity)
                 if not raw:continue
-                pokemon=OwnedPokemon.from_raw(raw);pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status="";pokemon.status_turns=0;pokemon.move_pp={key:MOVES[key].pp for key in pokemon.moves};raw.update(pokemon.raw());party.append(pokemon)
+                pokemon=OwnedPokemon.from_raw(raw);before_party.append(OwnedPokemon.from_raw(pokemon.raw()));pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status="";pokemon.status_turns=0;pokemon.move_pp={key:MOVES[key].pp for key in pokemon.moves};raw.update(pokemon.raw());party.append(pokemon)
             if not party:await ctx.send("Choose a starter and prepare a party first.");return
             conf["center_last_at"]=now.isoformat();await self.config.user(ctx.author).set(conf)
-        embed,files=await self.rendered_center(ctx.author,party,False);message=await ctx.send(embed=embed,files=files)
+        embed,files=await self.rendered_center(ctx.author,before_party,False);message=await ctx.send(embed=embed,files=files)
         await asyncio.sleep(CENTER_TREATMENT_SECONDS)
         embed,files=await self.rendered_center(ctx.author,party,True)
         try:await message.edit(embed=embed,attachments=files,view=CenterCollectView(ctx.author.id))

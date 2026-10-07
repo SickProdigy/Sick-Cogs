@@ -608,15 +608,17 @@ class BattleRenderer:
     def _pokemon_center_sync(self,party,data,trainer_name,complete=False):
         canvas=Image.new("RGB",(900,540),(218,228,225));draw=ImageDraw.Draw(canvas);ink=(39,61,66);metal=(105,126,130);glass=(179,225,232);light=(72,196,117) if complete else (244,177,62)
         for y in range(0,430,28):draw.line((0,y,900,y),fill=(197,211,208),width=2)
+        emblem=(188,91,96);draw.ellipse((298,83,602,387),fill=(224,207,204),outline=emblem,width=14);draw.rectangle((298,220,602,250),fill=emblem);draw.ellipse((414,199,486,271),fill=(224,207,204),outline=emblem,width=14)
         draw.rectangle((0,0,900,62),fill=(213,70,76));draw.rectangle((0,55,900,68),fill=(248,240,214));draw.text((28,14),"POKEMON CENTER · RESTORATION ROOM",fill=(255,255,255),font=ImageFont.load_default(size=28))
         for index in range(6):
             column=index%3;row=index//3;x=38+column*288;y=86+row*164
-            draw.rounded_rectangle((x,y,x+246,y+145),20,fill=(151,169,171),outline=ink,width=4);draw.rounded_rectangle((x+15,y+13,x+231,y+112),18,fill=glass,outline=metal,width=3)
-            draw.rectangle((x+22,y+116,x+224,y+134),fill=(72,84,87),outline=ink,width=2);draw.ellipse((x+195,y+119,x+210,y+132),fill=light,outline=ink,width=2)
+            draw.rounded_rectangle((x,y,x+246,y+145),20,fill=(151,169,171),outline=ink,width=4);draw.rounded_rectangle((x+15,y+13,x+231,y+106),18,fill=glass,outline=metal,width=3)
+            draw.rectangle((x+22,y+108,x+224,y+137),fill=(72,84,87),outline=ink,width=2);draw.ellipse((x+195,y+115,x+210,y+128),fill=light,outline=ink,width=2)
             if index>=len(party):
                 label="EMPTY";font=ImageFont.load_default(size=17);draw.text((x+123-int(draw.textlength(label,font=font))//2,y+54),label,fill=metal,font=font);continue
-            pokemon=party[index];image=self._open(data[index],(118,92),trim=True,upscale=True);canvas.paste(image,(x+123-image.width//2,y+104-image.height),image)
-            name=pokemon.nickname or SPECIES[pokemon.species_id].name;font=ImageFont.load_default(size=16);label=f"{name} · Lv.{pokemon.level}";draw.text((x+123-int(draw.textlength(label,font=font))//2,y+118),label,fill=(238,244,240),font=font)
+            pokemon=party[index];image=self._open(data[index],(112,84),trim=True,upscale=True);canvas.paste(image,(x+123-image.width//2,y+98-image.height),image)
+            name=pokemon.nickname or SPECIES[pokemon.species_id].name;font=ImageFont.load_default(size=13);label=f"{name} · Lv.{pokemon.level}";draw.text((x+31,y+111),label[:21],fill=(238,244,240),font=font)
+            maximum=pokemon_max_hp(pokemon);current=max(0,min(maximum,int(pokemon.current_hp)));hp=f"HP {current}/{maximum}";small=ImageFont.load_default(size=12);draw.text((x+31,y+124),hp,fill=(238,244,240),font=small)
         draw.rounded_rectangle((250,400,650,455),14,fill=(69,85,88),outline=ink,width=4)
         for index in range(7):draw.ellipse((278+index*48,418,292+index*48,432),fill=light if index<6 else (112,159,218),outline=ink,width=2)
         draw.rectangle((0,466,900,540),fill=(239,247,224),outline=ink,width=5)
