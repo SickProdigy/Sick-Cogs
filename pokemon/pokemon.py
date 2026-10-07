@@ -205,7 +205,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.51.0";__author__="SickProdigy"
+    __version__="0.51.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1172,7 +1172,13 @@ class Pokemon(commands.Cog):
             trade_id=int(await self.config.next_trade());await self.config.next_trade.set(trade_id+1);now=datetime.now(timezone.utc)
             record={"trade_id":trade_id,"state":"offered","offerer_id":ctx.author.id,"recipient_id":member.id,"offerer_name":ctx.author.display_name,"recipient_name":member.display_name,"offered_id":offered["instance_id"],"requested_id":requested["instance_id"],"offered_name":offered.get("nickname") or SPECIES[offered["species_id"]].name,"requested_name":requested.get("nickname") or SPECIES[requested["species_id"]].name,"offered_level":int(offered["level"]),"requested_level":int(requested["level"]),"offered_gender":offered.get("gender","unknown"),"requested_gender":requested.get("gender","unknown"),"offered_shiny":bool(offered.get("shiny",False)),"requested_shiny":bool(requested.get("shiny",False)),"created_at":now.isoformat(),"expires_at":(now+timedelta(seconds=TRADE_TIMEOUT_SECONDS)).isoformat(),"guild_id":ctx.guild.id,"channel_id":ctx.channel.id,"message_id":None}
             trades[str(trade_id)]=record;await self.config.trades.set(trades)
-        view=TradeView(self,trade_id,ctx.author.id,member.id);message=await ctx.send(content=member.mention,embed=self.trade_embed(record),view=view,allowed_mentions=discord.AllowedMentions(users=True,roles=False,everyone=False))
+        view=TradeView(self,trade_id,ctx.author.id,member.id)
+        try:message=await ctx.send(content=member.mention,embed=self.trade_embed(record),view=view,allowed_mentions=discord.AllowedMentions(users=True,roles=False,everyone=False))
+        except Exception:
+            async with self.lock("trades"):
+                trades=await self.config.trades();current=trades.get(str(trade_id))
+                if current and current.get("state")=="offered":current["state"]="delivery_failed";trades[str(trade_id)]=current;await self.config.trades.set(trades)
+            raise
         async with self.lock("trades"):
             trades=await self.config.trades();current=trades.get(str(trade_id))
             if current and current.get("state")=="offered":current["message_id"]=message.id;trades[str(trade_id)]=current;await self.config.trades.set(trades)
