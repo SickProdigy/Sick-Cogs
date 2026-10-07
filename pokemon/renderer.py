@@ -601,9 +601,24 @@ class BattleRenderer:
         return self._save(canvas)
 
     @staticmethod
+    def _center_attendant(canvas,origin=(830,4),scale=3):
+        rows=(
+            "       KKK       ","     KKWWWKK     ","    KWWWRWWWK    ","   KWWWRRRWWWK   ",
+            "   KPPPPPPPPPK   ","  KPPSSSSSSSPPK  ","  KPSSDSSSDSSPK  ","  KPSSSSSSSSSPK  ",
+            "   KSSSDSDSSSK   ","    KSSSSSSSK    ","    KPPSSSPPK    ","   KWWKSSSKWWK   ",
+            "  KWWWWRRRWWWWK  ","  KWWRWWRWWRWWK  ","   KWWRRRRRWWK   ","   KWWWWWWWWWK   ",
+            "    KKK KKK     ","    KWW KWW     ",
+        )
+        colors={"K":(40,48,61),"W":(245,242,226),"R":(202,52,70),"P":(222,112,139),"S":(242,191,151),"D":(57,59,66)}
+        pixels=ImageDraw.Draw(canvas);ox,oy=origin
+        for row,line in enumerate(rows):
+            for column,key in enumerate(line):
+                if key in colors:pixels.rectangle((ox+column*scale,oy+row*scale,ox+(column+1)*scale-1,oy+(row+1)*scale-1),fill=colors[key])
+
+    @staticmethod
     def pokemon_center_message(trainer_name,complete=False):
         trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer"
-        return f"{trainer}, your Pokemon are fighting fit!" if complete else f"Restoring {trainer}’s party… Please wait."
+        return f"{trainer}, your Pokemon are back to perfect health!" if complete else f"Restoring {trainer}’s party… Please wait."
 
     def _pokemon_center_sync(self,party,data,trainer_name,complete=False):
         canvas=Image.new("RGB",(900,540),(218,228,225));draw=ImageDraw.Draw(canvas);ink=(39,61,66);metal=(105,126,130);glass=(179,225,232);light=(72,196,117) if complete else (244,177,62)
@@ -619,6 +634,7 @@ class BattleRenderer:
             pokemon=party[index];image=self._open(data[index],(112,84),trim=True,upscale=True);canvas.paste(image,(x+123-image.width//2,y+98-image.height),image)
             name=pokemon.nickname or SPECIES[pokemon.species_id].name;font=ImageFont.load_default(size=13);label=f"{name} · Lv.{pokemon.level}";draw.text((x+31,y+111),label[:21],fill=(238,244,240),font=font)
             maximum=pokemon_max_hp(pokemon);current=max(0,min(maximum,int(pokemon.current_hp)));hp=f"HP {current}/{maximum}";small=ImageFont.load_default(size=12);draw.text((x+31,y+124),hp,fill=(238,244,240),font=small)
+        self._center_attendant(canvas)
         draw.rounded_rectangle((250,400,650,455),14,fill=(69,85,88),outline=ink,width=4)
         for index in range(7):draw.ellipse((278+index*48,418,292+index*48,432),fill=light if index<6 else (112,159,218),outline=ink,width=2)
         draw.rectangle((0,466,900,540),fill=(239,247,224),outline=ink,width=5)

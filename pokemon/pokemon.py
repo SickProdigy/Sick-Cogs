@@ -15,7 +15,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,CenterCollectView,TradeView,GymChallengeView,TradeCollectionView,ReleasePokemonView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,GymChallengeView,TradeCollectionView,ReleasePokemonView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -753,7 +753,7 @@ class Pokemon(commands.Cog):
 
     async def rendered_center(self,user,party,complete=False):
         trainer=getattr(user,"display_name",getattr(user,"name","Trainer"));title="Your party is fully restored!" if complete else "Healing your Pokémon…"
-        description="Collect your refreshed party when you are ready." if complete else f"The restoration cycle takes about {CENTER_TREATMENT_SECONDS} seconds."
+        description="Your Pokémon are back to perfect health." if complete else f"The restoration cycle takes about {CENTER_TREATMENT_SECONDS} seconds."
         embed=discord.Embed(title=title,description=description,color=discord.Color.green() if complete else discord.Color.gold())
         try:
             image=await self.renderer.pokemon_center(party,trainer,complete);embed.set_image(url="attachment://pokemon-center.png");return embed,[discord.File(image,filename="pokemon-center.png")]
@@ -1632,7 +1632,7 @@ class Pokemon(commands.Cog):
         embed,files=await self.rendered_center(ctx.author,before_party,False);message=await ctx.send(embed=embed,files=files)
         await asyncio.sleep(CENTER_TREATMENT_SECONDS)
         embed,files=await self.rendered_center(ctx.author,party,True)
-        try:await message.edit(embed=embed,attachments=files,view=CenterCollectView(ctx.author.id))
+        try:await message.edit(embed=embed,attachments=files)
         except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
 
     async def selected_pokedex_style(self,user):

@@ -81,20 +81,6 @@ class GymChallengeView(discord.ui.View):
     async def challenge(self,interaction,button):await self.cog.gym_challenge_interaction(interaction)
 
 
-class CenterCollectView(discord.ui.View):
-    def __init__(self,user_id):
-        super().__init__(timeout=180);self.user_id=user_id
-
-    async def interaction_check(self,interaction):
-        if interaction.user.id==self.user_id:return True
-        await interaction.response.send_message("This healed party belongs to another trainer.",ephemeral=True);return False
-
-    @discord.ui.button(label="Collect Party",emoji="✨",style=discord.ButtonStyle.success,custom_id="pokemon:center:collect")
-    async def collect(self,interaction,button):
-        name=getattr(interaction.user,"display_name","Trainer")
-        await interaction.response.edit_message(content=f"**{name}** collected their fully restored party.",view=None)
-
-
 class ReleasePokemonView(discord.ui.View):
     def __init__(self,cog,user_id,identity,name):
         super().__init__(timeout=120);self.cog=cog;self.user_id=user_id;self.identity=identity;self.name=name
