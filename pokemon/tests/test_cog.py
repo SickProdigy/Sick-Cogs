@@ -484,9 +484,19 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         current=battle();current.state="won"
         conf={"pokedex_caught":[1,2,3,4,5],"pokedex_stats":{"1":{"defeated":4}},"recorded_battles":[],"achievement_rewards":[],"balls":2,"items":{"potion":1}}
         cog=Pokemon.__new__(Pokemon);rewards=cog.record_battle_result(conf,current)
-        self.assertEqual((conf["balls"],conf["items"]["potion"]),(7,6))
-        self.assertEqual(set(conf["achievement_rewards"]),{"collection:5","victories:5"});self.assertEqual(len(rewards),2)
-        self.assertEqual(cog.record_battle_result(conf,current),[]);self.assertEqual((conf["balls"],conf["items"]["potion"]),(7,6))
+        self.assertEqual((conf["balls"],conf["items"]["potion"]),(11,6))
+        self.assertEqual(set(conf["achievement_rewards"]),{"collection:5","victories:5","type:grass:3","type:poison:3"});self.assertEqual(len(rewards),4)
+        self.assertEqual(cog.record_battle_result(conf,current),[]);self.assertEqual((conf["balls"],conf["items"]["potion"]),(11,6))
+
+    def test_encounter_and_type_specialist_goals_award_once(self):
+        conf={"pokedex_caught":[1,2,3],"pokedex_stats":{"1":{"battled":10}},"achievement_rewards":[],"balls":0,"items":{}}
+        rewards=Pokemon.grant_achievement_rewards(conf)
+        self.assertEqual(conf["balls"],7)
+        self.assertIn("encounters:10",conf["achievement_rewards"])
+        self.assertIn("type:grass:3",conf["achievement_rewards"])
+        self.assertIn("type:poison:3",conf["achievement_rewards"])
+        self.assertEqual(len(rewards),3)
+        self.assertEqual(Pokemon.grant_achievement_rewards(conf),[])
 
     async def test_battle_potion_consumes_inventory_and_wild_turn(self):
         current=battle();maximum=current.max_hp(current.player);current.player_hp=max(1,maximum-8);current.party_hp[current.player.instance_id]=current.player_hp
