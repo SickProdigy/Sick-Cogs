@@ -41,6 +41,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `giveaways` - Persistent button giveaways with core entry rules and weighted draws.
 - `gameroles` - Interactive, tightly scoped role delegation for game and clan communities.
 - `imagine` - Private, provider-neutral AI image generation with OpenAI and managed Codex support.
+- `icarus` - Official Icarus Steam announcements with category filters and card or article delivery.
 - `movies` - Configurable TMDb new movie release announcements.
 - `nsfw` - NSFW-channel-only mature media with configurable external providers.
 - `predictions` - Interactive server prediction games with optional fictional Red Bank stakes and staff-reviewed payouts.
