@@ -12,6 +12,7 @@ from .ai import DIFFICULTIES, advance_solo
 from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, match_result, render_battlefield, render_hand
 from .cards import BASE_CARDS, CARDS, starter
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
+from .collection import resolve_deck
 from .engine import Game, GameError
 from .views import CatalogDetailView, CatalogView, ChallengeView, CollectionDetailView, CollectionView, GameView, HandPaginationView, HistoryPaginationView, LibrarySearchView, NaturalSelectionView, PrivateHandDecisionView
 
@@ -24,7 +25,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.122.0"
+    __version__="0.122.1"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.config.register_user(**DEFAULT_PROFILE)
@@ -74,6 +75,12 @@ class MTG(commands.Cog):
         return profile
     def collection_card(self,key):
         return CARDS[key]
+    def resolve_saved_deck(self,profile,deck_id=None):
+        deck_id=deck_id or profile.get("active_deck",""); deck=profile.get("decks",{}).get(deck_id)
+        if not deck: raise GameError("That saved deck does not exist.")
+        resolved,errors=resolve_deck(deck.get("cards",{}),profile.get("collection",{}),CARDS)
+        if errors: raise GameError("Deck is invalid: "+"; ".join(errors))
+        return resolved
     async def collection_records(self,user_id):
         profile=await self.player_profile(user_id)
         records=[(key,int(count)) for key,count in profile.get("collection",{}).items() if key in CARDS and int(count)>0]
