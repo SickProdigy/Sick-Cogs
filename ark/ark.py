@@ -73,7 +73,7 @@ class ArkAnnouncements(commands.Cog):
     """Publish official ARK: Survival Ascended Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.0"
+    __version__ = "1.1.1"
 
     default_guild = {
         "enabled": False,
@@ -364,7 +364,13 @@ class ArkAnnouncements(commands.Cog):
     @commands.group(name="ark", invoke_without_command=True)
     @commands.guild_only()
     async def ark(self, ctx: commands.Context):
-        """View the latest official ARK: Survival Ascended announcement."""
+        """Browse official ARK: Survival Ascended Steam announcements.
+
+        Quick setup for server administrators and owners:
+        `[p]arkset channel #updates`
+        `[p]arkset mode card` (or `article`)
+        `[p]arkset autopost start`
+        """
         await ctx.invoke(self.ark_latest)
 
     @ark.command(name="updates")

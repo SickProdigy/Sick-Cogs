@@ -1,5 +1,7 @@
 import unittest
 
+from ark.ark import ArkAnnouncements
+
 from ark.client import (
     classify_news,
     extract_image,
@@ -14,6 +16,12 @@ from ark.client import (
 
 
 class ArkClientTests(unittest.TestCase):
+    def test_public_help_includes_quick_setup(self):
+        help_text = ArkAnnouncements.ark.help
+        self.assertIn("[p]arkset channel #updates", help_text)
+        self.assertIn("[p]arkset mode card", help_text)
+        self.assertIn("[p]arkset autopost start", help_text)
+
     def test_classifies_community_before_embedded_update_words(self):
         item = {"title": "Community Crunch 500: Update Preview", "contents": "A patch is coming."}
         self.assertEqual(classify_news(item), "community")
