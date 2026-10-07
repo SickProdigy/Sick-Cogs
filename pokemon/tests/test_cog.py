@@ -556,6 +556,13 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         embed,files=await cog.rendered_trainer_card(user,conf)
         self.assertIn("VIP Trainer Profile",embed.title);self.assertIn("SickGaming VIP",embed.description);self.assertTrue(cog.renderer.trainer_card.await_args.args[1]["vip"]);self.assertEqual(len(files),1)
 
+    async def test_bag_command_uses_trainer_name(self):
+        section=StoredSection({"balls":8,"items":{"great_ball":6,"ultra_ball":1,"potion":10,"revive":2}})
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section)
+        ctx=SimpleNamespace(author=SimpleNamespace(display_name="SickProdigy"),send=AsyncMock())
+        await Pokemon.pokemon_bag.callback(cog,ctx)
+        text=ctx.send.await_args.args[0];self.assertTrue(text.startswith("**SickProdigy’s Poke Bag**"));self.assertIn("Great Ball: **6**",text)
+
     async def test_owner_reset_requires_confirmation_and_releases_battle(self):
         section=StoredSection({"collection":[{"instance_id":"starter"}],"starter_chosen":True})
         encounters=StoredEncounters();encounters.value={"9":{"guild_id":1,"channel_id":55,"message_id":99,"battle":{"user_id":42,"encounter_id":9}}}
