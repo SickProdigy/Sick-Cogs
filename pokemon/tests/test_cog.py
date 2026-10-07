@@ -597,14 +597,21 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_timer_under_one_hour_is_bot_owner_only(self):
         cog=Pokemon.__new__(Pokemon);cog.bot=SimpleNamespace(is_owner=AsyncMock(return_value=False));ctx=SimpleNamespace(author=SimpleNamespace(id=7),send=AsyncMock())
         await Pokemon.spawn_timer.callback(cog,ctx,59)
-        ctx.send.assert_awaited_once_with("Use 60–10080 minutes; only the bot owner may use 30–59.")
+        ctx.send.assert_awaited_once_with("Use 60–10080 minutes; only the bot owner may use 10–59.")
 
         timer=StoredValue(60);next_spawn=StoredValue(None);mode=StoredValue("timed");section=SimpleNamespace(timer_minutes=timer,next_spawn_at=next_spawn,spawn_mode=mode)
         cog.bot.is_owner=AsyncMock(return_value=True);cog.config=SimpleNamespace(guild=lambda guild:section)
         owner_ctx=SimpleNamespace(author=SimpleNamespace(id=1),guild=SimpleNamespace(id=42),send=AsyncMock())
-        await Pokemon.spawn_timer.callback(cog,owner_ctx,30)
-        self.assertEqual(timer.value,30);self.assertIsNotNone(next_spawn.value)
-        self.assertIn("every 30 minutes",owner_ctx.send.await_args.args[0])
+        await Pokemon.spawn_timer.callback(cog,owner_ctx,10)
+        self.assertEqual(timer.value,10);self.assertIsNotNone(next_spawn.value)
+        self.assertIn("every 10 minutes",owner_ctx.send.await_args.args[0])
+
+    async def test_bot_owner_can_set_two_minute_encounter_lifetime(self):
+        timeout=StoredValue(900);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(encounter_timeout=timeout)
+        ctx=SimpleNamespace(send=AsyncMock())
+        await Pokemon.encounter_time.callback(cog,ctx,2)
+        self.assertEqual(timeout.value,120)
+        ctx.send.assert_awaited_once_with("Global wild encounter lifetime set to 2 minutes.")
 
     async def test_forced_shiny_spawn_is_bot_owner_only(self):
         conf={"active_encounter":None,"last_spawn_at":None}
