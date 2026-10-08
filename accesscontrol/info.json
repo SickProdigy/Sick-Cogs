@@ -13,5 +13,5 @@
   "short": "Central bot and premium feature access policy.",
   "tags": ["access", "permissions", "roles", "vip", "entitlements"],
   "type": "COG",
-  "version": "0.2.0"
+  "version": "0.2.1"
 }

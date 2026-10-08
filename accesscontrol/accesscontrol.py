@@ -34,7 +34,7 @@ class AccessControl(commands.Cog):
     """Central guild and feature entitlement policy for Sick-Cogs."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
     def __init__(self, bot):
         self.bot = bot

@@ -1,6 +1,6 @@
 import unittest
 
-from AccessControl.policy import (
+from accesscontrol.policy import (
     command_capability,
     evaluate_capability,
     normalize_capability,

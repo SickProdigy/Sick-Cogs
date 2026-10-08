@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from redbot.core import commands
 
-from AccessControl.accesscontrol import AccessControl, CONFIG_SCHEMA_VERSION
+from accesscontrol.accesscontrol import AccessControl, CONFIG_SCHEMA_VERSION
 
 
 class Value:
