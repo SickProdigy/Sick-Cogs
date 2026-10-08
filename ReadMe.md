@@ -57,6 +57,7 @@ Current develop experiments include:
 - `tickets` — private text-channel support with persistent staff controls.
 - `advancedhelp` — audience-first, permission-filtered interactive Red help.
 - `codex` — private manual Codex allowance-cycle reminders.
+- `botupdates` — collaborative, human-approved bot update announcements.
 - `twitter` — native X API post announcements.
 - `mtg` — experimental persistent two-player Magic rules prototype.
 - `yugioh` — experimental persistent two-player Yu-Gi-Oh rules prototype.

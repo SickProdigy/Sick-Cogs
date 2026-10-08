@@ -1,0 +1,17 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Create bot-branded update drafts from project and upstream references, collect trusted human edits, require final approval, and publish to subscribed servers.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores configured editor and publisher user IDs, proposal author IDs and text, approval history, guild channel and optional role IDs, source references, and delivery history. User-data deletion removes configured access and anonymizes retained draft history.",
+  "hidden": false,
+  "install_msg": "BotUpdates is disabled for delivery until each server subscribes. Configure a private review channel and trusted editors before publishing.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 8, 0],
+  "name": "BotUpdates",
+  "permissions": ["embed_links", "send_messages"],
+  "requirements": [],
+  "short": "Human-reviewed bot update announcements.",
+  "tags": ["updates", "announcements", "changelog", "collaboration"],
+  "type": "COG",
+  "version": "0.1.0"
+}
