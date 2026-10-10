@@ -1,11 +1,15 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from meme.meme import Meme
+from meme.models import MemeResult
 
 
 class MemeFeedReconciliationTests(unittest.TestCase):
+    def test_automatic_feeds_default_to_silent(self):
+        self.assertTrue(Meme.default_guild["feed_silent"])
+
     def test_create_new_feed(self):
         feeds = {}
 
@@ -101,6 +105,34 @@ class MemeFeedReconciliationTests(unittest.TestCase):
         self.assertEqual(set(feeds), {"1", "2", "3"})
         self.assertEqual(feeds["2"]["channel_id"], 11)
         self.assertEqual(feeds["3"]["source"], "gaming")
+
+
+class MemeDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_notification_command_sets_server_preference(self):
+        value = SimpleNamespace(set=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(guild=lambda guild: SimpleNamespace(feed_silent=value))
+        )
+        ctx = SimpleNamespace(guild=object(), send=AsyncMock())
+
+        await Meme.memeset_notifications.callback(cog, ctx, "normal")
+
+        value.set.assert_awaited_once_with(False)
+        self.assertIn("normal", ctx.send.await_args.args[0])
+
+    async def test_sender_supports_silent_and_normal_delivery(self):
+        channel = SimpleNamespace(send=AsyncMock())
+        result = MemeResult(
+            title="Example", media_url="https://example.com/meme.jpg",
+            source_url="https://example.com/source", provider="test",
+        )
+
+        await Meme._send(channel, result, silent=True)
+        self.assertTrue(channel.send.await_args.kwargs["silent"])
+
+        channel.send.reset_mock()
+        await Meme._send(channel, result)
+        self.assertFalse(channel.send.await_args.kwargs["silent"])
 
 
 if __name__ == "__main__":

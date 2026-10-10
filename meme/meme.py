@@ -26,12 +26,13 @@ class Meme(commands.Cog):
     """Find online memes and GIFs and publish scheduled feeds."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.1"
+    __version__ = "1.0.2"
+    default_guild = {"feeds": {}, "seen": [], "feed_silent": True}
 
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=927440181113, force_registration=True)
-        self.config.register_guild(feeds={}, seen=[])
+        self.config.register_guild(**self.default_guild)
         self.session: Optional[aiohttp.ClientSession] = None
         self.reddit: Optional[RedditProvider] = None
         self.meme_api: Optional[MemeApiProvider] = None
@@ -107,7 +108,7 @@ class Meme(commands.Cog):
         return choose_result(results, seen)
 
     @staticmethod
-    async def _send(channel, result: MemeResult):
+    async def _send(channel, result: MemeResult, *, silent: bool = False):
         embed = discord.Embed(
             title=result.title[:256],
             url=result.source_url,
@@ -117,7 +118,11 @@ class Meme(commands.Cog):
         embed.set_image(url=result.media_url)
         footer = result.provider + (f" · {result.author}" if result.author else "")
         embed.set_footer(text=footer[:2048])
-        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        await channel.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+            silent=silent,
+        )
 
     async def _run_interactive(self, ctx, provider: str, source="", query=""):
         async with ctx.typing():
@@ -197,6 +202,22 @@ class Meme(commands.Cog):
 
         Use `[p]memeset feed` for advanced providers and feed management.
         """
+
+    @memeset.command(name="notifications", aliases=["notify"])
+    async def memeset_notifications(self, ctx, mode: str):
+        """Choose silent or normal delivery for automatic meme feeds."""
+        mode = mode.casefold()
+        if mode not in {"silent", "normal"}:
+            await ctx.send("Choose `silent` or `normal`.")
+            return
+        silent = mode == "silent"
+        await self.config.guild(ctx.guild).feed_silent.set(silent)
+        detail = (
+            "Automatic meme posts will remain visible without push or desktop notifications."
+            if silent
+            else "Automatic meme posts will use Discord’s normal channel notification behavior."
+        )
+        await ctx.send(f"Meme feed delivery is now **{mode}**. {detail}")
 
     @memeset.group(name="feed")
     async def memeset_feed(self, ctx):
@@ -348,7 +369,8 @@ class Meme(commands.Cog):
         self, ctx, channel: Optional[discord.TextChannel] = None,
     ):
         """Show Meme API feed IDs, sources, destinations, intervals, and state."""
-        feeds = await self.config.guild(ctx.guild).feeds()
+        group = self.config.guild(ctx.guild)
+        feeds, feed_silent = await asyncio.gather(group.feeds(), group.feed_silent())
         destination = channel
         matches = [
             (feed_id, feed) for feed_id, feed in feeds.items()
@@ -364,7 +386,8 @@ class Meme(commands.Cog):
             f"{'ON' if feed.get('enabled', True) else 'OFF'}"
             for feed_id, feed in matches
         ]
-        await ctx.send("**Meme autopost status**\n" + "\n".join(lines))
+        delivery = "silent" if feed_silent else "normal"
+        await ctx.send(f"**Meme autopost status** · Delivery: **{delivery}**\n" + "\n".join(lines))
 
     @memeset.command(name="gifpost")
     async def memeset_gifpost(
@@ -418,7 +441,8 @@ class Meme(commands.Cog):
     @memeset_feed.command(name="list")
     async def feed_list(self, ctx):
         """List configured feeds."""
-        feeds = await self.config.guild(ctx.guild).feeds()
+        group = self.config.guild(ctx.guild)
+        feeds, feed_silent = await asyncio.gather(group.feeds(), group.feed_silent())
         if not feeds:
             await ctx.send("No meme feeds are configured.")
             return
@@ -429,7 +453,8 @@ class Meme(commands.Cog):
                 f"`{feed_id}` <#{feed['channel_id']}> · {feed['provider']} "
                 f"`{feed['source']}` · every {minutes}m · {'ON' if feed.get('enabled', True) else 'OFF'}"
             )
-        await ctx.send("**Meme feeds**\n" + "\n".join(lines))
+        delivery = "silent" if feed_silent else "normal"
+        await ctx.send(f"**Meme feeds** · Delivery: **{delivery}**\n" + "\n".join(lines))
 
     @tasks.loop(minutes=5)
     async def feed_loop(self):
@@ -442,7 +467,9 @@ class Meme(commands.Cog):
                 if guild is None:
                     continue
                 group = self.config.guild_from_id(guild_id)
-                feeds, seen_list = await asyncio.gather(group.feeds(), group.seen())
+                feeds, seen_list, feed_silent = await asyncio.gather(
+                    group.feeds(), group.seen(), group.feed_silent()
+                )
                 seen = set(seen_list)
                 changed = False
                 for feed in feeds.values():
@@ -456,7 +483,7 @@ class Meme(commands.Cog):
                             channel, feed.get("provider", "memeapi"),
                             feed.get("source", ""), seen=seen,
                         )
-                        await self._send(channel, result)
+                        await self._send(channel, result, silent=feed_silent)
                     except (
                         ProviderError, aiohttp.ClientError, asyncio.TimeoutError,
                         discord.HTTPException,
