@@ -32,13 +32,14 @@ Simple Meme API setup:
 [p]memeset autopost
 [p]memeset autopost #memes pcmasterrace 180
 [p]memeset autopost status
+[p]memeset notifications silent
 [p]memeset autopost off #memes pcmasterrace
 ```
 
 The optional Discord destination defaults to the current channel, the subreddit source defaults to
 `memes`, and the interval defaults to 360 minutes (six hours). Repeating an identical destination and
 source turns that feed off; supplying a different interval updates it in place. `autopost status`
-shows feed IDs, sources, destination channels, intervals, and enabled state. You can also use
+shows feed IDs, sources, destination channels, intervals, enabled state, and the server-wide delivery mode. Automatic feeds default to silent delivery; administrators can choose `silent` or `normal` with `[p]memeset notifications <silent|normal>`. Manual meme commands are unaffected. You can also use
 `[p]memeset feed list` and `[p]memeset feed remove <feed-id>` for direct feed management.
 
 Simple animated Imgur setup:
