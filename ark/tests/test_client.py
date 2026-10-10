@@ -1,4 +1,8 @@
 import unittest
+from unittest.mock import AsyncMock, Mock, patch
+
+from ark import setup
+from ark.ark import Ark, CONFIG_IDENTIFIER, LEGACY_CONFIG_COG_NAME
 
 from ark.client import (
     classify_news,
@@ -14,6 +18,22 @@ from ark.client import (
 
 
 class ArkClientTests(unittest.TestCase):
+    def test_neutral_identity_keeps_legacy_config_namespace(self):
+        config = Mock()
+        with (
+            patch("ark.ark.Config.get_conf", return_value=config) as get_conf,
+            patch("discord.ext.tasks.Loop.start"),
+        ):
+            cog = Ark(Mock())
+        self.assertEqual(type(cog).__name__, "Ark")
+        get_conf.assert_called_once_with(
+            cog,
+            identifier=CONFIG_IDENTIFIER,
+            force_registration=True,
+            cog_name=LEGACY_CONFIG_COG_NAME,
+        )
+        self.assertEqual(LEGACY_CONFIG_COG_NAME, "ArkAnnouncements")
+
     def test_classifies_community_before_embedded_update_words(self):
         item = {"title": "Community Crunch 500: Update Preview", "contents": "A patch is coming."}
         self.assertEqual(classify_news(item), "community")
@@ -151,6 +171,19 @@ class ArkClientTests(unittest.TestCase):
             {"gid": "2", "date": 20},
         ]
         self.assertEqual([item["gid"] for item in new_items(items, ["1"])], ["2", "3"])
+
+
+class ArkSetupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_setup_adds_neutral_cog(self):
+        bot = Mock(add_cog=AsyncMock())
+        config = Mock()
+        with (
+            patch("ark.ark.Config.get_conf", return_value=config),
+            patch("discord.ext.tasks.Loop.start"),
+        ):
+            await setup(bot)
+        bot.add_cog.assert_awaited_once()
+        self.assertIsInstance(bot.add_cog.await_args.args[0], Ark)
 
 
 if __name__ == "__main__":

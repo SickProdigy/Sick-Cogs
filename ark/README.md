@@ -1,4 +1,4 @@
-# ARK: Survival Ascended Announcements
+# ARK: Survival Ascended
 
 Publish new official ARK: Survival Ascended Steam announcements in Discord. It does not use RCON, query game servers, or require an API key.
 
@@ -38,6 +38,10 @@ posts use the `official` classification and are delivered when `all` is selected
 These are content filters assigned by the bot from each post’s title and text. They are not Steam’s own
 publication badges. Steam separately labels posts as Regular Update, Major Update, Patch Notes, and
 In-Game Event; a Steam Regular Update is not necessarily a hotfix.
+
+## Updating or removing
+
+Version 1.1.3 changes Red's displayed cog name from `ArkAnnouncements` to `Ark` without changing the `ark` install package, commands, or saved configuration. A normal `[p]cog update` followed by `[p]reload ark` keeps automatic posting enabled and retains channels, roles, categories, and posted-item history. Use `[p]unload ark` to stop the cog while leaving it installed, or `[p]cog uninstall ark` to remove its installed code. Persistent Red data is intentionally retained unless it is deleted separately.
 
 ## Commands
 

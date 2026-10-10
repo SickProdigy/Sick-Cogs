@@ -7,10 +7,10 @@
     "install_msg": "Set an announcement channel with `[p]icarusset channel #channel`, choose `[p]icarusset mode card` or `[p]icarusset mode article`, optionally set a notification role, then start automatic posting with `[p]icarusset autopost start`. Existing Steam posts are seeded during setup and will not flood the channel.",
     "min_bot_version": "3.5.0",
     "permissions": ["embed_links", "attach_files"],
-    "name": "IcarusAnnouncements",
+    "name": "Icarus",
     "requirements": ["Pillow>=12.0,<13"],
     "short": "Official Icarus Steam announcements",
     "tags": ["icarus", "steam", "updates", "notifications", "games"],
     "type": "COG",
-    "version": "1.0.0"
+    "version": "1.0.1"
 }
