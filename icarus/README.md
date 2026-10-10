@@ -40,7 +40,7 @@ In-Game Event; a Steam label is not used as the bot category.
 
 ## Updating or removing
 
-Version 1.0.1 changes Red's displayed cog name from `IcarusAnnouncements` to `Icarus` without changing the `icarus` install package, commands, or saved configuration. A normal `[p]cog update` followed by `[p]reload icarus` keeps automatic posting enabled and retains channels, roles, categories, and posted-item history. Use `[p]unload icarus` to stop the cog while leaving it installed, or `[p]cog uninstall icarus` to remove its installed code. Persistent Red data is intentionally retained unless it is deleted separately.
+Version 1.0.2 completes the identity change by copying existing guild settings from `IcarusAnnouncements` into the active `Icarus` Config namespace before polling starts. The migration is restart-safe and leaves the old folder untouched as a recovery copy; future writes use `cogs/Icarus/settings.json`. A normal `[p]cog update` followed by `[p]reload icarus` retains channels, roles, categories, and posted-item history. Use `[p]unload icarus` to stop the cog while leaving it installed, or `[p]cog uninstall icarus` to remove its installed code. Persistent Red data is retained unless it is deleted separately.
 
 ## Commands
 
