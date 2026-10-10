@@ -1,4 +1,4 @@
-# Icarus Announcements
+# Icarus
 
 Publish new official Icarus Steam announcements in Discord. It does not use RCON, query game servers, or require an API key.
 
@@ -37,6 +37,10 @@ posts use the `official` classification and are delivered when `all` is selected
 These are content filters assigned by the bot from each post’s title and text. They are not Steam’s own
 publication badges. Steam may separately label posts as Regular Update, Major Update, Patch Notes, and
 In-Game Event; a Steam label is not used as the bot category.
+
+## Updating or removing
+
+Version 1.0.1 changes Red's displayed cog name from `IcarusAnnouncements` to `Icarus` without changing the `icarus` install package, commands, or saved configuration. A normal `[p]cog update` followed by `[p]reload icarus` keeps automatic posting enabled and retains channels, roles, categories, and posted-item history. Use `[p]unload icarus` to stop the cog while leaving it installed, or `[p]cog uninstall icarus` to remove its installed code. Persistent Red data is intentionally retained unless it is deleted separately.
 
 ## Commands
 

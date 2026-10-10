@@ -1,6 +1,8 @@
 import unittest
+from unittest.mock import AsyncMock, Mock, patch
 
-from dayz.dayz import DayZAnnouncements
+from dayz import setup
+from dayz.dayz import CONFIG_IDENTIFIER, LEGACY_CONFIG_COG_NAME, DayZ
 
 from dayz.client import (
     classify_news,
@@ -17,8 +19,24 @@ from dayz.client import (
 
 
 class DayZClientTests(unittest.TestCase):
+    def test_neutral_identity_keeps_legacy_config_namespace(self):
+        config = Mock()
+        with (
+            patch("dayz.dayz.Config.get_conf", return_value=config) as get_conf,
+            patch("discord.ext.tasks.Loop.start"),
+        ):
+            cog = DayZ(Mock())
+        self.assertEqual(type(cog).__name__, "DayZ")
+        get_conf.assert_called_once_with(
+            cog,
+            identifier=CONFIG_IDENTIFIER,
+            force_registration=True,
+            cog_name=LEGACY_CONFIG_COG_NAME,
+        )
+        self.assertEqual(LEGACY_CONFIG_COG_NAME, "DayZAnnouncements")
+
     def test_public_help_includes_quick_setup(self):
-        help_text = DayZAnnouncements.dayz.help
+        help_text = DayZ.dayz.help
         self.assertIn("[p]dayzset channel #updates", help_text)
         self.assertIn("[p]dayzset mode card", help_text)
         self.assertIn("[p]dayzset autopost start", help_text)
@@ -186,6 +204,19 @@ class DayZClientTests(unittest.TestCase):
             {"gid": "2", "date": 20},
         ]
         self.assertEqual([item["gid"] for item in new_items(items, ["1"])], ["2", "3"])
+
+
+class DayZSetupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_setup_adds_neutral_cog(self):
+        bot = Mock(add_cog=AsyncMock())
+        config = Mock()
+        with (
+            patch("dayz.dayz.Config.get_conf", return_value=config),
+            patch("discord.ext.tasks.Loop.start"),
+        ):
+            await setup(bot)
+        bot.add_cog.assert_awaited_once()
+        self.assertIsInstance(bot.add_cog.await_args.args[0], DayZ)
 
 
 if __name__ == "__main__":

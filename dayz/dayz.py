@@ -32,8 +32,9 @@ from .client import (
 )
 
 
-log = logging.getLogger("red.sick-cogs.DayZAnnouncements")
+log = logging.getLogger("red.sick-cogs.DayZ")
 CONFIG_IDENTIFIER = 620261007221100250
+LEGACY_CONFIG_COG_NAME = "DayZAnnouncements"
 DEFAULT_CATEGORIES = ["all"]
 MIN_INTERVAL_MINUTES = 5
 MAX_INTERVAL_MINUTES = 1440
@@ -69,11 +70,11 @@ def due(last_poll_at: Optional[str], interval_minutes: int) -> bool:
     return utc_now() >= parsed + datetime.timedelta(minutes=interval_minutes)
 
 
-class DayZAnnouncements(commands.Cog):
+class DayZ(commands.Cog):
     """Publish official DayZ Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.0.1"
 
     default_guild = {
         "enabled": False,
@@ -89,7 +90,12 @@ class DayZAnnouncements(commands.Cog):
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=CONFIG_IDENTIFIER, force_registration=True)
+        self.config = Config.get_conf(
+            self,
+            identifier=CONFIG_IDENTIFIER,
+            force_registration=True,
+            cog_name=LEGACY_CONFIG_COG_NAME,
+        )
         self.config.register_guild(**self.default_guild)
         self.session: Optional[aiohttp.ClientSession] = None
         self._poll_locks = {}

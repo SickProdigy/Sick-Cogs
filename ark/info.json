@@ -7,10 +7,10 @@
     "install_msg": "Set an announcement channel with `[p]arkset channel #channel`, choose `[p]arkset mode card` or `[p]arkset mode article`, optionally set a notification role, then start automatic posting with `[p]arkset autopost start`. Existing Steam posts are seeded during setup and will not flood the channel.",
     "min_bot_version": "3.5.0",
     "permissions": ["embed_links", "attach_files"],
-    "name": "ArkAnnouncements",
+    "name": "Ark",
     "requirements": ["Pillow>=12.0,<13"],
     "short": "Official ARK: Survival Ascended Steam announcements",
     "tags": ["ark", "steam", "updates", "notifications", "games"],
     "type": "COG",
-    "version": "1.1.0"
+    "version": "1.1.3"
 }

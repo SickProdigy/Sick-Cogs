@@ -1,10 +1,10 @@
 from redbot.core.utils import get_end_user_data_statement
 
-from .dayz import DayZAnnouncements
+from .dayz import DayZ
 
 
 __red_end_user_data_statement__ = get_end_user_data_statement(__file__)
 
 
 async def setup(bot):
-    await bot.add_cog(DayZAnnouncements(bot))
+    await bot.add_cog(DayZ(bot))
