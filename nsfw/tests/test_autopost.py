@@ -141,6 +141,27 @@ class NsfwAutopostTests(unittest.IsolatedAsyncioTestCase):
     def test_minimum_interval_is_sensible(self):
         self.assertEqual(MIN_AUTOPOST_MINUTES, 30)
 
+    async def test_scheduled_sender_can_suppress_notifications(self):
+        sent = []
+
+        async def send(**kwargs):
+            sent.append(kwargs)
+
+        channel = SimpleNamespace(send=send)
+        await Core._send_autopost(channel, "payload", silent=True)
+        self.assertTrue(sent[0]["silent"])
+        self.assertEqual(sent[0]["content"], "payload")
+
+    async def test_preview_sender_defaults_to_normal_delivery(self):
+        sent = []
+
+        async def send(**kwargs):
+            sent.append(kwargs)
+
+        channel = SimpleNamespace(send=send)
+        await Core._send_autopost(channel, "payload")
+        self.assertFalse(sent[0]["silent"])
+
     async def test_bare_autopost_opens_help_instead_of_configuring(self):
         shown = []
 
