@@ -983,14 +983,16 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         interaction.response.send_message.assert_awaited_once_with("Poké Balls cannot be used in a Gym battle.",ephemeral=True)
 
     async def test_server_settings_lists_channels_and_spawn_progress(self):
-        conf={"enabled":True,"channels":[10,20],"center_channel":30,"threshold_min":8,"threshold_max":15,"threshold":12,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"active_encounter":None,"activity":0,"pace":"normal","battle_timeout":1800,"spawn_mode":"activity"}
-        policy={"minimum_threshold":8,"minimum_cooldown":120,"allowed_generations":[1],"encounter_timeout":900,"rarity_profile":"friendly","allow_special_species":False}
+        conf={"enabled":True,"channels":[10,20],"center_channel":30,"max_active_encounters":4,"concurrency_owner_override":False,"threshold_min":8,"threshold_max":15,"threshold":12,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"active_encounter":None,"activity":0,"pace":"normal","battle_timeout":1800,"spawn_mode":"activity"}
+        policy={"minimum_threshold":8,"minimum_cooldown":120,"maximum_concurrency":2,"allowed_generations":[1],"encounter_timeout":900,"rarity_profile":"friendly","allow_special_species":False}
         cog=Pokemon.__new__(Pokemon);cog.activity={42:5};cog.config=SimpleNamespace(guild=lambda guild:StoredSection(conf),all=AsyncMock(return_value=policy))
         ctx=SimpleNamespace(guild=SimpleNamespace(id=42,get_role=lambda role_id:None),send=AsyncMock())
         await Pokemon.spawn_status.callback(cog,ctx)
         message=ctx.send.await_args.args[0]
         self.assertIn("Spawn channels: <#10>, <#20>",message)
         self.assertIn("Activity: **5/12**",message)
+        self.assertIn("Concurrency limit: **2** (server selected 4; bot-wide ceiling 2)",message)
+        self.assertIn("Active encounters: **0/2**",message)
         self.assertIn("Needs 7 more activity points",message)
         self.assertIn("Rarity: **friendly**",message)
         self.assertIn("Expired unattended cards: **delete**",message)
