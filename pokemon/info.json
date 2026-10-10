@@ -4,7 +4,7 @@
   "disabled": false,
   "end_user_data_statement": "This cog stores Discord user IDs, globally owned Pokémon, party selections, inventory counts, persistent Pokémon health/status, badges, healing-item counts, catch provenance, Pokédex and trainer-card display preferences, active battles, restart-safe trade journals, and guild/channel spawn and Pokémon Center configuration. User deletion removes the requesting user’s collection and active encounters, cancels pending trade offers, and preserves any already-completed transfer.",
   "hidden": false,
-  "install_msg": "Configure an opt-in channel with `[p]pokemon set channel #channel`, then choose a starter with `[p]pokemon starter bulbasaur`. This is an unofficial noncommercial prototype.",
+  "install_msg": "Configure an opt-in channel with `[p]pokemonset channel #channel`, then choose a starter with `[p]pokemon starter bulbasaur`. This is an unofficial noncommercial game.",
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 9, 0],
   "name": "Pokemon",
@@ -13,5 +13,5 @@
   "short": "Global Pokémon catching and wild battles",
   "tags": ["pokemon", "games", "collecting", "battles"],
   "type": "COG",
-  "version": "1.0.0"
+  "version": "1.1.0"
 }
