@@ -1054,7 +1054,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_spawn_profiles_apply_values_and_owner_overrides(self):
         self.assertEqual(SPAWN_PROFILES["active"],{"timer_minutes":10,"encounter_minutes":5,"battle_minutes":15,"concurrency":3})
         self.assertEqual(SPAWN_PROFILES["balanced"],{"timer_minutes":30,"encounter_minutes":15,"battle_minutes":15,"concurrency":2})
-        self.assertEqual(SPAWN_PROFILES["relaxed"],{"timer_minutes":120,"encounter_minutes":20,"battle_minutes":20,"concurrency":1})
+        self.assertEqual(SPAWN_PROFILES["relaxed"],{"timer_minutes":60,"encounter_minutes":20,"battle_minutes":20,"concurrency":1})
         conf={**GUILD};section=StoredSection(conf);policy={"minimum_timer":15,"maximum_concurrency":5,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900}
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section,all=AsyncMock(return_value=policy));ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
         await Pokemon.spawn_profile.callback(cog,ctx,"balanced")

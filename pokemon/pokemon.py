@@ -60,7 +60,7 @@ OWNER_TIMER_MINUTES=(1,10080)
 SPAWN_PROFILES={
     "active":{"timer_minutes":10,"encounter_minutes":5,"battle_minutes":15,"concurrency":3},
     "balanced":{"timer_minutes":30,"encounter_minutes":15,"battle_minutes":15,"concurrency":2},
-    "relaxed":{"timer_minutes":120,"encounter_minutes":20,"battle_minutes":20,"concurrency":1},
+    "relaxed":{"timer_minutes":60,"encounter_minutes":20,"battle_minutes":20,"concurrency":1},
 }
 COLLECTION_PAGE_SIZE=9
 RECENT_TRAINER_SECONDS=3600
