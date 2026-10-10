@@ -33,7 +33,7 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.6.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.6.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
 BLAST_HISTORY_LIMIT = 100
@@ -61,7 +61,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.6.0"
+    __version__ = "1.6.1"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -89,6 +89,7 @@ class RocketLeague(commands.Cog):
             clip_channel_id=None,
             clip_enabled=False,
             clip_sources=[],
+            clip_silent=True,
             clip_interval=CLIP_DEFAULT_INTERVAL,
             clip_max_length=CLIP_DEFAULT_MAX_LENGTH,
             clip_last_post=0,
@@ -724,7 +725,9 @@ class RocketLeague(commands.Cog):
         )
         return source, self._preferred_clip(clips)
 
-    async def _post_clip_for_guild(self, guild, *, force_refresh: bool = False) -> dict:
+    async def _post_clip_for_guild(
+        self, guild, *, force_refresh: bool = False, automatic: bool = False
+    ) -> dict:
         settings = await self.config.guild(guild).all()
         channel_id = settings.get("clip_channel_id")
         channel = guild.get_channel(int(channel_id)) if channel_id else None
@@ -734,6 +737,7 @@ class RocketLeague(commands.Cog):
         await channel.send(
             str(clip.get("url") or ""),
             allowed_mentions=discord.AllowedMentions.none(),
+            silent=bool(settings.get("clip_silent", True)) if automatic else False,
         )
         history = list(settings.get("clip_posted") or [])
         history.append(clip_identity(clip))
@@ -755,7 +759,7 @@ class RocketLeague(commands.Cog):
             if next_post and next_post > now:
                 continue
             try:
-                await self._post_clip_for_guild(guild)
+                await self._post_clip_for_guild(guild, automatic=True)
             except (ClipSourceError, discord.Forbidden, discord.HTTPException) as exc:
                 log.warning("Automatic clip post failed for guild %s: %s", guild.id, exc)
                 await self.config.guild(guild).clip_next_post.set(now + CLIP_CACHE_INTERVAL)
@@ -1657,6 +1661,21 @@ class RocketLeague(commands.Cog):
         await self.config.guild(ctx.guild).clip_next_post.set(self._next_clip_post(seconds))
         await ctx.send(f"Automatic clips will post about every **{hours} hour{'s' if hours != 1 else ''}**.")
 
+    @rocketleagueset_clips.command(name="notifications", aliases=["notify"])
+    async def rocketleagueset_clips_notifications(self, ctx: commands.Context, mode: str):
+        """Choose silent or normal delivery for automatic clip posts."""
+        mode = mode.casefold()
+        if mode not in {"silent", "normal"}:
+            await ctx.send("Choose `silent` or `normal`.")
+            return
+        await self.config.guild(ctx.guild).clip_silent.set(mode == "silent")
+        detail = (
+            "Automatic clips remain visible without push or desktop notifications."
+            if mode == "silent"
+            else "Automatic clips use Discord’s normal channel notification behavior."
+        )
+        await ctx.send(f"Rocket League clip delivery is now **{mode}**. {detail}")
+
     @rocketleagueset_clips.command(name="maxlength")
     async def rocketleagueset_clips_maxlength(
         self, ctx: commands.Context, seconds: commands.Range[int, 15, 600]
@@ -1697,10 +1716,12 @@ class RocketLeague(commands.Cog):
         channel = ctx.guild.get_channel(int(settings["clip_channel_id"])) if settings.get("clip_channel_id") else None
         sources = await self._number_clip_sources(ctx.guild)
         interval = int(settings.get("clip_interval") or CLIP_DEFAULT_INTERVAL) // 3600
+        delivery = "silent" if settings.get("clip_silent", True) else "normal"
         next_post = int(settings.get("clip_next_post") or 0)
         lines = [
             f"Status: **{'enabled' if settings.get('clip_enabled') else 'disabled'}**",
             f"Channel: {channel.mention if channel else 'not configured'}",
+            f"Delivery: **{delivery}**",
             f"Sources: **{len(sources)}**",
             f"Maximum length: **{int(settings.get('clip_max_length') or CLIP_DEFAULT_MAX_LENGTH)} seconds**",
             f"Approximate interval: **{interval} hour{'s' if interval != 1 else ''}**",
