@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 from dayz import setup
 from dayz.dayz import CONFIG_IDENTIFIER, LEGACY_CONFIG_COG_NAME, DayZ
@@ -19,22 +19,6 @@ from dayz.client import (
 
 
 class DayZClientTests(unittest.TestCase):
-    def test_neutral_identity_keeps_legacy_config_namespace(self):
-        config = Mock()
-        with (
-            patch("dayz.dayz.Config.get_conf", return_value=config) as get_conf,
-            patch("discord.ext.tasks.Loop.start"),
-        ):
-            cog = DayZ(Mock())
-        self.assertEqual(type(cog).__name__, "DayZ")
-        get_conf.assert_called_once_with(
-            cog,
-            identifier=CONFIG_IDENTIFIER,
-            force_registration=True,
-            cog_name=LEGACY_CONFIG_COG_NAME,
-        )
-        self.assertEqual(LEGACY_CONFIG_COG_NAME, "DayZAnnouncements")
-
     def test_public_help_includes_quick_setup(self):
         help_text = DayZ.dayz.help
         self.assertIn("[p]dayzset channel #updates", help_text)
@@ -207,16 +191,38 @@ class DayZClientTests(unittest.TestCase):
 
 
 class DayZSetupTests(unittest.IsolatedAsyncioTestCase):
-    async def test_setup_adds_neutral_cog(self):
+    async def test_setup_migrates_to_neutral_namespace_once(self):
         bot = Mock(add_cog=AsyncMock())
         config = Mock()
+        config.legacy_namespace_migrated = AsyncMock(side_effect=[False, True])
+        config.legacy_namespace_migrated.set = AsyncMock()
+        config.guild_from_id.return_value.set = AsyncMock()
+        legacy = Mock(all_guilds=AsyncMock(return_value={123: {"enabled": True}}))
         with (
-            patch("dayz.dayz.Config.get_conf", return_value=config),
-            patch("discord.ext.tasks.Loop.start"),
+            patch("dayz.dayz.Config.get_conf", side_effect=[config, legacy]) as get_conf,
+            patch("discord.ext.tasks.Loop.start") as start,
         ):
             await setup(bot)
-        bot.add_cog.assert_awaited_once()
-        self.assertIsInstance(bot.add_cog.await_args.args[0], DayZ)
+            cog = bot.add_cog.await_args.args[0]
+            await cog.cog_load()
+            await cog._migrate_legacy_config()
+        self.assertIsInstance(cog, DayZ)
+        get_conf.assert_has_calls(
+            [
+                call(cog, identifier=CONFIG_IDENTIFIER, force_registration=True),
+                call(
+                    None,
+                    identifier=CONFIG_IDENTIFIER,
+                    force_registration=True,
+                    cog_name=LEGACY_CONFIG_COG_NAME,
+                ),
+            ]
+        )
+        legacy.all_guilds.assert_awaited_once()
+        config.guild_from_id.assert_called_once_with(123)
+        config.guild_from_id.return_value.set.assert_awaited_once_with({"enabled": True})
+        config.legacy_namespace_migrated.set.assert_awaited_once_with(True)
+        start.assert_called_once_with()
 
 
 if __name__ == "__main__":

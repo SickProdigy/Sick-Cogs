@@ -40,7 +40,7 @@ In-Game Event; a Steam label is not used as the bot category.
 
 ## Updating or removing
 
-Version 1.0.1 changes Red's displayed cog name from `DayZAnnouncements` to `DayZ` without changing the `dayz` install package, commands, or saved configuration. A normal `[p]cog update` followed by `[p]reload dayz` keeps automatic posting enabled and retains channels, roles, categories, and posted-item history. Use `[p]unload dayz` to stop the cog while leaving it installed, or `[p]cog uninstall dayz` to remove its installed code. Persistent Red data is intentionally retained unless it is deleted separately.
+Version 1.0.2 completes the identity change by copying existing guild settings from `DayZAnnouncements` into the active `DayZ` Config namespace before polling starts. The migration is restart-safe and leaves the old folder untouched as a recovery copy; future writes use `cogs/DayZ/settings.json`. A normal `[p]cog update` followed by `[p]reload dayz` retains channels, roles, categories, and posted-item history. Use `[p]unload dayz` to stop the cog while leaving it installed, or `[p]cog uninstall dayz` to remove its installed code. Persistent Red data is retained unless it is deleted separately.
 
 ## Commands
 

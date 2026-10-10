@@ -74,7 +74,7 @@ class Ark(commands.Cog):
     """Publish official ARK: Survival Ascended Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.3"
+    __version__ = "1.1.4"
 
     default_guild = {
         "enabled": False,
@@ -91,15 +91,29 @@ class Ark(commands.Cog):
     def __init__(self, bot: Red):
         self.bot = bot
         self.config = Config.get_conf(
-            self,
+            self, identifier=CONFIG_IDENTIFIER, force_registration=True
+        )
+        self.legacy_config = Config.get_conf(
+            None,
             identifier=CONFIG_IDENTIFIER,
             force_registration=True,
             cog_name=LEGACY_CONFIG_COG_NAME,
         )
+        self.config.register_global(legacy_namespace_migrated=False)
         self.config.register_guild(**self.default_guild)
         self.session: Optional[aiohttp.ClientSession] = None
         self._poll_locks = {}
+
+    async def cog_load(self):
+        await self._migrate_legacy_config()
         self.poll_loop.start()
+
+    async def _migrate_legacy_config(self):
+        if await self.config.legacy_namespace_migrated():
+            return
+        for guild_id, settings in (await self.legacy_config.all_guilds()).items():
+            await self.config.guild_from_id(int(guild_id)).set(settings)
+        await self.config.legacy_namespace_migrated.set(True)
 
     async def red_delete_data_for_user(self, **kwargs):
         """This cog stores no user data."""
