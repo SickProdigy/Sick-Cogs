@@ -1,0 +1,505 @@
+import io
+import unittest
+from pathlib import Path
+
+from PIL import Image
+from pokemon.catching import BALLS,attempt_catch,calculate_catch_value
+from pokemon.catalog_versions import CATALOG_VERSIONS,DIMENSIONS
+from pokemon.data import EVOLUTIONS,SPECIES,effectiveness,experience_to_next,moves_for_level,total_experience
+from pokemon.models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
+from pokemon.renderer import BattleRenderer,ENCOUNTER_BACKDROPS,KANTO_COVERS,RETRO
+from pokemon.rulesets import STANDARD,TYPE_CHARTS
+
+def battle(seed=1,wild=10):
+    p=OwnedPokemon("abc",4,10)
+    return Battle(1,100,1,2,3,p,wild,4,SPECIES[4].hp+10,SPECIES[wild].hp+8,seed=seed)
+
+class DataTests(unittest.TestCase):
+    def test_initial_catalog_and_types(self):
+        from pathlib import Path
+        from pokemon.catalog import PokemonCatalog
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        self.assertEqual(len([key for key in SPECIES if key <= 151]),151)
+        self.assertEqual(effectiveness("fire",("grass",)),2)
+        self.assertEqual(effectiveness("water",("grass",)),0.5)
+        self.assertEqual(effectiveness("electric",("ground",)),0)
+        self.assertEqual(effectiveness("rock",("flying",)),2)
+        self.assertEqual(effectiveness("psychic",("poison",)),2)
+        self.assertTrue(EVOLUTIONS)
+        self.assertTrue(all(1<=source<=151 and 1<=target<=151 and 2<=level<=100 for source,(target,level) in EVOLUTIONS.items()))
+        from pokemon.data import MOVES
+        self.assertEqual(len(MOVES),147)
+        self.assertTrue(all(SPECIES[key].learnset for key in range(1,152)))
+        self.assertEqual(SPECIES[63].moves,("teleport",))
+        self.assertEqual(SPECIES[129].moves,("splash",))
+        self.assertEqual(SPECIES[132].moves,("transform",))
+
+    def test_every_bundled_move_has_an_explicit_support_audit(self):
+        import json
+        from pokemon.data import MOVES
+        audit=json.loads((Path(__file__).parents[1]/"move_audit.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(audit["moves"]),set(MOVES))
+        self.assertEqual(sum(audit["summary"].values()),147)
+        self.assertEqual({item["classification"] for item in audit["moves"].values()},{"accurate","standardized","deferred"})
+        self.assertEqual(audit["moves"]["transform"]["classification"],"deferred")
+        self.assertEqual(audit["moves"]["headbutt"]["classification"],"accurate")
+
+class BattleTests(unittest.TestCase):
+    def test_classic_battle_narration_and_immunity(self):
+        moves=__import__("pokemon.data",fromlist=["MOVES"]).MOVES
+        self.assertEqual(Battle.effectiveness_line(moves["ember"],10),"It's super effective!")
+        self.assertEqual(Battle.effectiveness_line(moves["water_gun"],1),"It's not very effective...")
+        self.assertEqual(Battle.effectiveness_line(moves["scratch"],92),"It doesn't affect Gastly...")
+        line=Battle.attack_line("Charmander",10,moves["ember"],4,critical=True,status="burn")
+        self.assertIn("A critical hit!",line)
+        self.assertIn("It's super effective!",line)
+        self.assertIn("Caterpie was burned!",line)
+        current=battle();scratch=moves["scratch"]
+        self.assertEqual(current._damage(10,92,5,scratch,current.rng(),attacker_types=("normal",),defense=10),0)
+
+    def test_standard_ruleset_versions_damage_stats_type_chart_and_criticals(self):
+        moves=__import__("pokemon.data",fromlist=["MOVES"]).MOVES
+        self.assertEqual(STANDARD.mechanics_generation,9)
+        self.assertIs(TYPE_CHARTS[STANDARD.type_chart],TYPE_CHARTS["modern"])
+        self.assertEqual(STANDARD.damage_stats(moves["ember"]),("special_attack","special_defense"))
+        self.assertEqual(STANDARD.damage_stats(moves["scratch"]),("attack","defense"))
+        self.assertEqual(STANDARD.critical_denominator(moves["scratch"],1),24)
+        self.assertEqual(STANDARD.critical_denominator(moves["slash"],1),8)
+        self.assertEqual(STANDARD.effective_stage(-3,critical=True,offensive=True),0)
+        self.assertEqual(STANDARD.effective_stage(3,critical=True,offensive=False),0)
+        self.assertEqual(STANDARD.effective_stage(3,critical=True,offensive=True),3)
+
+    def test_classic_level_and_move_learning_narration(self):
+        player=OwnedPokemon.create("learner",4,8,seed=3);player.experience=experience_to_next(4,8)-1
+        current=Battle(1,100,1,2,3,player,10,3,20,20,seed=4)
+        detail=current._award_experience(1)
+        self.assertIn("Charmander grew to Lv. 9!",detail)
+        self.assertIn("Charmander learned Ember!",detail)
+
+    def test_status_and_fixed_damage_moves_are_not_tackle_substitutes(self):
+        bulbasaur=OwnedPokemon.create("bulba",1,5,seed=2)
+        current=Battle(1,100,1,2,3,bulbasaur,10,5,30,30,seed=4)
+        old_hp=current.wild_hp
+        current.use_move(1)
+        self.assertEqual(current.wild_hp,old_hp)
+        self.assertEqual(current.wild_stages.get("attack"),-1)
+        fixed=__import__("pokemon.data",fromlist=["MOVES"]).MOVES["dragon_rage"]
+        self.assertEqual(current._damage(1,10,5,fixed,current.rng(),target_hp=99),40)
+
+    def test_standard_status_immunities_and_residual_damage(self):
+        player=OwnedPokemon.create("status",4,20,seed=3)
+        current=Battle(1,100,1,2,3,player,4,20,50,50,seed=8)
+        rng=type("Fixed",(),{"randrange":lambda self,n:0})()
+        self.assertEqual(current._set_status("burn",False,rng),"")
+        self.assertEqual(current.wild_status,"")
+        current.wild_species_id=23
+        self.assertEqual(current._set_status("poison",False,rng),"")
+        current.player_status="burn";current.wild_status="poison"
+        current.player_hp=current.max_hp(player);current.wild_hp=current.wild_max_hp
+        before=(current.player_hp,current.wild_hp);current._end_turn_status()
+        self.assertEqual(before[0]-current.player_hp,max(1,current.max_hp(player)//16))
+        self.assertEqual(before[1]-current.wild_hp,max(1,current.wild_max_hp//8))
+
+    def test_flinch_is_order_sensitive_and_haze_clears_stat_stages(self):
+        moves=__import__("pokemon.data",fromlist=["MOVES"]).MOVES
+        current=battle();rng=type("Fixed",(),{"randrange":lambda self,n:0})()
+        current.wild_acted=False
+        self.assertEqual(current._set_status("flinch",False,rng),"flinch")
+        allowed,message=current._can_act(False,rng)
+        self.assertFalse(allowed);self.assertIn("flinched",message)
+        current.wild_acted=True
+        self.assertEqual(current._set_status("flinch",False,rng),"")
+        current.player_stages={"attack":2};current.wild_stages={"defense":-2}
+        line=current._status_action(moves["haze"],True,rng)
+        self.assertEqual((current.player_stages,current.wild_stages),({},{}) )
+        self.assertIn("all stat changes were eliminated",line)
+
+    def test_sleep_and_confusion_are_bounded_and_restart_safe(self):
+        player=OwnedPokemon.create("status",7,10,seed=3)
+        current=Battle(1,100,1,2,3,player,19,10,40,40,seed=8)
+        rng=type("Fixed",(),{"randrange":lambda self,n:0})()
+        self.assertEqual(current._set_status("sleep",True,rng),"sleep")
+        self.assertEqual(current.player_status_turns,1)
+        current._set_status("confusion",False,rng)
+        restored=Battle.from_raw(current.raw())
+        self.assertEqual((restored.player_status,restored.player_status_turns,restored.wild_confusion_turns),("sleep",1,2))
+        before=restored.wild_hp
+        allowed,message=restored._can_act(False,rng)
+        self.assertFalse(allowed);self.assertLess(restored.wild_hp,before);self.assertIn("confusion",message)
+
+    def test_owned_and_wild_combat_stats_share_level_scaling(self):
+        player=OwnedPokemon.create("scaled",4,5,seed=3)
+        low=Battle(1,100,1,2,3,player,19,2,20,20,seed=8)
+        high=Battle(2,100,1,2,4,player,19,5,20,20,seed=8)
+        self.assertEqual(low.wild_stat("attack"),Battle.scaled_stat(SPECIES[19],2,"attack"))
+        self.assertLess(low.wild_stat("attack"),high.wild_stat("attack"))
+        self.assertLess(low.wild_stat("attack"),SPECIES[19].attack)
+        self.assertEqual(Battle.stat(player,"defense"),Battle.scaled_stat(SPECIES[4],5,"defense",player.ivs["defense"]))
+        move=__import__("pokemon.data",fromlist=["MOVES"]).MOVES["tackle"]
+        low_before=low.player_hp;high_before=high.player_hp
+        low._wild_attack(move);high._wild_attack(move)
+        self.assertLessEqual(low_before-low.player_hp,high_before-high.player_hp)
+
+    def test_move_damages_and_wild_responds(self):
+        b=battle();old_wild=b.wild_hp;old_player=b.player_hp
+        b.use_move(2)
+        self.assertLess(b.wild_hp,old_wild)
+        self.assertLessEqual(b.player_hp,old_player)
+        self.assertIn(f"{SPECIES[b.player.species_id].name} used",b.last_action)
+        self.assertIn(f"{SPECIES[b.wild_species_id].name} used",b.last_action)
+    def test_invalid_move_rejected(self):
+        with self.assertRaises(BattleError):battle().use_move(9)
+    def test_zero_hp_ends_battle(self):
+        b=battle();b.wild_hp=1;b.use_move(2)
+        self.assertEqual(b.state,"won")
+        self.assertGreater(b.experience_award,0)
+        self.assertGreater(b.player.experience,0)
+    def test_ball_and_status_modifiers_raise_catch_value(self):
+        current=battle();species=SPECIES[current.wild_species_id];rules=current.rules()
+        poke=calculate_catch_value(species,current.wild_max_hp,current.wild_hp,"",BALLS["poke_ball"],rules)
+        great=calculate_catch_value(species,current.wild_max_hp,current.wild_hp,"",BALLS["great_ball"],rules)
+        ultra=calculate_catch_value(species,current.wild_max_hp,current.wild_hp,"sleep",BALLS["ultra_ball"],rules)
+        self.assertLess(poke,great);self.assertLess(great,ultra)
+
+    def test_catch_service_records_four_deterministic_shakes(self):
+        current=battle();species=SPECIES[current.wild_species_id];current.wild_hp=1
+        first=attempt_catch(species,current.wild_max_hp,1,"sleep","ultra_ball",current.rules(),current.rng())
+        clone=battle();clone.wild_hp=1
+        second=attempt_catch(species,clone.wild_max_hp,1,"sleep","ultra_ball",clone.rules(),clone.rng())
+        self.assertEqual(first,second)
+        self.assertEqual(first.shakes,4);self.assertTrue(first.caught)
+
+    def test_ball_is_deterministic_and_consumable_once(self):
+        a=battle(22);b=battle(22)
+        self.assertEqual(a.throw_ball(),b.throw_ball())
+        self.assertEqual(a.raw(),b.raw())
+        self.assertIn("You threw a Poké Ball",a.result or a.last_action)
+    def test_failed_ball_allows_wild_response(self):
+        b=battle(1);old_hp=b.player_hp
+        self.assertFalse(b.throw_ball())
+        self.assertEqual(b.state,"active")
+        self.assertLessEqual(b.player_hp,old_hp)
+        self.assertGreater(b.rolls,0)
+        self.assertIn("You threw a Poké Ball",b.last_action)
+        self.assertIn(f"{SPECIES[b.wild_species_id].name} used",b.last_action)
+    def test_speed_tie_uses_recorded_deterministic_roll(self):
+        player=OwnedPokemon.create("tie",19,7,seed=3)
+        first=Battle(1,100,1,2,3,player,19,7,30,30,seed=14)
+        second=Battle.from_raw(first.raw())
+        first.use_move(2);second.use_move(2)
+        self.assertEqual(first.raw(),second.raw())
+
+    def test_quick_attack_beats_higher_speed(self):
+        player=OwnedPokemon.create("fast",19,7,seed=3)
+        b=Battle(1,100,1,2,3,player,52,5,30,30,seed=8)
+        b.use_move(2)
+        self.assertTrue(b.last_action.startswith("Rattata used Quick Attack"))
+
+    def test_caught_instance_is_global_identity(self):
+        b=battle(3);b.state="caught";b.wild_gender="female";b.wild_shiny=True
+        caught=b.caught()
+        self.assertEqual(caught.species_id,10)
+        self.assertEqual(caught.gender,"female")
+        self.assertTrue(caught.shiny)
+        self.assertEqual(caught.caught_guild_id,1)
+        self.assertEqual(len(caught.instance_id),32)
+    def test_successful_catch_awards_half_victory_xp(self):
+        caught=None
+        for seed in range(1,100):
+            candidate=battle(seed);candidate.wild_hp=1
+            if candidate.throw_ball():caught=candidate;break
+        self.assertIsNotNone(caught)
+        self.assertEqual(caught.experience_award,caught.rules().experience_reward(SPECIES[caught.wild_species_id],caught.wild_level,caught=True))
+        self.assertIn(f"gained {caught.experience_award} XP",caught.result)
+    def test_explicit_party_switch(self):
+        first=OwnedPokemon.create("one",4,10,seed=1)
+        second=OwnedPokemon.create("two",7,10,seed=2)
+        b=Battle(1,100,1,2,3,first,10,10,30,30);b.initialize_party([first,second])
+        b.switch_to(1)
+        self.assertEqual(b.player.instance_id,"two")
+        with self.assertRaises(BattleError):b.switch_to(1)
+
+    def test_run_finishes(self):
+        b=battle();b.run()
+        self.assertEqual(b.state,"ran")
+        with self.assertRaises(BattleError):b.run()
+    def test_round_trip(self):
+        b=battle();b.trainer_name="SickProdigy";b.wild_shiny=True;b.use_move(0)
+        self.assertEqual(Battle.from_raw(b.raw()).raw(),b.raw())
+        self.assertEqual(b.action_history[-1]["action"],"move:scratch")
+        self.assertEqual(b.action_count,1)
+        self.assertEqual(Battle.from_raw(b.raw()).trainer_name,"SickProdigy")
+        self.assertTrue(Battle.from_raw(b.raw()).wild_shiny)
+
+    def test_gym_battle_metadata_round_trip(self):
+        b=battle();b.battle_kind="gym";b.gym_key="boulder"
+        restored=Battle.from_raw(b.raw())
+        self.assertEqual((restored.battle_kind,restored.gym_key),("gym","boulder"))
+
+    def test_gym_opponent_party_switches_and_round_trips(self):
+        b=battle();b.battle_kind="gym";b.gym_key="boulder";b.initialize_opponents(((74,12),(95,14)))
+        b.wild_hp=0;b._finish_if_needed()
+        self.assertEqual((b.state,b.wild_species_id,b.wild_level,b.opponent_index),("active",95,14,1))
+        self.assertIn("sent out Onix",b.result);self.assertEqual(b.opponents_defeated,[74])
+        restored=Battle.from_raw(b.raw())
+        self.assertEqual((restored.wild_species_id,restored.opponent_index,restored.opponent_total),(95,1,2))
+        restored.wild_hp=0;restored._finish_if_needed()
+        self.assertEqual(restored.state,"won");self.assertEqual(restored.opponents_defeated,[74,95]);self.assertGreater(restored.experience_award,0)
+
+    def test_action_history_is_monotonic_and_bounded(self):
+        b=battle()
+        for index in range(125):b._record(f"test:{index}")
+        self.assertEqual(len(b.action_history),100)
+        self.assertEqual(b.action_history[0]["sequence"],26)
+        self.assertEqual(b.action_history[-1]["sequence"],125)
+
+    def test_move_categories_use_special_stats(self):
+        self.assertEqual(__import__("pokemon.data",fromlist=["MOVES"]).MOVES["ember"].category,"special")
+        self.assertGreater(SPECIES[4].special_attack,0)
+        self.assertGreater(SPECIES[4].special_defense,0)
+
+    def test_owned_pokemon_has_stable_moves_and_pp(self):
+        pokemon=OwnedPokemon("stable",4,5)
+        self.assertEqual(pokemon.moves,("scratch","growl"))
+        self.assertEqual(pokemon.move_pp["growl"],40)
+        self.assertEqual(pokemon.move_pp["scratch"],35)
+        pokemon.current_hp=3;pokemon.status="burn"
+        self.assertEqual(OwnedPokemon.from_raw(pokemon.raw()).raw(),pokemon.raw())
+        self.assertEqual(set(pokemon.evs),{"hp","attack","defense","special_attack","special_defense","speed"})
+        self.assertEqual(pokemon.gender,"unknown")
+        created=OwnedPokemon.create("created",4,5,seed=8)
+        self.assertIn(created.gender,{"male","female","genderless"})
+        self.assertTrue(created.ability)
+        self.assertEqual(created.origin,"starter")
+    def test_battle_ruleset_and_generations_survive_restart(self):
+        current=battle();raw=current.raw()
+        self.assertEqual((raw["ruleset"],raw["mechanics_generation"],raw["content_generation"]),("standard",9,1))
+        restored=Battle.from_raw(raw)
+        self.assertEqual((restored.rules().key,restored.mechanics_generation,restored.content_generation),("standard",9,1))
+        for key in ("ruleset","mechanics_generation","content_generation"):raw.pop(key)
+        legacy=Battle.from_raw(raw)
+        self.assertEqual((legacy.ruleset,legacy.mechanics_generation,legacy.content_generation),("standard",9,1))
+
+    def test_wild_turn_speed_is_level_scaled(self):
+        player=OwnedPokemon.create("speed",7,5,seed=1)
+        current=Battle(1,100,1,2,3,player,150,2,10,10,seed=4)
+        self.assertEqual(current.combat_speed(False),current.wild_stat("speed"))
+        self.assertLess(current.combat_speed(False),SPECIES[150].speed)
+        current.wild_status="paralysis"
+        self.assertEqual(current.combat_speed(False),max(1,current.wild_stat("speed")//2))
+
+    def test_species_growth_curves_and_base_experience_are_bundled(self):
+        self.assertEqual((SPECIES[1].base_experience,SPECIES[1].growth_rate),(64,"medium-slow"))
+        self.assertEqual(total_experience(100,"fast"),800000)
+        self.assertEqual(total_experience(100,"medium"),1000000)
+        self.assertEqual(total_experience(100,"slow"),1250000)
+        self.assertNotEqual(experience_to_next(1,20),experience_to_next(10,20))
+
+    def test_experience_is_split_between_conscious_participants(self):
+        first=OwnedPokemon.create("first",4,10,seed=1);second=OwnedPokemon.create("second",7,10,seed=2)
+        current=Battle(1,100,1,2,3,first,10,10,30,0,seed=4);current.initialize_party([first,second]);current.switch_to(1)
+        before=(first.experience,second.experience);current._finish_if_needed()
+        reward=current.rules().experience_reward(SPECIES[10],10)
+        self.assertEqual(current.experience_award,reward)
+        self.assertEqual(first.experience-before[0],reward//2)
+        self.assertEqual(second.experience-before[1],reward//2)
+        self.assertEqual(set(current.experience_awards),{"first","second"})
+
+    def test_experience_levels_up(self):
+        pokemon=OwnedPokemon.create("xp",4,5,seed=7)
+        pokemon.experience=experience_to_next(4,5)-1
+        levels,evolved,learned=pokemon.gain_experience(1)
+        self.assertEqual((levels,evolved,learned,pokemon.level),(1,None,[],6))
+    def test_supported_move_learning(self):
+        pokemon=OwnedPokemon.create("learner",4,8,seed=4)
+        pokemon.experience=experience_to_next(4,8)-1
+        levels,evolved,learned=pokemon.gain_experience(1)
+        self.assertEqual((levels,evolved,pokemon.level),(1,None,9))
+        self.assertIn("ember",learned)
+        self.assertIn("ember",pokemon.moves)
+    def test_underleveled_evolved_species_inherits_pre_evolution_moves(self):
+        self.assertEqual(moves_for_level(78,3),("ember",))
+        self.assertEqual(moves_for_level(78,30),("ember","tail_whip"))
+        self.assertIn("fire_spin",moves_for_level(78,40))
+
+    def test_level_evolution(self):
+        pokemon=OwnedPokemon.create("evolve",10,6,seed=4)
+        pokemon.experience=experience_to_next(10,6)-1
+        levels,evolved,learned=pokemon.gain_experience(1)
+        self.assertEqual((levels,evolved,pokemon.species_id),(1,10,11))
+
+    def test_fifth_move_waits_for_a_persisted_trainer_choice(self):
+        pokemon=OwnedPokemon.create("full",25,25,seed=4)
+        self.assertEqual(pokemon.moves,("thunder_wave","quick_attack","double_team","slam"))
+        pokemon.experience=experience_to_next(25,25)-1
+        levels,evolved,learned=pokemon.gain_experience(1)
+        self.assertEqual((levels,evolved,learned,pokemon.level),(1,None,[],26))
+        self.assertEqual(pokemon.pending_moves,["thunderbolt","swift"])
+        self.assertEqual(OwnedPokemon.from_raw(pokemon.raw()).pending_moves,["thunderbolt","swift"])
+
+    def test_party_can_switch_after_fainting(self):
+        first=OwnedPokemon.create("first",4,5,seed=1)
+        second=OwnedPokemon.create("second",7,5,seed=2)
+        b=Battle(1,100,1,2,3,first,10,4,1,20,seed=5)
+        b.initialize_party([first,second]);b.player_hp=0;b._finish_if_needed()
+        self.assertTrue(b.needs_switch)
+        b.switch_next()
+        self.assertEqual(b.player.instance_id,"second")
+        self.assertGreater(b.player_hp,0)
+    def test_renderer_trims_and_upscales_small_padded_sprites(self):
+        source=io.BytesIO();image=Image.new("RGBA",(96,96),(0,0,0,0))
+        for x in range(40,56):
+            for y in range(44,56):image.putpixel((x,y),(200,40,30,255))
+        image.save(source,"PNG")
+        rendered=BattleRenderer._open(source.getvalue(),(240,210),trim=True,upscale=True)
+        self.assertEqual(rendered.size,(56,42))
+        self.assertEqual(rendered.getchannel("A").getbbox(),(0,0,56,42))
+
+    def test_trainer_party_preserves_saved_order_and_skips_missing_entries(self):
+        first=OwnedPokemon.create("first",4,5,seed=1);second=OwnedPokemon.create("second",7,3,seed=2)
+        conf={"collection":[first.raw(),second.raw()],"party":["second","missing","first"]}
+        self.assertEqual([item.instance_id for item in BattleRenderer.trainer_party(conf)],["second","first"])
+
+    def test_pokedex_registration_details_show_types_and_abilities(self):
+        self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[39]),("Type: Normal / Fairy","Abilities: Cute Charm, Competitive"))
+        self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[25]),("Type: Electric","Abilities: Static"))
+
+    def test_pokemon_center_dialogue_is_ascii_safe(self):
+        self.assertEqual(BattleRenderer.pokemon_center_message("SickProdigy",True),"SickProdigy, your Pokemon are back to perfect health!")
+        self.assertNotIn("Pokémon",BattleRenderer.pokemon_center_message("SickProdigy",True))
+        pokemon=OwnedPokemon.create("center-state",25,5,seed=2);pokemon.current_hp=0;self.assertEqual(BattleRenderer.pokemon_center_state(pokemon)[0],"FAINTED")
+        pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status="poison";self.assertEqual(BattleRenderer.pokemon_center_state(pokemon)[0],"POISONED");self.assertEqual(BattleRenderer.pokemon_center_state(pokemon,True)[0],"READY")
+
+    def test_renderer_builds_expected_pngs(self):
+        source=io.BytesIO()
+        Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
+        data=source.getvalue();avatar_source=io.BytesIO();Image.new("RGBA",(80,80),(220,40,80,255)).save(avatar_source,"PNG");avatar_data=avatar_source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
+        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);expired=renderer._encounter_sync(10,data,backdrop=0,expired=True);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy",[1]);registration=renderer._pokedex_registration_sync(starter_pokemon,data,"SickProdigy");menu_conf={"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id]};retro_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"retro",avatar_data=avatar_data);modern_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"modern",avatar_data=avatar_data);starter_pokemon.current_hp=0;center_treating=renderer._pokemon_center_sync([starter_pokemon],[data],"SickProdigy",False);starter_pokemon.current_hp=pokemon_max_hp(starter_pokemon);center_complete=renderer._pokemon_center_sync([starter_pokemon],[data],"SickProdigy",True);trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},[starter_pokemon],[data],"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data,avatar_data);b.gym_key="boulder";gym_victory=renderer._gym_victory_sync(b,data,avatar_data);b.gym_key="";b.state="caught";caught_result=renderer._battle_result_sync(b,data,avatar_data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
+        self.assertEqual(len(ENCOUNTER_BACKDROPS),12)
+        self.assertEqual(len(KANTO_COVERS),11)
+        with Image.open(encounter) as image,Image.open(alternate) as other:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((400,400)),RETRO[5])
+            self.assertEqual(image.getpixel((255,309)),RETRO[0])
+            self.assertNotEqual(image.getpixel((10,10)),other.getpixel((10,10)))
+        with Image.open(encounter) as live,Image.open(expired) as inactive:
+            self.assertEqual(inactive.size,(800,450))
+            self.assertNotEqual(live.getpixel((400,200)),inactive.getpixel((400,200)))
+            live_sprite=live.getpixel((440,200));expired_sprite=inactive.getpixel((440,200))
+            self.assertLess(max(expired_sprite)-min(expired_sprite),max(live_sprite)-min(live_sprite))
+        with Image.open(choice) as image:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((255,259)),(205,63,58))
+            self.assertEqual(image.getpixel((400,298)),(40,120,220))
+        with Image.open(party_card) as image:self.assertEqual(image.size,(1200,360))
+        with Image.open(collection_card) as image:
+            self.assertEqual(image.size,(900,720));self.assertEqual(image.getpixel((60,100)),(54,83,70))
+        with Image.open(registration) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(retro_menu) as retro,Image.open(modern_menu) as modern:
+            self.assertEqual(retro.size,(800,500));self.assertEqual(modern.size,(800,500));self.assertNotEqual(retro.getpixel((10,10)),modern.getpixel((10,10)))
+        with Image.open(center_treating) as treating,Image.open(center_complete) as complete:
+            self.assertEqual(treating.size,(900,540));self.assertEqual(complete.size,(900,540));self.assertNotEqual(treating.getpixel((240,211)),complete.getpixel((240,211)));self.assertEqual(complete.getpixel((300,240)),(188,91,96));self.assertNotEqual(treating.getpixel((160,150)),complete.getpixel((160,150)))
+        with Image.open(trainer_card) as image:self.assertEqual(image.size,(800,610))
+        with Image.open(gym_victory) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(evolution) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(move_card) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(starter) as image:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((255,259)),(205,63,58))
+            self.assertEqual(image.getpixel((400,298)),(40,120,220))
+            self.assertEqual(image.getpixel((120,330)),(132,82,48))
+            self.assertEqual(image.getpixel((400,400)),RETRO[5])
+            self.assertEqual(image.getpixel((110,398)),RETRO[5])
+        with Image.open(scene) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(victory) as image:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((145,245)),(220,40,80))
+        with Image.open(caught_result) as image:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((145,245)),(220,40,80))
+            self.assertNotIn(RETRO[1],set(image.crop((460,320,550,348)).get_flattened_data()))
+            self.assertIn(RETRO[1],set(image.crop((65,380,150,408)).get_flattened_data()))
+        with Image.open(escape_result) as image:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((10,410)),RETRO[5])
+        with Image.open(loss_result) as image:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((10,410)),RETRO[5])
+
+    def test_result_text_uses_named_bottom_box_messages(self):
+        b=battle();b.trainer_name="SickProdigy";wild=SPECIES[b.wild_species_id]
+        b.state="caught"
+        self.assertEqual(BattleRenderer.battle_result_text(b),f"Gotcha! {wild.name} was caught by SickProdigy!")
+        b.state="won"
+        self.assertEqual(BattleRenderer.battle_result_text(b),f"SickProdigy defeated {wild.name}!")
+        b.state="ran"
+        self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy!")
+        b.state="lost"
+        self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
+
+
+class CatalogVersionTests(unittest.TestCase):
+    def test_every_release_versions_all_future_mechanics_dimensions(self):
+        self.assertEqual(set(DIMENSIONS),{"typing","stats","learnsets","evolution_methods","abilities","items","weather","terrain"})
+        self.assertTrue(CATALOG_VERSIONS.releases)
+        for release in CATALOG_VERSIONS.releases.values():
+            self.assertEqual(set(release.dimensions),set(DIMENSIONS))
+            self.assertTrue(all({"version","status"}<=set(value) for value in release.dimensions.values()))
+
+    def test_owned_and_caught_pokemon_preserve_catalog_version(self):
+        legacy=OwnedPokemon.from_raw({"instance_id":"legacy","species_id":4,"level":1})
+        self.assertEqual(legacy.catalog_version,"bundled-gen1-rby-v1")
+        current=battle();current.state="caught";current.catalog_version="pokeapi-gen2-v1"
+        self.assertEqual(current.caught("caught").catalog_version,"pokeapi-gen2-v1")
+        self.assertEqual(Battle.from_raw(current.raw()).catalog_version,"pokeapi-gen2-v1")
+
+class CatalogTests(unittest.TestCase):
+    def test_parses_bounded_api_record(self):
+        from pokemon.catalog import PokemonCatalog
+        raw = {
+            "id": 25,
+            "stats": [
+                {"stat": {"name": "hp"}, "base_stat": 35},
+                {"stat": {"name": "attack"}, "base_stat": 55},
+                {"stat": {"name": "defense"}, "base_stat": 40},
+                {"stat": {"name": "special-attack"}, "base_stat": 50},
+                {"stat": {"name": "special-defense"}, "base_stat": 50},
+                {"stat": {"name": "speed"}, "base_stat": 90},
+            ],
+            "types": [{"slot": 1, "type": {"name": "electric"}}],
+            "abilities": [
+                {"slot": 1, "is_hidden": False, "ability": {"name": "static"}},
+                {"slot": 3, "is_hidden": True, "ability": {"name": "lightning-rod"}},
+            ],
+            "moves": [
+                {"move": {"name": "quick-attack"}, "version_group_details": [{"level_learned_at": 4, "move_learn_method": {"name": "level-up"}, "version_group": {"name": "red-blue"}}]},
+                {"move": {"name": "thunder-shock"}, "version_group_details": [{"level_learned_at": 1, "move_learn_method": {"name": "level-up"}, "version_group": {"name": "red-blue"}}]},
+            ],
+        }
+        species = PokemonCatalog.parse_api(
+            raw, {"name": "pikachu", "capture_rate": 190, "gender_rate": 4}
+        )
+        self.assertEqual(species.id, 25)
+        self.assertEqual(species.moves, ("thunder_shock", "quick_attack"))
+        self.assertEqual(species.abilities,("Static",))
+        self.assertEqual(species.gender_rate,4)
+        self.assertEqual(PokemonCatalog.parse_cached(PokemonCatalog.to_cached(species)),species)
+
+    def test_api_learnsets_are_selected_for_requested_generation(self):
+        from pokemon.catalog import PokemonCatalog
+        raw={"id":25,"stats":[{"stat":{"name":name},"base_stat":50} for name in ("hp","attack","defense","special-attack","special-defense","speed")],"types":[{"slot":1,"type":{"name":"electric"}}],"moves":[{"move":{"name":"quick-attack"},"version_group_details":[{"level_learned_at":4,"move_learn_method":{"name":"level-up"},"version_group":{"name":"red-blue"}}]},{"move":{"name":"tackle"},"version_group_details":[{"level_learned_at":1,"move_learn_method":{"name":"level-up"},"version_group":{"name":"gold-silver"}}]}]}
+        species=PokemonCatalog.parse_api(raw,{"name":"pikachu","capture_rate":190},generation=2)
+        self.assertEqual(species.moves,("tackle",))
+        self.assertEqual(species.learnset,((1,"tackle"),))
+
+    def test_cache_rejects_unknown_move(self):
+        from pokemon.catalog import CatalogError, PokemonCatalog
+        raw = {
+            "id": 1, "name": "Test", "types": ["grass"], "hp": 1,
+            "attack": 1, "defense": 1, "speed": 1, "catch_rate": 1,
+            "moves": ["not-supported"],
+        }
+        with self.assertRaises(CatalogError):
+            PokemonCatalog.parse_cached(raw)
+
+if __name__=="__main__":unittest.main()

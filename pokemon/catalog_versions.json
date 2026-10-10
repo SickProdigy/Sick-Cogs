@@ -1,0 +1,396 @@
+{
+  "default": "bundled-gen1-rby-v1",
+  "dimensions": [
+    "typing",
+    "stats",
+    "learnsets",
+    "evolution_methods",
+    "abilities",
+    "items",
+    "weather",
+    "terrain"
+  ],
+  "releases": {
+    "bundled-gen1-rby-v1": {
+      "dimensions": {
+        "abilities": {
+          "status": "reserved",
+          "version": "reserved-v1"
+        },
+        "evolution_methods": {
+          "status": "active",
+          "version": "rby-v1"
+        },
+        "items": {
+          "status": "reserved",
+          "version": "reserved-v1"
+        },
+        "learnsets": {
+          "status": "active",
+          "version": "rby-v1"
+        },
+        "stats": {
+          "status": "active",
+          "version": "rby-v1"
+        },
+        "terrain": {
+          "status": "reserved",
+          "version": "reserved-v1"
+        },
+        "typing": {
+          "status": "active",
+          "version": "rby-v1"
+        },
+        "weather": {
+          "status": "reserved",
+          "version": "reserved-v1"
+        }
+      },
+      "generation": 1,
+      "parent": null
+    },
+    "pokeapi-gen1-v1": {
+      "dimensions": {
+        "abilities": {
+          "status": "cataloged",
+          "version": "pokeapi-gen1-v1"
+        },
+        "evolution_methods": {
+          "status": "reserved",
+          "version": "pokeapi-gen1-v1"
+        },
+        "items": {
+          "status": "reserved",
+          "version": "pokeapi-gen1-v1"
+        },
+        "learnsets": {
+          "status": "cataloged",
+          "version": "pokeapi-gen1-v1"
+        },
+        "stats": {
+          "status": "cataloged",
+          "version": "pokeapi-gen1-v1"
+        },
+        "terrain": {
+          "status": "reserved",
+          "version": "pokeapi-gen1-v1"
+        },
+        "typing": {
+          "status": "cataloged",
+          "version": "pokeapi-gen1-v1"
+        },
+        "weather": {
+          "status": "reserved",
+          "version": "pokeapi-gen1-v1"
+        }
+      },
+      "generation": 1,
+      "parent": "bundled-gen1-rby-v1"
+    },
+    "pokeapi-gen2-v1": {
+      "dimensions": {
+        "abilities": {
+          "status": "cataloged",
+          "version": "pokeapi-gen2-v1"
+        },
+        "evolution_methods": {
+          "status": "reserved",
+          "version": "pokeapi-gen2-v1"
+        },
+        "items": {
+          "status": "reserved",
+          "version": "pokeapi-gen2-v1"
+        },
+        "learnsets": {
+          "status": "cataloged",
+          "version": "pokeapi-gen2-v1"
+        },
+        "stats": {
+          "status": "cataloged",
+          "version": "pokeapi-gen2-v1"
+        },
+        "terrain": {
+          "status": "reserved",
+          "version": "pokeapi-gen2-v1"
+        },
+        "typing": {
+          "status": "cataloged",
+          "version": "pokeapi-gen2-v1"
+        },
+        "weather": {
+          "status": "reserved",
+          "version": "pokeapi-gen2-v1"
+        }
+      },
+      "generation": 2,
+      "parent": "bundled-gen1-rby-v1"
+    },
+    "pokeapi-gen3-v1": {
+      "dimensions": {
+        "abilities": {
+          "status": "cataloged",
+          "version": "pokeapi-gen3-v1"
+        },
+        "evolution_methods": {
+          "status": "reserved",
+          "version": "pokeapi-gen3-v1"
+        },
+        "items": {
+          "status": "reserved",
+          "version": "pokeapi-gen3-v1"
+        },
+        "learnsets": {
+          "status": "cataloged",
+          "version": "pokeapi-gen3-v1"
+        },
+        "stats": {
+          "status": "cataloged",
+          "version": "pokeapi-gen3-v1"
+        },
+        "terrain": {
+          "status": "reserved",
+          "version": "pokeapi-gen3-v1"
+        },
+        "typing": {
+          "status": "cataloged",
+          "version": "pokeapi-gen3-v1"
+        },
+        "weather": {
+          "status": "reserved",
+          "version": "pokeapi-gen3-v1"
+        }
+      },
+      "generation": 3,
+      "parent": "bundled-gen1-rby-v1"
+    },
+    "pokeapi-gen4-v1": {
+      "dimensions": {
+        "abilities": {
+          "status": "cataloged",
+          "version": "pokeapi-gen4-v1"
+        },
+        "evolution_methods": {
+          "status": "reserved",
+          "version": "pokeapi-gen4-v1"
+        },
+        "items": {
+          "status": "reserved",
+          "version": "pokeapi-gen4-v1"
+        },
+        "learnsets": {
+          "status": "cataloged",
+          "version": "pokeapi-gen4-v1"
+        },
+        "stats": {
+          "status": "cataloged",
+          "version": "pokeapi-gen4-v1"
+        },
+        "terrain": {
+          "status": "reserved",
+          "version": "pokeapi-gen4-v1"
+        },
+        "typing": {
+          "status": "cataloged",
+          "version": "pokeapi-gen4-v1"
+        },
+        "weather": {
+          "status": "reserved",
+          "version": "pokeapi-gen4-v1"
+        }
+      },
+      "generation": 4,
+      "parent": "bundled-gen1-rby-v1"
+    },
+    "pokeapi-gen5-v1": {
+      "dimensions": {
+        "abilities": {
+          "status": "cataloged",
+          "version": "pokeapi-gen5-v1"
+        },
+        "evolution_methods": {
+          "status": "reserved",
+          "version": "pokeapi-gen5-v1"
+        },
+        "items": {
+          "status": "reserved",
+          "version": "pokeapi-gen5-v1"
+        },
+        "learnsets": {
+          "status": "cataloged",
+          "version": "pokeapi-gen5-v1"
+        },
+        "stats": {
+          "status": "cataloged",
+          "version": "pokeapi-gen5-v1"
+        },
+        "terrain": {
+          "status": "reserved",
+          "version": "pokeapi-gen5-v1"
+        },
+        "typing": {
+          "status": "cataloged",
+          "version": "pokeapi-gen5-v1"
+        },
+        "weather": {
+          "status": "reserved",
+          "version": "pokeapi-gen5-v1"
+        }
+      },
+      "generation": 5,
+      "parent": "bundled-gen1-rby-v1"
+    },
+    "pokeapi-gen6-v1": {
+      "dimensions": {
+        "abilities": {
+          "status": "cataloged",
+          "version": "pokeapi-gen6-v1"
+        },
+        "evolution_methods": {
+          "status": "reserved",
+          "version": "pokeapi-gen6-v1"
+        },
+        "items": {
+          "status": "reserved",
+          "version": "pokeapi-gen6-v1"
+        },
+        "learnsets": {
+          "status": "cataloged",
+          "version": "pokeapi-gen6-v1"
+        },
+        "stats": {
+          "status": "cataloged",
+          "version": "pokeapi-gen6-v1"
+        },
+        "terrain": {
+          "status": "reserved",
+          "version": "pokeapi-gen6-v1"
+        },
+        "typing": {
+          "status": "cataloged",
+          "version": "pokeapi-gen6-v1"
+        },
+        "weather": {
+          "status": "reserved",
+          "version": "pokeapi-gen6-v1"
+        }
+      },
+      "generation": 6,
+      "parent": "bundled-gen1-rby-v1"
+    },
+    "pokeapi-gen7-v1": {
+      "dimensions": {
+        "abilities": {
+          "status": "cataloged",
+          "version": "pokeapi-gen7-v1"
+        },
+        "evolution_methods": {
+          "status": "reserved",
+          "version": "pokeapi-gen7-v1"
+        },
+        "items": {
+          "status": "reserved",
+          "version": "pokeapi-gen7-v1"
+        },
+        "learnsets": {
+          "status": "cataloged",
+          "version": "pokeapi-gen7-v1"
+        },
+        "stats": {
+          "status": "cataloged",
+          "version": "pokeapi-gen7-v1"
+        },
+        "terrain": {
+          "status": "reserved",
+          "version": "pokeapi-gen7-v1"
+        },
+        "typing": {
+          "status": "cataloged",
+          "version": "pokeapi-gen7-v1"
+        },
+        "weather": {
+          "status": "reserved",
+          "version": "pokeapi-gen7-v1"
+        }
+      },
+      "generation": 7,
+      "parent": "bundled-gen1-rby-v1"
+    },
+    "pokeapi-gen8-v1": {
+      "dimensions": {
+        "abilities": {
+          "status": "cataloged",
+          "version": "pokeapi-gen8-v1"
+        },
+        "evolution_methods": {
+          "status": "reserved",
+          "version": "pokeapi-gen8-v1"
+        },
+        "items": {
+          "status": "reserved",
+          "version": "pokeapi-gen8-v1"
+        },
+        "learnsets": {
+          "status": "cataloged",
+          "version": "pokeapi-gen8-v1"
+        },
+        "stats": {
+          "status": "cataloged",
+          "version": "pokeapi-gen8-v1"
+        },
+        "terrain": {
+          "status": "reserved",
+          "version": "pokeapi-gen8-v1"
+        },
+        "typing": {
+          "status": "cataloged",
+          "version": "pokeapi-gen8-v1"
+        },
+        "weather": {
+          "status": "reserved",
+          "version": "pokeapi-gen8-v1"
+        }
+      },
+      "generation": 8,
+      "parent": "bundled-gen1-rby-v1"
+    },
+    "pokeapi-gen9-v1": {
+      "dimensions": {
+        "abilities": {
+          "status": "cataloged",
+          "version": "pokeapi-gen9-v1"
+        },
+        "evolution_methods": {
+          "status": "reserved",
+          "version": "pokeapi-gen9-v1"
+        },
+        "items": {
+          "status": "reserved",
+          "version": "pokeapi-gen9-v1"
+        },
+        "learnsets": {
+          "status": "cataloged",
+          "version": "pokeapi-gen9-v1"
+        },
+        "stats": {
+          "status": "cataloged",
+          "version": "pokeapi-gen9-v1"
+        },
+        "terrain": {
+          "status": "reserved",
+          "version": "pokeapi-gen9-v1"
+        },
+        "typing": {
+          "status": "cataloged",
+          "version": "pokeapi-gen9-v1"
+        },
+        "weather": {
+          "status": "reserved",
+          "version": "pokeapi-gen9-v1"
+        }
+      },
+      "generation": 9,
+      "parent": "bundled-gen1-rby-v1"
+    }
+  },
+  "schema": 1
+}

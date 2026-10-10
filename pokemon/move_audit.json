@@ -1,0 +1,600 @@
+{
+  "catalog_generation": 1,
+  "moves": {
+    "absorb": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "acid": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "acid_armor": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "agility": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "amnesia": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "aurora_beam": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "barrage": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "barrier": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "bind": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "bite": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "blizzard": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "body_slam": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "bone_club": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "bonemerang": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "bubble": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "clamp": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "comet_punch": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "confuse_ray": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "confusion": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "constrict": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "conversion": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "counter": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "crabhammer": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "defense_curl": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "dig": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "disable": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "dizzy_punch": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "double_edge": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "double_kick": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "double_slap": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "double_team": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "dragon_rage": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "dream_eater": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "drill_peck": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "earthquake": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "ember": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "explosion": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "fire_punch": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "fire_spin": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "flamethrower": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "focus_energy": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "fury_attack": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "fury_swipes": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "glare": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "growl": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "growth": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "guillotine": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "gust": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "harden": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "haze": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "headbutt": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "high_jump_kick": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "horn_attack": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "horn_drill": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "hydro_pump": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "hyper_beam": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "hyper_fang": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "hypnosis": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "ice_beam": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "ice_punch": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "jump_kick": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "karate_chop": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "kinesis": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "leech_life": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "leech_seed": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "leer": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "lick": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "light_screen": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "lovely_kiss": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "low_kick": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "meditate": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "mega_kick": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "mega_punch": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "metronome": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "minimize": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "mirror_move": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "mist": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "night_shade": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "pay_day": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "peck": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "petal_dance": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "pin_missile": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "poison_gas": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "poison_powder": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "poison_sting": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "pound": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "psybeam": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "psychic": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "quick_attack": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "rage": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "razor_leaf": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "recover": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "reflect": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "rest": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "roar": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "rock_throw": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "rolling_kick": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "sand_attack": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "scratch": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "screech": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "seismic_toss": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "self_destruct": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "sharpen": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "sing": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "skull_bash": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "sky_attack": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "slam": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "slash": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "sleep_powder": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "sludge": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "smog": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "smokescreen": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "solar_beam": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "sonic_boom": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "spike_cannon": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "splash": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "spore": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "stomp": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "string_shot": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "stun_spore": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "submission": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "substitute": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "super_fang": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "supersonic": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "swift": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "swords_dance": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "tackle": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "tail_whip": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "take_down": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "teleport": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "thrash": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "thunder": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "thunder_punch": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "thunder_shock": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "thunder_wave": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "thunderbolt": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "transform": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "tri_attack": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    },
+    "twineedle": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "vice_grip": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "vine_whip": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "water_gun": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "waterfall": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "whirlwind": {
+      "classification": "standardized",
+      "reason": "Supported with a documented bounded singles-engine interpretation."
+    },
+    "wing_attack": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "withdraw": {
+      "classification": "accurate",
+      "reason": "Direct damage, stat, status, healing, recoil, drain, or flinch behavior is represented by the standard ruleset."
+    },
+    "wrap": {
+      "classification": "deferred",
+      "reason": "Requires dedicated persistent turn, field, move-history, escalating-status, or special-case state."
+    }
+  },
+  "ruleset": "standard",
+  "schema": 1,
+  "summary": {
+    "accurate": 85,
+    "deferred": 36,
+    "standardized": 26
+  }
+}
