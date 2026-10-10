@@ -243,6 +243,12 @@ class CogPolicyTests(unittest.TestCase):
         self.assertEqual(embed.title,f"{wild.name} escaped from SickProdigy!")
         self.assertIn("Pokémon Center",embed.description)
 
+    def test_install_message_uses_registered_admin_group(self):
+        metadata=json.loads((Path(__file__).parents[1] / "info.json").read_text(encoding="utf-8"))
+        self.assertIn("[p]pokemonset channel #channel",metadata["install_msg"])
+        self.assertNotIn("[p]pokemon set channel",metadata["install_msg"])
+        self.assertEqual(metadata["version"],Pokemon.__version__)
+
     def test_expected_command_surfaces_are_separate_and_documented(self):
         player_names={command.qualified_name for command in Pokemon.pokemon.walk_commands()}
         self.assertEqual(set(Pokemon.pokemon.aliases),{"pkmn","poke"})
