@@ -58,6 +58,7 @@ SERVER_TIMER_MINUTES=(1,10080)
 DEFAULT_SERVER_TIMER_MINUTES=60
 OWNER_TIMER_MINUTES=(1,10080)
 COLLECTION_PAGE_SIZE=9
+RECENT_TRAINER_SECONDS=3600
 PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
 SPECIAL_SPECIES={144,145,146,150,151}
 COLLECTION_REWARDS={5:{"balls":5},10:{"great_ball":5},25:{"ultra_ball":3},50:{"balls":10,"great_ball":5,"ultra_ball":5},100:{"balls":20,"great_ball":10,"ultra_ball":10}}
@@ -292,11 +293,11 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.63.1";__author__="SickProdigy"
+    __version__="0.63.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
-        self.battles={};self.locks={};self.activity={};self.recent_users={};self.recent_content={};self.vip_cache={};self.catalog=PokemonCatalog(cog_data_path(self)/"catalog.json",Path(__file__).with_name("gen1.json"));self.renderer=BattleRenderer(cog_data_path(self)/"sprites");self.cleanup_loop.start()
+        self.battles={};self.locks={};self.activity={};self.recent_users={};self.recent_trainers={};self.recent_content={};self.vip_cache={};self.catalog=PokemonCatalog(cog_data_path(self)/"catalog.json",Path(__file__).with_name("gen1.json"));self.renderer=BattleRenderer(cog_data_path(self)/"sprites");self.cleanup_loop.start()
     async def cog_load(self):
         try:self.catalog.load()
         except CatalogError:log.exception("Pokémon catalog cache could not be loaded")
@@ -626,9 +627,17 @@ class Pokemon(commands.Cog):
     async def record_activity(self,message):
         if not message.guild or message.author.bot:return
         conf=await self.config.guild(message.guild).all()
-        if not conf["enabled"] or conf.get("spawn_mode","timed")!="activity" or message.channel.id not in conf["channels"]:return
+        if not conf["enabled"] or message.channel.id not in conf["channels"]:return
+        now=time.monotonic()
+        trainers=getattr(self,"recent_trainers",None)
+        if trainers is None:self.recent_trainers={};trainers=self.recent_trainers
+        guild_trainers=trainers.setdefault(message.guild.id,{})
+        guild_trainers[message.author.id]=now
+        for user_id,last_seen in list(guild_trainers.items()):
+            if now-last_seen>RECENT_TRAINER_SECONDS:guild_trainers.pop(user_id,None)
+        if conf.get("spawn_mode","timed")!="activity":return
         policy=await self.config.all();minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
-        now=time.monotonic();content=" ".join((message.content or "").casefold().split())
+        content=" ".join((message.content or "").casefold().split())
         recent_key=(message.guild.id,message.author.id)
         previous=self.recent_content.get(recent_key)
         if previous and previous[0]==content and now-previous[1]<30:return
@@ -650,7 +659,9 @@ class Pokemon(commands.Cog):
             await self.spawn(message.channel)
     async def spawn_level(self,guild_id):
         levels=[]
-        for user_id in list(self.recent_users.get(guild_id,{}))[:12]:
+        now=time.monotonic();trainers=getattr(self,"recent_trainers",{}).get(guild_id,{})
+        recent=[user_id for user_id,last_seen in trainers.items() if now-last_seen<=RECENT_TRAINER_SECONDS]
+        for user_id in recent[:12]:
             data=await self.config.user_from_id(int(user_id)).all()
             collection=data.get("collection",[])
             if collection:levels.append(max(int(item.get("level",1)) for item in collection))
