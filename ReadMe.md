@@ -39,6 +39,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `movies` - Configurable TMDb new movie release announcements.
 - `navidrome` - Per-server Navidrome connections, linked users, and album announcements.
 - `nsfw` - NSFW-channel-only mature media with configurable external providers.
+- `pokemon` - Persistent global Pokémon catching, battles, trading, progression, and server-configured encounters.
 - `reminder` - Persistent personal reminders with restart recovery and timezone-aware display.
 - `rsspublisher` - Configurable RSS/Atom publishing and public repository branch updates.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
@@ -61,7 +62,6 @@ Current develop experiments include:
 - `twitter` — native X API post announcements.
 - `mtg` — experimental persistent two-player Magic rules prototype.
 - `yugioh` — experimental persistent two-player Yu-Gi-Oh rules prototype.
-- `pokemon` — experimental global catching and wild-battle RPG.
 
 ## External Cog Sync Helper
 
