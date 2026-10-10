@@ -416,6 +416,24 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(files),1)
 
 
+    async def test_timed_mode_tracks_recent_trainer_for_spawn_level_without_activity_points(self):
+        conf={"enabled":True,"spawn_mode":"timed","channels":[10]}
+        trainer=OwnedPokemon.create("trainer",4,6,seed=1)
+        cog=Pokemon.__new__(Pokemon);cog.activity={};cog.recent_users={};cog.recent_trainers={};cog.recent_content={}
+        cog.config=SimpleNamespace(
+            guild=lambda guild:StoredSection(conf),
+            user_from_id=lambda user_id:StoredSection({"collection":[trainer.raw()]}),
+        )
+        message=SimpleNamespace(guild=SimpleNamespace(id=42),channel=SimpleNamespace(id=10),author=SimpleNamespace(id=7,bot=False),content="hello trainers")
+
+        await cog.record_activity(message)
+        with patch("pokemon.pokemon.random.SystemRandom.choice",return_value=0):
+            level=await cog.spawn_level(42)
+
+        self.assertEqual(level,6)
+        self.assertEqual(cog.activity,{})
+        self.assertIn(7,cog.recent_trainers[42])
+
     async def test_completed_member_commands_count_as_activity_without_repeat_farming(self):
         conf={"enabled":True,"spawn_mode":"activity","channels":[10],"active_encounter":None,"threshold_min":8,"threshold_max":15,"threshold":12,"spawn_cooldown":120,"last_spawn_at":None,"activity":0}
         policy={"minimum_threshold":8,"minimum_cooldown":120}
