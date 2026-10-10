@@ -106,6 +106,7 @@ Configure a channel and add sources:
 [p]rocketleagueset clips sourceadd https://www.youtube.com/@creator
 [p]rocketleagueset clips sourceadd https://www.youtube.com/playlist?list=PLAYLIST_ID
 [p]rocketleagueset clips sources
+[p]rocketleagueset clips notifications silent
 [p]rocketleagueset clips enable
 ```
 
@@ -137,6 +138,7 @@ Useful controls:
 
 - `[p]rocketleagueset clips sourceremove <id>` - remove a source listed by `sources`.
 - `[p]rocketleagueset clips interval <hours>` - set an approximate 1-168 hour interval.
+- `[p]rocketleagueset clips notifications <silent|normal>` - choose delivery for automatic clips; the default is silent. Manual `postnow` posts remain normal.
 - `[p]rocketleagueset clips maxlength <seconds>` - allow clips from 15-600 seconds.
 - `[p]rocketleagueset clips refresh` - refresh every configured source now.
 - `[p]rocketleagueset clips postnow` - post one unseen eligible clip for testing.
