@@ -8,6 +8,7 @@ import secrets
 import time
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple, Union
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 import discord
@@ -25,12 +26,43 @@ from .setup import NavidromeSetupView, account_credentials_message
 log = logging.getLogger("red.sick-cogs.Navidrome")
 CONFIG_IDENTIFIER = 9172048261
 TOKEN_PREFIX = "navidrome_"
-USER_AGENT = "Sick-Cogs-Navidrome/1.2.0"
+USER_AGENT = "Sick-Cogs-Navidrome/1.2.1"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
 def utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
+
+
+def parse_quiet_clock(value: str) -> int:
+    parts = str(value).split(":")
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise ValueError("Use 24-hour HH:MM times.")
+    hour, minute = map(int, parts)
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        raise ValueError("Use 24-hour HH:MM times.")
+    return hour * 60 + minute
+
+
+def format_quiet_clock(minutes: int) -> str:
+    minutes = int(minutes) % 1440
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def quiet_hours_active(settings: Dict[str, Any], now: Optional[datetime.datetime] = None) -> bool:
+    zone_name = settings.get("quiet_timezone")
+    start = settings.get("quiet_start")
+    end = settings.get("quiet_end")
+    if not zone_name or start is None or end is None:
+        return False
+    try:
+        local = (now or utc_now()).astimezone(ZoneInfo(str(zone_name)))
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        return False
+    current = local.hour * 60 + local.minute
+    start = int(start)
+    end = int(end)
+    return start <= current < end if start < end else current >= start or current < end
 
 
 async def navidrome_config_permission(ctx: commands.Context) -> bool:
@@ -322,7 +354,7 @@ class Navidrome(commands.Cog):
     """Connect each Discord server to its own approved Navidrome library."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.0"
+    __version__ = "1.2.1"
 
     default_global = {"connections": {}, "guild_connections_enabled": False}
     default_guild = {
@@ -331,6 +363,11 @@ class Navidrome(commands.Cog):
         "guild_connection": None,
         "announcement_enabled": False,
         "announcement_channel_id": None,
+        "notification_mode": "silent",
+        "notification_role_id": None,
+        "quiet_timezone": None,
+        "quiet_start": None,
+        "quiet_end": None,
         "interval_minutes": 60,
         "next_check_at": None,
         "announced_album_ids": [],
@@ -712,6 +749,35 @@ class Navidrome(commands.Cog):
         embed.set_footer(text="Recently added to Navidrome")
         return embed
 
+    def announcement_delivery(
+        self,
+        channel: GuildMessageable,
+        settings: Dict[str, Any],
+        now: Optional[datetime.datetime] = None,
+    ) -> Dict[str, Any]:
+        if quiet_hours_active(settings, now):
+            return {"silent": True, "allowed_mentions": discord.AllowedMentions.none()}
+        mode = str(settings.get("notification_mode", "silent")).casefold()
+        if mode == "role":
+            role_id = settings.get("notification_role_id")
+            try:
+                role = channel.guild.get_role(int(role_id)) if role_id else None
+            except (TypeError, ValueError):
+                role = None
+            if role:
+                return {
+                    "content": role.mention,
+                    "silent": False,
+                    "allowed_mentions": discord.AllowedMentions(
+                        everyone=False, users=False, roles=[role], replied_user=False
+                    ),
+                }
+            return {"silent": True, "allowed_mentions": discord.AllowedMentions.none()}
+        return {
+            "silent": mode != "normal",
+            "allowed_mentions": discord.AllowedMentions.none(),
+        }
+
     async def send_album(
         self,
         channel: GuildMessageable,
@@ -719,6 +785,8 @@ class Navidrome(commands.Cog):
         client: NavidromeClient,
         *,
         content: Optional[str] = None,
+        silent: bool = False,
+        allowed_mentions: Optional[discord.AllowedMentions] = None,
     ):
         embed = self.album_embed(album)
         artwork = await client.cover_art(album.get("coverArt"))
@@ -730,7 +798,8 @@ class Navidrome(commands.Cog):
             content=content,
             embed=embed,
             file=file,
-            allowed_mentions=discord.AllowedMentions.none(),
+            allowed_mentions=allowed_mentions or discord.AllowedMentions.none(),
+            silent=silent,
         )
 
     @staticmethod
@@ -803,6 +872,30 @@ class Navidrome(commands.Cog):
             inline=True,
         )
         embed.add_field(name="Channel", value=channel.mention if channel else "Not set", inline=True)
+        notification_mode = str(settings.get("notification_mode", "silent")).casefold()
+        role_id = settings.get("notification_role_id")
+        try:
+            role = guild.get_role(int(role_id)) if role_id else None
+        except (AttributeError, TypeError, ValueError):
+            role = None
+        role_text = role.mention if role else ("Missing/deleted" if role_id else "None")
+        if (
+            settings.get("quiet_timezone")
+            and settings.get("quiet_start") is not None
+            and settings.get("quiet_end") is not None
+        ):
+            quiet_state = "active now" if quiet_hours_active(settings) else "inactive now"
+            quiet_start = format_quiet_clock(settings["quiet_start"])
+            quiet_end = format_quiet_clock(settings["quiet_end"])
+            quiet_timezone = settings["quiet_timezone"]
+            quiet_text = f"{quiet_start}–{quiet_end} {quiet_timezone} ({quiet_state})"
+        else:
+            quiet_text = "Disabled"
+        embed.add_field(
+            name="Notification delivery",
+            value=f"{notification_mode.title()} · Alert role: {role_text} · Quiet hours: {quiet_text}",
+            inline=False,
+        )
         embed.add_field(
             name="Interval", value=f"{settings.get('interval_minutes', 60)} minutes", inline=True
         )
@@ -888,8 +981,9 @@ class Navidrome(commands.Cog):
         ]
         original_seen_count = len(seen)
         try:
+            delivery = self.announcement_delivery(channel, settings)
             for album in unseen[:5]:
-                await self.send_album(channel, album, client)
+                await self.send_album(channel, album, client, **delivery)
                 seen.append(str(album["id"]))
         finally:
             # Persist every successfully delivered ID even if a later Discord send fails.
@@ -1481,6 +1575,80 @@ class Navidrome(commands.Cog):
         await self.config.guild(ctx.guild).interval_minutes.set(minutes)
         await self._set_next_check(ctx.guild, minutes)
         await ctx.send(f"Navidrome will be checked every {minutes} minutes.")
+
+    @navidromeset.command(name="notifications", aliases=("notify",))
+    async def navidromeset_notifications(self, ctx: commands.Context, mode: str):
+        """Choose silent, normal, or opt-in-role album notifications."""
+        mode = mode.casefold()
+        if mode not in {"silent", "normal", "role"}:
+            return await ctx.send("Choose silent, normal, or role.")
+        section = self.config.guild(ctx.guild)
+        previous = await section.notification_mode()
+        await section.notification_mode.set(mode)
+        if mode == "role" and not await section.notification_role_id():
+            suffix = " No alert role is configured, so announcements will remain silent until you set one."
+        elif mode == "silent":
+            suffix = " Automatic album posts remain visible without push or desktop notifications."
+        elif mode == "normal":
+            suffix = " Automatic album posts use Discord’s normal channel notification behavior."
+        else:
+            suffix = " The configured opt-in role will be mentioned outside quiet hours."
+        await ctx.send(f"Album notifications changed from **{previous}** to **{mode}**.{suffix}")
+
+    @navidromeset.command(name="notificationrole", aliases=("alertrole",))
+    async def navidromeset_notification_role(self, ctx: commands.Context, role: str):
+        """Set or clear the opt-in album alert role."""
+        section = self.config.guild(ctx.guild)
+        previous = await section.notification_role_id()
+        old = f"<@&{previous}>" if previous else "none"
+        if role.casefold() in {"clear", "none", "off", "reset"}:
+            await section.notification_role_id.set(None)
+            return await ctx.send(
+                f"Album alert role changed from {old} to **none**. Role notification mode will safely send silently."
+            )
+        try:
+            resolved = await commands.RoleConverter().convert(ctx, role)
+        except commands.BadArgument:
+            return await ctx.send("Mention an existing role, provide its ID, or use `clear`.")
+        if resolved.is_default():
+            return await ctx.send("The @everyone role cannot be used for album alerts. Create an opt-in role instead.")
+        await section.notification_role_id.set(resolved.id)
+        await ctx.send(f"Album alert role changed from {old} to {resolved.mention}.")
+
+    @navidromeset.command(name="quiethours")
+    async def navidromeset_quiet_hours(
+        self, ctx: commands.Context, timezone_name: str, start: str = None, end: str = None
+    ):
+        """Set local quiet hours or disable them with `off`."""
+        section = self.config.guild(ctx.guild)
+        settings = await section.all()
+        if timezone_name.casefold() in {"off", "clear", "none", "reset"}:
+            settings.update({"quiet_timezone": None, "quiet_start": None, "quiet_end": None})
+            await section.set(settings)
+            return await ctx.send("Navidrome quiet hours are disabled.")
+        if start is None or end is None:
+            return await ctx.send("Use `navidromeset quiethours <timezone> <HH:MM> <HH:MM>`, or `off`.")
+        try:
+            ZoneInfo(timezone_name)
+            start_minute = parse_quiet_clock(start)
+            end_minute = parse_quiet_clock(end)
+        except ZoneInfoNotFoundError:
+            return await ctx.send("That IANA timezone was not found. Example: `America/New_York`.")
+        except ValueError as error:
+            return await ctx.send(str(error))
+        if start_minute == end_minute:
+            return await ctx.send("Quiet-hour start and end times must differ.")
+        settings.update({
+            "quiet_timezone": timezone_name,
+            "quiet_start": start_minute,
+            "quiet_end": end_minute,
+        })
+        await section.set(settings)
+        await ctx.send(
+            f"Navidrome quiet hours are **{format_quiet_clock(start_minute)}–"
+            f"{format_quiet_clock(end_minute)} {timezone_name}**. Automatic posts remain visible "
+            "but send silently with no alert-role mention during that window."
+        )
 
     @navidromeset.command(name="enable")
     async def navidromeset_enable(self, ctx: commands.Context):
