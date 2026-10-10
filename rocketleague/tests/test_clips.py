@@ -1,5 +1,7 @@
 import json
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 from rocketleague.clips import (
     ClipSourceError,
@@ -119,6 +121,7 @@ class ClipSourceTests(unittest.TestCase):
             "sources",
             "interval",
             "maxlength",
+            "notifications",
             "enable",
             "disable",
             "status",
@@ -151,6 +154,45 @@ class ClipSourceTests(unittest.TestCase):
         """
         clip = parser("https://medal.tv/games/rocket-league/clips/example", html)
         self.assertEqual(clip["url"], "https://medal.tv/games/rocket-league/clips/example")
+
+
+class ClipDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def make_cog(*, silent=True):
+        settings = {
+            "clip_channel_id": 10, "clip_silent": silent,
+            "clip_posted": [], "clip_interval": 3600,
+        }
+        group = SimpleNamespace(
+            all=AsyncMock(return_value=settings),
+            clip_posted=SimpleNamespace(set=AsyncMock()),
+            clip_last_source_id=SimpleNamespace(set=AsyncMock()),
+            clip_last_post=SimpleNamespace(set=AsyncMock()),
+            clip_next_post=SimpleNamespace(set=AsyncMock()),
+        )
+        cog = object.__new__(RocketLeague)
+        cog.config = SimpleNamespace(guild=MagicMock(return_value=group))
+        cog._choose_clip = AsyncMock(return_value=(
+            {"id": 1},
+            {"provider": "medal", "clip_id": "abc", "url": "https://example.com/clip"},
+        ))
+        channel = SimpleNamespace(send=AsyncMock())
+        guild = SimpleNamespace(get_channel=lambda channel_id: channel)
+        return cog, guild, channel
+
+    async def test_automatic_clip_uses_server_delivery_preference(self):
+        cog, guild, channel = self.make_cog(silent=True)
+        await cog._post_clip_for_guild(guild, automatic=True)
+        self.assertTrue(channel.send.await_args.kwargs["silent"])
+
+        cog, guild, channel = self.make_cog(silent=False)
+        await cog._post_clip_for_guild(guild, automatic=True)
+        self.assertFalse(channel.send.await_args.kwargs["silent"])
+
+    async def test_manual_post_now_delivery_remains_normal(self):
+        cog, guild, channel = self.make_cog(silent=True)
+        await cog._post_clip_for_guild(guild)
+        self.assertFalse(channel.send.await_args.kwargs["silent"])
 
 
 if __name__ == "__main__":
