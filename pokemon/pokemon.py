@@ -93,6 +93,10 @@ def encounter_level(levels,offset=0):
 def encounter_shiny(rng):
     return rng.randrange(4096)==0
 
+
+def encounter_needs_level_migration(raw):
+    return not raw.get("level_locked") or int(raw.get("level", 0)) < 1
+
 def active_guild_encounters(encounters,guild_id):
     return {int(key):raw for key,raw in encounters.items() if int(raw.get("guild_id",0))==int(guild_id) and raw.get("state") in {"open","battle"}}
 
@@ -288,7 +292,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.63.0";__author__="SickProdigy"
+    __version__="0.63.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -706,7 +710,7 @@ class Pokemon(commands.Cog):
             owned=OwnedPokemon.from_raw(owned_raw)
             if owned.pending_moves:
                 await i.response.send_message("Your active Pokémon has an unfinished move choice. Use `pokemon moves` first.",ephemeral=True);return
-            if not raw.get("level_locked") or int(raw.get("level",0))<2:
+            if encounter_needs_level_migration(raw):
                 raw["level"]=scaled_wild_level(owned.level,random.SystemRandom().randrange(-2,3))
                 raw["gender"]=encounter_gender(SPECIES[int(raw["species_id"])],random.SystemRandom())
                 raw["level_locked"]=True
