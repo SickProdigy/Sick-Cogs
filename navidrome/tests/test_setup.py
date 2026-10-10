@@ -1,9 +1,10 @@
+import datetime
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from navidrome.client import NavidromeError
-from navidrome.navidrome import Navidrome
+from navidrome.navidrome import Navidrome, parse_quiet_clock, quiet_hours_active
 from navidrome.setup import (
     AccountCreateModal, AccountManagerView, ConnectionModal, DirectAccountCreateModal,
     DirectUserActionView, DirectUsersView, NavidromeSetupView, UserActionView, owner_check,
@@ -44,6 +45,11 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             "connection": None,
             "announcement_enabled": False,
             "announcement_channel_id": None,
+            "notification_mode": "silent",
+            "notification_role_id": None,
+            "quiet_timezone": None,
+            "quiet_start": None,
+            "quiet_end": None,
             "interval_minutes": 60,
             "next_check_at": None,
             "announced_album_ids": [],
@@ -77,6 +83,56 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         )
         member_names = {command.name for command in Navidrome.navidrome.commands}
         self.assertIn("account", member_names)
+
+    def test_notification_defaults_are_quiet(self):
+        self.assertEqual(Navidrome.default_guild["notification_mode"], "silent")
+        self.assertIsNone(Navidrome.default_guild["notification_role_id"])
+        self.assertIsNone(Navidrome.default_guild["quiet_timezone"])
+
+    def test_quiet_hours_support_daytime_overnight_and_timezone(self):
+        daytime = {"quiet_timezone": "UTC", "quiet_start": 8 * 60, "quiet_end": 17 * 60}
+        overnight = {"quiet_timezone": "America/New_York", "quiet_start": 22 * 60, "quiet_end": 7 * 60}
+        self.assertTrue(quiet_hours_active(daytime, datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.timezone.utc)))
+        self.assertFalse(quiet_hours_active(daytime, datetime.datetime(2026, 1, 1, 20, tzinfo=datetime.timezone.utc)))
+        self.assertTrue(quiet_hours_active(overnight, datetime.datetime(2026, 1, 2, 4, tzinfo=datetime.timezone.utc)))
+        self.assertFalse(quiet_hours_active(overnight, datetime.datetime(2026, 1, 2, 18, tzinfo=datetime.timezone.utc)))
+        self.assertEqual(parse_quiet_clock("07:05"), 425)
+        with self.assertRaises(ValueError):
+            parse_quiet_clock("25:00")
+
+    def test_delivery_modes_and_missing_role_fallback(self):
+        cog, _ = self.make_cog()
+        role = SimpleNamespace(id=7, mention="<@&7>")
+        guild = SimpleNamespace(get_role=lambda role_id: role if role_id == 7 else None)
+        channel = SimpleNamespace(guild=guild)
+        silent = cog.announcement_delivery(channel, {"notification_mode": "silent"})
+        normal = cog.announcement_delivery(channel, {"notification_mode": "normal"})
+        role_delivery = cog.announcement_delivery(
+            channel, {"notification_mode": "role", "notification_role_id": 7}
+        )
+        missing = cog.announcement_delivery(
+            channel, {"notification_mode": "role", "notification_role_id": 8}
+        )
+        self.assertTrue(silent["silent"])
+        self.assertFalse(normal["silent"])
+        self.assertEqual(role_delivery["content"], "<@&7>")
+        self.assertFalse(role_delivery["silent"])
+        self.assertTrue(missing["silent"])
+        self.assertNotIn("content", missing)
+
+    def test_quiet_hours_override_role_delivery(self):
+        cog, _ = self.make_cog()
+        role = SimpleNamespace(id=7, mention="<@&7>")
+        channel = SimpleNamespace(guild=SimpleNamespace(get_role=lambda role_id: role))
+        settings = {
+            "notification_mode": "role", "notification_role_id": 7,
+            "quiet_timezone": "UTC", "quiet_start": 0, "quiet_end": 120,
+        }
+        delivery = cog.announcement_delivery(
+            channel, settings, datetime.datetime(2026, 1, 1, 1, tzinfo=datetime.timezone.utc)
+        )
+        self.assertTrue(delivery["silent"])
+        self.assertNotIn("content", delivery)
 
     async def test_setup_view_shows_connection_channel_and_controls(self):
         cog, _ = self.make_cog(
@@ -141,6 +197,51 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         group.announced_album_ids.set.assert_awaited_once_with(["a", "b"])
         group.announcement_enabled.set.assert_awaited_once_with(True)
         cog._set_next_check.assert_awaited_once()
+
+    async def test_scheduled_posts_apply_notification_delivery(self):
+        cog, group = self.make_cog(settings={
+            "connection": "home", "announcement_enabled": True,
+            "announcement_channel_id": 10, "notification_mode": "silent",
+            "notification_role_id": None, "quiet_timezone": None,
+            "quiet_start": None, "quiet_end": None, "interval_minutes": 60,
+            "next_check_at": None, "announced_album_ids": [],
+            "last_success_at": None, "accounts": {},
+        })
+        guild = SimpleNamespace(id=2)
+        channel = SimpleNamespace(id=10, guild=SimpleNamespace(get_role=lambda role_id: None))
+        client = SimpleNamespace()
+        cog._channel = AsyncMock(return_value=channel)
+        cog.send_album = AsyncMock()
+        cog._set_next_check = AsyncMock()
+        await cog._check_guild(guild, [{"id": "new"}], client)
+        cog.send_album.assert_awaited_once()
+        self.assertTrue(cog.send_album.await_args.kwargs["silent"])
+        self.assertNotIn("content", cog.send_album.await_args.kwargs)
+        group.announced_album_ids.set.assert_awaited_once_with(["new"])
+
+    async def test_preview_does_not_apply_automatic_notification_policy(self):
+        cog, _ = self.make_cog(
+            profiles={"home": {"base_url": "https://music.example.com"}},
+            settings={
+                "connection": "home", "announcement_enabled": False,
+                "announcement_channel_id": 10, "notification_mode": "silent",
+                "notification_role_id": None, "quiet_timezone": None,
+                "quiet_start": None, "quiet_end": None, "interval_minutes": 60,
+                "next_check_at": None, "announced_album_ids": [],
+                "last_success_at": None, "accounts": {},
+            },
+        )
+        guild = SimpleNamespace(id=2)
+        channel = SimpleNamespace(id=10, mention="<#10>")
+        client = SimpleNamespace(newest_albums=AsyncMock(return_value=[{"id": "new"}]))
+        cog._channel = AsyncMock(return_value=channel)
+        cog._client = AsyncMock(return_value=client)
+        cog.send_album = AsyncMock()
+        ok, _ = await cog.preview_announcement(guild)
+        self.assertTrue(ok)
+        cog.send_album.assert_awaited_once_with(
+            channel, {"id": "new"}, client, content="Navidrome announcement preview"
+        )
 
     async def test_shared_connection_fetches_once_for_multiple_guilds(self):
         cog, _ = self.make_cog()
