@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import COMPLETED_GYMS,KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
-from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
+from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, spawn_profile_matches, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeCollectionView, GymChallengeView
@@ -754,22 +754,30 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repaired.moves,("ember",));self.assertEqual(repaired.move_pp,{"ember":1})
         rapidash.moves=("ember","agility");self.assertEqual(repair_underleveled_evolution_moves(rapidash.raw())["moves"],["ember","agility"])
 
-    async def test_schema_twenty_adds_profiles_and_prior_migrations(self):
+    async def test_schema_twenty_one_adds_profiles_and_prior_migrations(self):
         schema=AsyncMock(return_value=13);schema.set=AsyncMock();timer_minimum=AsyncMock(return_value=60);timer_minimum.set=AsyncMock()
         encounter_minimum=StoredValue(60);encounter_maximum=StoredValue(900);encounter_default=StoredValue(120);prices=StoredValue({**mart_prices(),"moon_stone":5000})
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,minimum_timer=timer_minimum,minimum_encounter_timeout=encounter_minimum,maximum_encounter_timeout=encounter_maximum,encounter_timeout=encounter_default,all_guilds=AsyncMock(return_value={}),all_users=AsyncMock(return_value={}),encounters=StoredValue({}),mart_prices=prices)
-        await cog._migrate();timer_minimum.set.assert_awaited_once_with(60);self.assertEqual(schema.set.await_args_list[-1].args,(20,));self.assertEqual((encounter_minimum.value,encounter_maximum.value,encounter_default.value),(60,900,120));self.assertEqual(prices.value["moon_stone"],25000)
+        await cog._migrate();timer_minimum.set.assert_awaited_once_with(60);self.assertEqual(schema.set.await_args_list[-1].args,(21,));self.assertEqual((encounter_minimum.value,encounter_maximum.value,encounter_default.value),(60,900,120));self.assertEqual(prices.value["moon_stone"],25000)
 
-    async def test_schema_twenty_preserves_custom_moon_stone_price(self):
+    async def test_schema_twenty_one_preserves_custom_moon_stone_price(self):
         schema=AsyncMock(return_value=17);schema.set=AsyncMock();prices=StoredValue({**mart_prices(),"moon_stone":42000})
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,mart_prices=prices,all_guilds=AsyncMock(return_value={}))
-        await cog._migrate();self.assertEqual(prices.value["moon_stone"],42000);self.assertEqual(schema.set.await_args.args,(20,))
+        await cog._migrate();self.assertEqual(prices.value["moon_stone"],42000);self.assertEqual(schema.set.await_args.args,(21,))
 
-    async def test_schema_twenty_migrates_existing_guilds_without_retuning(self):
+    async def test_schema_twenty_one_migrates_existing_guilds_without_retuning(self):
         schema=StoredValue(18);section=StoredSection({"enabled":True,"timer_minutes":47,"encounter_timeout":420,"battle_timeout":780,"max_active_encounters":4})
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,all_guilds=AsyncMock(return_value={42:dict(section.value)}),guild_from_id=lambda guild_id:section)
         await cog._migrate()
-        self.assertEqual(schema.value,20);self.assertEqual(section.value["notification_mode"],"silent");self.assertEqual(section.value["spawn_profile"],"custom");self.assertEqual((section.value["timer_minutes"],section.value["encounter_timeout"],section.value["battle_timeout"],section.value["max_active_encounters"]),(47,420,780,4));self.assertIsNone(section.value["notification_role_id"]);self.assertIsNone(section.value["quiet_timezone"])
+        self.assertEqual(schema.value,21);self.assertEqual(section.value["notification_mode"],"silent");self.assertEqual(section.value["spawn_profile"],"custom");self.assertEqual((section.value["timer_minutes"],section.value["encounter_timeout"],section.value["battle_timeout"],section.value["max_active_encounters"]),(47,420,780,4));self.assertIsNone(section.value["notification_role_id"]);self.assertIsNone(section.value["quiet_timezone"])
+
+    async def test_schema_twenty_one_corrects_false_profile_labels(self):
+        schema=StoredValue(20)
+        mismatched=StoredSection({"spawn_profile":"balanced","timer_minutes":30,"encounter_timeout":900,"battle_timeout":900,"max_active_encounters":3})
+        exact=StoredSection({"spawn_profile":"balanced","timer_minutes":30,"encounter_timeout":900,"battle_timeout":900,"max_active_encounters":2})
+        sections={42:mismatched,43:exact};cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,all_guilds=AsyncMock(return_value={key:dict(value.value) for key,value in sections.items()}),guild_from_id=lambda guild_id:sections[guild_id])
+        await cog._migrate()
+        self.assertEqual(schema.value,21);self.assertEqual(mismatched.value["spawn_profile"],"custom");self.assertEqual(exact.value["spawn_profile"],"balanced")
 
     async def test_gift_settlement_moves_up_to_three_without_payment(self):
         gifts=[OwnedPokemon.create(f"gift-{index}",species,5,seed=index).raw() for index,species in enumerate((1,4,7),1)];keeper=OwnedPokemon.create("keeper",25,5,seed=9).raw();offerer=StoredSection({"collection":gifts+[keeper],"party":[raw["instance_id"] for raw in gifts]});recipient=StoredSection({"collection":[],"party":[]})

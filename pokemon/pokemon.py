@@ -35,7 +35,7 @@ MART_ITEMS={
     "moon_stone":("Moon Stone","moon_stone",25000),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball","firestone":"fire_stone","waterstone":"water_stone","thunderstone":"thunder_stone","leafstone":"leaf_stone","moonstone":"moon_stone","fire":"fire_stone","water":"water_stone","thunder":"thunder_stone","leaf":"leaf_stone","moon":"moon_stone"}
-GLOBAL={"schema":20,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
+GLOBAL={"schema":21,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
 BOX_SIZE=30
 MAX_BOXES=8
 PARTY_SIZE=6
@@ -62,6 +62,16 @@ SPAWN_PROFILES={
     "balanced":{"timer_minutes":30,"encounter_minutes":15,"battle_minutes":15,"concurrency":2},
     "relaxed":{"timer_minutes":60,"encounter_minutes":20,"battle_minutes":20,"concurrency":1},
 }
+
+def spawn_profile_matches(conf,name):
+    profile=SPAWN_PROFILES.get(str(name).casefold())
+    if profile is None:return False
+    return (
+        int(conf.get("timer_minutes",0))==profile["timer_minutes"]
+        and int(conf.get("encounter_timeout") or 0)==profile["encounter_minutes"]*60
+        and int(conf.get("battle_timeout",0))==profile["battle_minutes"]*60
+        and int(conf.get("max_active_encounters",0))==profile["concurrency"]
+    )
 COLLECTION_PAGE_SIZE=9
 RECENT_TRAINER_SECONDS=3600
 PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
@@ -489,9 +499,15 @@ class Pokemon(commands.Cog):
             await self.config.schema.set(19)
         if schema<20:
             for guild_id,data in (await self.config.all_guilds()).items():
-                data.setdefault("spawn_profile","custom");data.setdefault("encounter_owner_override",False)
+                data["spawn_profile"]="custom";data.setdefault("encounter_owner_override",False)
                 await self.config.guild_from_id(int(guild_id)).set(data)
             await self.config.schema.set(20)
+        if schema<21:
+            for guild_id,data in (await self.config.all_guilds()).items():
+                profile=data.get("spawn_profile","custom")
+                if profile in SPAWN_PROFILES and not spawn_profile_matches(data,profile):
+                    data["spawn_profile"]="custom";await self.config.guild_from_id(int(guild_id)).set(data)
+            await self.config.schema.set(21)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
