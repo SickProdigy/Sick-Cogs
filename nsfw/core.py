@@ -35,7 +35,7 @@ SEEN_LIMIT = 100
 class Core(commands.Cog):
 
     __author__ = ["SickProdigy", "Predä", "aikaterna"]
-    __version__ = "3.1.1"
+    __version__ = "3.1.2"
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""
@@ -204,8 +204,11 @@ class Core(commands.Cog):
         return url, payload
 
     @staticmethod
-    async def _send_autopost(channel, payload):
-        kwargs = {"allowed_mentions": discord.AllowedMentions.none()}
+    async def _send_autopost(channel, payload, *, silent: bool = False):
+        kwargs = {
+            "allowed_mentions": discord.AllowedMentions.none(),
+            "silent": silent,
+        }
         if isinstance(payload, discord.Embed):
             kwargs["embed"] = payload
         else:
@@ -248,7 +251,7 @@ class Core(commands.Cog):
                     if result is None:
                         raise RuntimeError("No new media available")
                     url, payload = result
-                    await self._send_autopost(channel, payload)
+                    await self._send_autopost(channel, payload, silent=True)
                 except (aiohttp.ClientError, asyncio.TimeoutError, discord.HTTPException, RuntimeError):
                     feed["next_post"] = self._retry_at(now, feed.get("interval", 3600))
                     feed["last_error"] = "The media provider is temporarily unavailable; retry scheduled."
