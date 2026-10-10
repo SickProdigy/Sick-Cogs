@@ -20,7 +20,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":None,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1,"concurrency_owner_override":False,"timer_owner_override":False,"notification_mode":"silent","notification_role_id":None,"quiet_timezone":None,"quiet_start":None,"quiet_end":None}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":None,"battle_timeout":900,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":1,"concurrency_owner_override":False,"timer_owner_override":False,"notification_mode":"silent","notification_role_id":None,"quiet_timezone":None,"quiet_start":None,"quiet_end":None}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{},"menu_style":"retro","vip_reward_month":None}
 MART_ITEMS={
     "poke_ball":("Poké Ball","balls",50),
@@ -1911,7 +1911,7 @@ class Pokemon(commands.Cog):
             progress=f"Activity: **{activity}/{target}** points (new target range {minimum}–{maximum}) · Cooldown: **{cooldown}s**"
             next_spawn=f"Waiting for a free slot ({len(active)}/{slot_limit} active)" if len(active)>=slot_limit else (f"Needs {target-activity} more activity points" if activity<target else "Ready on the next qualifying message")
         generations=effective_generations(conf.get("generations",[1]),policy.get("allowed_generations",[1]));generation_text=", ".join(map(str,generations))
-        enabled=conf.get("enabled",False);encounter_minutes=effective_encounter_timeout(conf,policy)//60;encounter_source="server override" if conf.get("encounter_timeout") is not None else "bot-wide default";battle_minutes=int(conf.get("battle_timeout",1800))//60
+        enabled=conf.get("enabled",False);encounter_minutes=effective_encounter_timeout(conf,policy)//60;encounter_source="server override" if conf.get("encounter_timeout") is not None else "bot-wide default";battle_minutes=int(conf.get("battle_timeout",GUILD["battle_timeout"]))//60
         rarity=policy.get("rarity_profile","friendly");specials="enabled" if policy.get("allow_special_species") else "event-only";expired_cards=conf.get("expired_card_mode","delete")
         notification_mode=str(conf.get("notification_mode","silent")).casefold();role_id=conf.get("notification_role_id");notification_role=f"<@&{role_id}>" if role_id and ctx.guild.get_role(int(role_id)) else ("missing/deleted" if role_id else "none")
         if conf.get("quiet_timezone") and conf.get("quiet_start") is not None and conf.get("quiet_end") is not None:

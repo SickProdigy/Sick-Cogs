@@ -170,6 +170,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertGreater(spawn_weight(very_rare),spawn_weight(very_rare,"challenging"))
 
     def test_global_policy_clamps_server_pace_and_generations(self):
+        self.assertEqual(GUILD["battle_timeout"],15*60)
         self.assertEqual((GLOBAL["minimum_timer"],GLOBAL["maximum_concurrency"]),(15,5))
         policy={"minimum_threshold":12,"minimum_cooldown":240}
         self.assertEqual(bounded_pace(5,9,60,policy),(12,12,240))
