@@ -68,6 +68,9 @@ when guilds share an approved connection.
 - `[p]navidromeset disconnect` - clear this guild's selection and announcement history.
 - `[p]navidromeset channel [channel]` - choose the announcement channel.
 - `[p]navidromeset interval <15-1440>` - set the polling interval in minutes.
+- `[p]navidromeset notifications <silent|normal|role>` - choose automatic-post delivery; the default is silent.
+- `[p]navidromeset notificationrole <role|clear>` - set the single opt-in role used by role delivery.
+- `[p]navidromeset quiethours <IANA timezone> <HH:MM> <HH:MM>|off` - silence posts and suppress role mentions during a local-time window; overnight windows are supported.
 - `[p]navidromeset enable|disable` - control scheduled album posts.
 - `[p]navidromeset preview` - preview the latest album without changing delivery history.
 - `[p]navidromeset status` - show configuration and the last successful check.
