@@ -46,6 +46,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `icarus` - Official Icarus Steam announcements with category filters and card or article delivery.
 - `movies` - Configurable TMDb new movie release announcements.
 - `nsfw` - NSFW-channel-only mature media with configurable external providers.
+- `pokemon` - Persistent global Pokémon catching, battles, trading, progression, and server-configured encounters.
 - `predictions` - Interactive server prediction games with optional fictional Red Bank stakes and staff-reviewed payouts.
 - `reminder` - Persistent personal reminders with restart recovery and timezone-aware display.
 - `rocketleague` - Cached RLCS tournament schedules and configurable server announcements.
