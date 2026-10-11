@@ -12,8 +12,9 @@ runtime, genres, status, and TMDb rating.
 1. Get a TMDb API key from <https://www.themoviedb.org/settings/api>.
 2. As the bot owner, set the shared key in a DM or private channel with `[p]set api tmdb api_key,YOUR_KEY`.
 3. Choose where announcements should appear with `[p]movieset channel #movies`.
-4. Optional: let users opt in to notifications by assigning them a role, then set `[p]movieset role @MovieNews`.
-5. Start scheduled checks with `[p]movieset enable`; stop them with `[p]movieset disable`.
+4. Choose per-server delivery with `[p]movieset notifications silent|normal`. Silent posts remain visible without Discord notifications or role mentions.
+5. Optional: let users opt in to normal-delivery notifications by assigning them a role, then set `[p]movieset role @MovieNews`.
+6. Start scheduled checks with `[p]movieset enable`; stop them with `[p]movieset disable`.
 
 The cog checks each server on its own persisted hourly schedule, posts at most one unposted movie per check, and enforces a configurable per-day cap. Reloading or restarting the cog preserves the next check time, so a release backlog cannot cause rapid-fire posts.
 
@@ -22,7 +23,8 @@ The cog checks each server on its own persisted hourly schedule, posts at most o
 - `[p]movies [title]` - show search guidance and random suggestions, or look up the supplied title.
 - `[p]movie <title>` - alias for `[p]movies <title>`.
 - `[p]movieset channel [channel]` - set the announcement channel, defaulting to the current channel.
-- `[p]movieset role <role>` - set the optional role mentioned by automatic release posts.
+- `[p]movieset notifications <silent|normal>` - suppress or allow Discord notifications for automatic and forced release posts; existing servers default to normal.
+- `[p]movieset role <role>` - set the optional role mentioned by normal-delivery automatic release posts.
 - `[p]movieset roleclear` - stop mentioning the notification role.
 - `[p]movieset enable` - start hourly release checks, with at most one post per check.
 - `[p]movieset disable` - stop automatic posts; lookups remain available.
