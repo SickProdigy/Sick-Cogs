@@ -1,7 +1,11 @@
+import io
+import json
+
 import discord
-from redbot.core import Config, checks, commands
+from redbot.core import Config, checks, commands, version_info
 from redbot.core.utils.chat_formatting import pagify
 
+from .exporter import build_inventory
 from .formatter import AdvancedHelpFormatter
 from .models import DEFAULT_AUDIENCE_LABELS
 from .views import AdvancedHelpView
@@ -27,7 +31,7 @@ class AdvancedHelp(commands.Cog):
     """Audience-first interactive help using Red's permission filtering."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
     def __init__(self, bot):
         self.bot = bot
@@ -97,6 +101,31 @@ class AdvancedHelp(commands.Cog):
                 await ctx.send(
                     "I could not send help by DM. Check your privacy settings."
                 )
+
+    @commands.command(name="docsreport", aliases=["commandinventory"])
+    @checks.is_owner()
+    async def docs_report(self, ctx):
+        """Export sanitized metadata for every registered command."""
+        global_settings = await self.config.all()
+        inventory = build_inventory(
+            self.bot,
+            ctx,
+            global_settings,
+            prefix=ctx.clean_prefix,
+            red_version=version_info,
+            advancedhelp_version=self.__version__,
+        )
+        content = json.dumps(
+            inventory, ensure_ascii=False, indent=2, sort_keys=True
+        ).encode("utf-8")
+        attachment = discord.File(
+            io.BytesIO(content), filename="sickgamingbot-command-inventory.json"
+        )
+        await ctx.send(
+            f"Sanitized command inventory: {inventory['command_count']} command paths. "
+            "Live permissions and disabled state remain authoritative.",
+            file=attachment,
+        )
 
     @commands.group(name="advancedhelpset", aliases=["advhelpset"], invoke_without_command=True)
     @checks.is_owner()

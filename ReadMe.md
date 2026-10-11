@@ -56,7 +56,7 @@ Current develop experiments include:
 - `imagine` — private provider-neutral AI image generation with explicit allowlisting.
 - `mybb` — per-server SickProdigy MyBB browsing and publishing.
 - `tickets` — private text-channel support with persistent staff controls.
-- `advancedhelp` — audience-first, permission-filtered interactive Red help.
+- `advancedhelp` — audience-first, permission-filtered interactive Red help with a sanitized owner-only command inventory export.
 - `codex` — private manual Codex allowance-cycle reminders.
 - `botupdates` — collaborative, human-approved bot update announcements.
 - `twitter` — native X API post announcements.

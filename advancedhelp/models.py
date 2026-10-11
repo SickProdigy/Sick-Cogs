@@ -79,18 +79,41 @@ class HelpCatalog:
             )
 
 
+def iter_command_chain(command):
+    """Yield a command followed by its parents without looping forever."""
+    seen = set()
+    current = command
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = getattr(current, "parent", None)
+
+
+def _declared_audience(command):
+    audience = "member"
+    rank = {"member": 0, "staff": 1, "server_owner": 2, "bot_owner": 3}
+    for current in iter_command_chain(command):
+        requires = getattr(current, "requires", None)
+        level = getattr(getattr(requires, "privilege_level", None), "name", "NONE")
+        candidate = {
+            "BOT_OWNER": "bot_owner",
+            "GUILD_OWNER": "server_owner",
+            "ADMIN": "staff",
+            "MOD": "staff",
+        }.get(level)
+        user_perms = getattr(requires, "user_perms", None)
+        if candidate is None and user_perms is not None and getattr(user_perms, "value", 0):
+            candidate = "staff"
+        if candidate is not None and rank[candidate] > rank[audience]:
+            audience = candidate
+    return audience
+
+
 def classify_audience(command, overrides):
     target = command.qualified_name.lower()
     if target in overrides:
         return overrides[target]
-    level = getattr(getattr(command, "requires", None), "privilege_level", None)
-    name = getattr(level, "name", "NONE")
-    return {
-        "BOT_OWNER": "bot_owner",
-        "GUILD_OWNER": "server_owner",
-        "ADMIN": "staff",
-        "MOD": "staff",
-    }.get(name, "member")
+    return _declared_audience(command)
 
 
 def classify_category(command, overrides):

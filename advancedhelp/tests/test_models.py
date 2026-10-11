@@ -6,13 +6,17 @@ from redbot.core import commands
 from advancedhelp.models import build_catalog, classify_audience
 
 
-def command(name, level, cog="General"):
-    requires = SimpleNamespace(privilege_level=level)
+def command(name, level, cog="General", parent=None, user_perms=None):
+    requires = SimpleNamespace(
+        privilege_level=level,
+        user_perms=user_perms,
+    )
     cog_object = SimpleNamespace(qualified_name=cog)
     return SimpleNamespace(
         qualified_name=name,
         requires=requires,
         cog=cog_object,
+        parent=parent,
     )
 
 
@@ -42,6 +46,19 @@ class ModelTests(unittest.TestCase):
             ),
             "bot_owner",
         )
+
+    def test_classification_inherits_parent_and_permission_only_checks(self):
+        owner_group = command("settings", commands.PrivilegeLevel.GUILD_OWNER)
+        child = command(
+            "settings channel", commands.PrivilegeLevel.NONE, parent=owner_group
+        )
+        self.assertEqual(classify_audience(child, {}), "server_owner")
+        permission_only = command(
+            "purge",
+            commands.PrivilegeLevel.NONE,
+            user_perms=SimpleNamespace(value=1),
+        )
+        self.assertEqual(classify_audience(permission_only, {}), "staff")
 
     def test_override_and_role_group_only_copy_visible_commands(self):
         member = command("ping", commands.PrivilegeLevel.NONE)
