@@ -146,9 +146,11 @@ class NsfwAutopostTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(Core.default_guild["autopost_silent"])
 
     async def test_notification_command_sets_server_preference(self):
-        config = FakeConfig({}, silent=False);ctx = SimpleNamespace(guild=object(), send=lambda message: _capture([], message))
+        config = FakeConfig({}, silent=False);sent = [];ctx = SimpleNamespace(guild=object(), send=lambda message: _capture(sent, message))
         await Nsfw.nsfwset_notifications.callback(SimpleNamespace(config=config), ctx, "silent")
-        self.assertTrue(config.silent.value)
+        self.assertTrue(config.silent.value);self.assertIn("changed from **normal** to **silent**", sent[0])
+        sent.clear();await Nsfw.nsfwset_notifications.callback(SimpleNamespace(config=config), ctx, "silent")
+        self.assertIn("remains **silent**", sent[0])
 
         sent = [];ctx.send = lambda message: _capture(sent, message)
         await Nsfw.nsfwset_notifications.callback(SimpleNamespace(config=config), ctx, "loud")

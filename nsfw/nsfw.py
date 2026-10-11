@@ -35,13 +35,16 @@ class Nsfw(Core, name="Nsfw"):
             await ctx.send("Choose `silent` or `normal`.")
             return
         silent = mode == "silent"
-        await self.config.guild(ctx.guild).autopost_silent.set(silent)
+        setting = self.config.guild(ctx.guild).autopost_silent
+        previous = "silent" if await setting() else "normal"
+        await setting.set(silent)
+        change = f"changed from **{previous}** to **{mode}**" if previous != mode else f"remains **{mode}**"
         detail = (
             "Scheduled NSFW posts will remain visible without push or desktop notifications."
             if silent
             else "Scheduled NSFW posts will use Discord’s normal channel notification behavior."
         )
-        await ctx.send(f"NSFW autopost delivery is now **{mode}**. {detail}")
+        await ctx.send(f"NSFW autopost delivery {change}. {detail}")
 
     @nsfwset.group(name="autopost", invoke_without_command=True)
     async def nsfwset_autopost(
