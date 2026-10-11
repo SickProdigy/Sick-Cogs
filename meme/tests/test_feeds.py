@@ -109,7 +109,7 @@ class MemeFeedReconciliationTests(unittest.TestCase):
 
 class MemeDeliveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_notification_command_sets_server_preference(self):
-        value = SimpleNamespace(set=AsyncMock())
+        value = AsyncMock(return_value=False);value.set = AsyncMock()
         cog = SimpleNamespace(
             config=SimpleNamespace(guild=lambda guild: SimpleNamespace(feed_silent=value))
         )
@@ -118,7 +118,11 @@ class MemeDeliveryTests(unittest.IsolatedAsyncioTestCase):
         await Meme.memeset_notifications.callback(cog, ctx, "normal")
 
         value.set.assert_awaited_once_with(False)
-        self.assertIn("normal", ctx.send.await_args.args[0])
+        self.assertIn("remains **normal**", ctx.send.await_args.args[0])
+
+        value.return_value=True;ctx.send.reset_mock()
+        await Meme.memeset_notifications.callback(cog, ctx, "normal")
+        self.assertIn("changed from **silent** to **normal**", ctx.send.await_args.args[0])
 
     async def test_sender_supports_silent_and_normal_delivery(self):
         channel = SimpleNamespace(send=AsyncMock())
