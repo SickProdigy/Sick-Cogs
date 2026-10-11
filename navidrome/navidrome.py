@@ -354,7 +354,7 @@ class Navidrome(commands.Cog):
     """Connect each Discord server to its own approved Navidrome library."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.1"
+    __version__ = "1.2.2"
 
     default_global = {"connections": {}, "guild_connections_enabled": False}
     default_guild = {
@@ -1585,6 +1585,7 @@ class Navidrome(commands.Cog):
         section = self.config.guild(ctx.guild)
         previous = await section.notification_mode()
         await section.notification_mode.set(mode)
+        change = f"changed from **{previous}** to **{mode}**" if previous != mode else f"remains **{mode}**"
         if mode == "role" and not await section.notification_role_id():
             suffix = " No alert role is configured, so announcements will remain silent until you set one."
         elif mode == "silent":
@@ -1593,7 +1594,7 @@ class Navidrome(commands.Cog):
             suffix = " Automatic album posts use Discord’s normal channel notification behavior."
         else:
             suffix = " The configured opt-in role will be mentioned outside quiet hours."
-        await ctx.send(f"Album notifications changed from **{previous}** to **{mode}**.{suffix}")
+        await ctx.send(f"Album notifications {change}.{suffix}")
 
     @navidromeset.command(name="notificationrole", aliases=("alertrole",))
     async def navidromeset_notification_role(self, ctx: commands.Context, role: str):

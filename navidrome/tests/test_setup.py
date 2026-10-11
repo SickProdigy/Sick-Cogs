@@ -848,6 +848,14 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         group.announcement_enabled.set.assert_awaited_once_with(True)
         cog._set_next_check.assert_awaited_once()
 
+    async def test_notification_confirmation_distinguishes_change_and_noop(self):
+        cog, group = self.make_cog(settings={"notification_mode": "silent", "notification_role_id": None})
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=2), send=AsyncMock())
+        await Navidrome.navidromeset_notifications.callback(cog, ctx, "normal")
+        self.assertIn("changed from **silent** to **normal**", ctx.send.await_args.args[0])
+        ctx.send.reset_mock();await Navidrome.navidromeset_notifications.callback(cog, ctx, "normal")
+        self.assertIn("remains **normal**", ctx.send.await_args.args[0])
+
     async def test_scheduled_posts_apply_notification_delivery(self):
         cog, group = self.make_cog(settings={
             "announcement_enabled": True,
