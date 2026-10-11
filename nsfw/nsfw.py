@@ -27,6 +27,22 @@ class Nsfw(Core, name="Nsfw"):
     async def nsfwset(self, ctx: commands.Context):
         """Settings for the Nsfw cog."""
 
+    @nsfwset.command(name="notifications", aliases=["notify"])
+    async def nsfwset_notifications(self, ctx: commands.Context, mode: str):
+        """Choose silent or normal delivery for scheduled NSFW posts."""
+        mode = mode.casefold()
+        if mode not in {"silent", "normal"}:
+            await ctx.send("Choose `silent` or `normal`.")
+            return
+        silent = mode == "silent"
+        await self.config.guild(ctx.guild).autopost_silent.set(silent)
+        detail = (
+            "Scheduled NSFW posts will remain visible without push or desktop notifications."
+            if silent
+            else "Scheduled NSFW posts will use Discord’s normal channel notification behavior."
+        )
+        await ctx.send(f"NSFW autopost delivery is now **{mode}**. {detail}")
+
     @nsfwset.group(name="autopost", invoke_without_command=True)
     async def nsfwset_autopost(
         self,
@@ -72,10 +88,12 @@ class Nsfw(Core, name="Nsfw"):
     @nsfwset_autopost.command(name="status", aliases=["show"])
     async def nsfwset_autopost_status(self, ctx: commands.Context):
         """Show this server's scheduled NSFW feed."""
-        feed = await self.config.guild(ctx.guild).autopost()
+        group = self.config.guild(ctx.guild)
+        feed = await group.autopost()
         if not feed:
             await ctx.send("No NSFW autopost feed is configured for this server.")
             return
+        delivery = "silent" if await group.autopost_silent() else "normal"
         channel = ctx.guild.get_channel(feed.get("channel_id"))
         error = self._autopost_destination_error(ctx.guild, channel)
         state = "OFF" if not feed.get("enabled", True) else "ON"
@@ -88,6 +106,7 @@ class Nsfw(Core, name="Nsfw"):
             f"**{feed.get('source', 'unknown')}** ({feed.get('provider', 'configured')}) "
             f"→ <#{feed.get('channel_id')}> · every {max(1, int(feed.get('interval', 21600)) // 60)}m · {state} · "
             f"next <t:{int(feed.get('next_post', 0))}:R>"
+            f" · delivery **{delivery}**"
         )
 
     @nsfwset_autopost.command(name="preview", aliases=["test"])

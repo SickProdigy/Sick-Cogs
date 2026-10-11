@@ -21,11 +21,12 @@ class FakeValue:
 
 
 class FakeConfig:
-    def __init__(self, feed):
+    def __init__(self, feed, silent=False):
         self.value = FakeValue(feed)
+        self.silent = FakeValue(silent)
 
     def guild(self, guild):
-        return SimpleNamespace(autopost=self.value)
+        return SimpleNamespace(autopost=self.value, autopost_silent=self.silent)
 
 
 class NsfwAutopostTests(unittest.IsolatedAsyncioTestCase):
@@ -141,6 +142,18 @@ class NsfwAutopostTests(unittest.IsolatedAsyncioTestCase):
     def test_minimum_interval_is_sensible(self):
         self.assertEqual(MIN_AUTOPOST_MINUTES, 30)
 
+    def test_scheduled_posts_default_to_normal_delivery(self):
+        self.assertFalse(Core.default_guild["autopost_silent"])
+
+    async def test_notification_command_sets_server_preference(self):
+        config = FakeConfig({}, silent=False);ctx = SimpleNamespace(guild=object(), send=lambda message: _capture([], message))
+        await Nsfw.nsfwset_notifications.callback(SimpleNamespace(config=config), ctx, "silent")
+        self.assertTrue(config.silent.value)
+
+        sent = [];ctx.send = lambda message: _capture(sent, message)
+        await Nsfw.nsfwset_notifications.callback(SimpleNamespace(config=config), ctx, "loud")
+        self.assertEqual(sent, ["Choose `silent` or `normal`."])
+
     async def test_scheduled_sender_can_suppress_notifications(self):
         sent = []
 
@@ -190,6 +203,7 @@ class NsfwAutopostTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("boobs", sent[0])
         self.assertIn("every 60m", sent[0])
         self.assertIn("ON", sent[0])
+        self.assertIn("delivery **normal**", sent[0])
 
     async def test_preview_does_not_change_the_saved_feed(self):
         feed = {"channel_id": 7, "source": "random", "interval": 7200,
