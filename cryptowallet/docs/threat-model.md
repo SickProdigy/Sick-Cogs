@@ -44,7 +44,7 @@ Intent IDs, stored pending state, owner-bound views, expiry, exact quote compari
 
 ### Provider, RPC, and chain disagreement
 
-Provider status or public RPC data may be stale, unavailable, or malicious. Network identity is explicit and capabilities fail closed. Final validation independently binds chain ID, provider-managed nonce strategy, fee policy, operation state, balance, authorization, and environment-isolated provider identity; confirmation independently handles public receipts, finality, replacement, and reorg evidence. Mainnet remains prohibited while its executable network capabilities are empty and until the remaining legal and release gates are complete.
+Provider status or public RPC data may be stale, unavailable, or malicious. Network identity is explicit and capabilities fail closed. Final validation independently binds chain ID, provider-managed nonce strategy, fee policy, operation state, balance, authorization, and environment-isolated provider identity; confirmation independently handles public receipts, finality, replacement, and reorg evidence. Mainnet remains prohibited while its executable network capabilities are empty and until the remaining security, acceptance, and release gates are complete. Outside legal review applies before monetization, platform fee sharing, promoted token activity, managed liquidity, custody-like behavior, or other expanded financial services; it is not a blanket prerequisite for free default-disabled proof-of-concept testing.
 
 ### Credential leakage
 
@@ -56,4 +56,4 @@ Exact acknowledgements, owner-only commands, capability gates, emergency pause, 
 
 ## Mainnet release blockers
 
-Base mainnet remains unavailable until issue 202 verifies provider ownership/export behavior, legal review, environment separation, final chain and nonce revalidation, monitoring and reconciliation, restart and provider-failure tests, migration/restart testing, complete ordinary-member develop acceptance, and a separately approved low-value smoke test.
+Base mainnet remains unavailable until issue 202 verifies provider ownership/export behavior, environment separation, final chain and nonce revalidation, monitoring and reconciliation, restart and provider-failure tests, migration/restart testing, complete ordinary-member develop acceptance, a separately approved low-value smoke test, and independent security review of the frozen release candidate. Any enabled scope that triggers outside-counsel review must complete that review before release.

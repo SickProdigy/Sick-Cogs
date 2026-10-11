@@ -895,7 +895,7 @@ class WalletTransactionCommands:
             ):
                 await ctx.send(
                     "Base mainnet sends remain code-disabled until the finished "
-                    "release candidate completes security and legal review."
+                    "release candidate completes independent security review."
                 )
                 return
             policy = await self.config.base_mainnet_policy()
