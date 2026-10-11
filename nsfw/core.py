@@ -35,7 +35,8 @@ SEEN_LIMIT = 100
 class Core(commands.Cog):
 
     __author__ = ["SickProdigy", "Predä", "aikaterna"]
-    __version__ = "3.1.2"
+    __version__ = "3.1.3"
+    default_guild = {"autopost": {}, "seen": [], "autopost_silent": False}
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""
@@ -55,7 +56,7 @@ class Core(commands.Cog):
         )
         self.config = Config.get_conf(self, identifier=512227974893010954, force_registration=True)
         self.config.register_global(use_reddit_api=False)
-        self.config.register_guild(autopost={}, seen=[])
+        self.config.register_guild(**self.default_guild)
         self._autopost_lock = asyncio.Lock()
         self.autopost_loop.start()
 
@@ -227,6 +228,7 @@ class Core(commands.Cog):
                     continue
                 group = self.config.guild_from_id(guild_id)
                 feed = await group.autopost()
+                autopost_silent = await group.autopost_silent()
                 if not feed or not feed.get("enabled", True) or feed.get("next_post", 0) > now:
                     continue
                 channel = guild.get_channel(feed.get("channel_id"))
@@ -251,7 +253,7 @@ class Core(commands.Cog):
                     if result is None:
                         raise RuntimeError("No new media available")
                     url, payload = result
-                    await self._send_autopost(channel, payload, silent=True)
+                    await self._send_autopost(channel, payload, silent=autopost_silent)
                 except (aiohttp.ClientError, asyncio.TimeoutError, discord.HTTPException, RuntimeError):
                     feed["next_post"] = self._retry_at(now, feed.get("interval", 3600))
                     feed["last_error"] = "The media provider is temporarily unavailable; retry scheduled."

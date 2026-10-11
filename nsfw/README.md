@@ -11,11 +11,12 @@ Every media command is restricted by Red's NSFW-channel check. Provider failures
 - `[p]nsfwversion` - Show the installed cog version.
 - `[p]cleandm <number>` - Delete recent bot messages from your direct message channel.
 - `[p]nsfwset autopost` - Open the scheduled-feed help.
+- `[p]nsfwset notifications <silent|normal>` - choose per-server delivery for scheduled posts; the default is normal.
 - `[p]nsfwset autopost [channel] [source] [minutes]` - Configure or replace the server's one scheduled feed. Supply at least one argument; the channel otherwise defaults to the current channel, the source to `random`, and the interval to 360 minutes (minimum 30). Random posts show the exact category command members can copy and run.
 - `[p]nsfwset autopost status` - Show the configured feed, schedule, and any destination/provider problem.
 - `[p]nsfwset autopost preview` - Preview one post in the current NSFW channel without changing the schedule.
 
-Scheduled NSFW feed posts are always sent silently, suppressing push and desktop notifications. Manual previews and member-invoked media commands use normal delivery.
+Scheduled NSFW feed posts use normal Discord delivery by default. Administrators can choose silent delivery to suppress push and desktop notifications. Manual previews and member-invoked media commands always use normal delivery.
 - `[p]nsfwset autopost off` - Remove the server's scheduled feed.
 - `[p]nsfwset switchredditapi` - Bot owner only. Toggle between the default Martine API source and direct Reddit API requests.
 
