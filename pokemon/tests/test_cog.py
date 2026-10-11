@@ -1015,7 +1015,8 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_notification_commands_persist_mode_and_quiet_hours(self):
         mode=StoredValue("silent");role=StoredValue(None);section=SimpleNamespace(notification_mode=mode,notification_role_id=role)
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section);ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
-        await Pokemon.encounter_notifications.callback(cog,ctx,"role");self.assertEqual(mode.value,"role");self.assertIn("remain silent",ctx.send.await_args.args[0])
+        await Pokemon.encounter_notifications.callback(cog,ctx,"role");self.assertEqual(mode.value,"role");self.assertIn("changed from **silent** to **role**",ctx.send.await_args.args[0]);self.assertIn("remain silent",ctx.send.await_args.args[0])
+        ctx.send.reset_mock();await Pokemon.encounter_notifications.callback(cog,ctx,"role");self.assertIn("remains **role**",ctx.send.await_args.args[0])
         quiet_section=StoredSection({"quiet_timezone":None,"quiet_start":None,"quiet_end":None});cog.config=SimpleNamespace(guild=lambda guild:quiet_section)
         await Pokemon.encounter_quiet_hours.callback(cog,ctx,"America/New_York","22:00","08:00")
         self.assertEqual((quiet_section.value["quiet_timezone"],quiet_section.value["quiet_start"],quiet_section.value["quiet_end"]),("America/New_York",1320,480))
