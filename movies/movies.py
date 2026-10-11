@@ -23,7 +23,7 @@ TMDB_DETAILS_URL = "https://api.themoviedb.org/3/movie/{movie_id}"
 TMDB_POPULAR_URL = "https://api.themoviedb.org/3/movie/popular"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 TMDB_MOVIE_URL = "https://www.themoviedb.org/movie/{movie_id}"
-USER_AGENT = "Sick-Cogs-MovieReleases/1.2.2 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-MovieReleases/1.2.3 (+https://github.com/SickProdigy/Sick-Cogs)"
 CHECK_INTERVAL = datetime.timedelta(hours=1)
 CONFIG_SCHEMA_VERSION = 1
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
@@ -37,7 +37,7 @@ class MovieReleases(commands.Cog):
     """Post new movie release announcements from TMDb."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.2"
+    __version__ = "1.2.3"
 
     default_guild = {
         "enabled": False,
@@ -532,8 +532,9 @@ class MovieReleases(commands.Cog):
         guild_config = self.config.guild(ctx.guild)
         previous = await guild_config.notification_mode()
         await guild_config.notification_mode.set(mode)
+        change = f"changed from **{previous}** to **{mode}**" if previous != mode else f"remains **{mode}**"
         detail = "without Discord notifications or role mentions" if mode == "silent" else "with normal Discord notifications and the configured role mention"
-        await ctx.send(f"Automatic movie posts changed from **{previous}** to **{mode}** delivery: {detail}.")
+        await ctx.send(f"Automatic movie post delivery {change}: {detail}.")
 
     @movieset.command(name="role")
     async def movieset_role(self, ctx: commands.Context, role: discord.Role):
