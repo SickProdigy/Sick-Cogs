@@ -23,7 +23,7 @@ TMDB_DETAILS_URL = "https://api.themoviedb.org/3/movie/{movie_id}"
 TMDB_POPULAR_URL = "https://api.themoviedb.org/3/movie/popular"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 TMDB_MOVIE_URL = "https://www.themoviedb.org/movie/{movie_id}"
-USER_AGENT = "Sick-Cogs-MovieReleases/1.2.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-MovieReleases/1.2.2 (+https://github.com/SickProdigy/Sick-Cogs)"
 CHECK_INTERVAL = datetime.timedelta(hours=1)
 CONFIG_SCHEMA_VERSION = 1
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
@@ -37,12 +37,13 @@ class MovieReleases(commands.Cog):
     """Post new movie release announcements from TMDb."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.0"
+    __version__ = "1.2.2"
 
     default_guild = {
         "enabled": False,
         "channel_id": None,
         "role_id": None,
+        "notification_mode": "normal",
         "max_per_day": 3,
         "days_back": 0,
         "days_ahead": 7,
@@ -175,7 +176,7 @@ class MovieReleases(commands.Cog):
         limit = 1
         sent = 0
         for movie in new_movies[:limit]:
-            await self.send_movie(channel, movie, settings.get("role_id"))
+            await self.send_movie(channel, movie, settings.get("role_id"), settings.get("notification_mode", "normal"))
             posted_ids.append(int(movie["id"]))
             posted_today["count"] = int(posted_today.get("count", 0)) + 1
             sent += 1
@@ -327,7 +328,7 @@ class MovieReleases(commands.Cog):
         embed.set_footer(text="Movie data provided by TMDb")
         return embed
 
-    async def send_movie(self, channel: GuildMessageable, movie: Dict[str, Any], role_id: Optional[int]):
+    async def send_movie(self, channel: GuildMessageable, movie: Dict[str, Any], role_id: Optional[int], notification_mode: str = "normal"):
         title = movie.get("title") or "Untitled movie"
         release_date = movie.get("release_date") or "Unknown date"
         overview = movie.get("overview") or "No description available."
@@ -350,11 +351,12 @@ class MovieReleases(commands.Cog):
             embed.set_thumbnail(url=f"{TMDB_IMAGE_BASE}{poster_path}")
 
         content = None
-        if role_id:
+        silent = str(notification_mode).casefold() == "silent"
+        if role_id and not silent:
             role = channel.guild.get_role(int(role_id))
             if role:
                 content = role.mention
-        await channel.send(content=content, embed=embed, allowed_mentions=discord.AllowedMentions(roles=True))
+        await channel.send(content=content, embed=embed, allowed_mentions=discord.AllowedMentions(roles=not silent), silent=silent)
 
     @commands.guild_only()
     @commands.command(name="movies", aliases=["movie", "moviereleases"])
@@ -520,6 +522,19 @@ class MovieReleases(commands.Cog):
         await self.config.guild(ctx.guild).channel_id.set(channel.id)
         await ctx.send(f"Movie releases will be posted in {channel.mention}.")
 
+    @movieset.command(name="notifications", aliases=["notify"])
+    async def movieset_notifications(self, ctx: commands.Context, mode: str):
+        """Choose silent or normal delivery for automatic movie posts."""
+        mode = mode.casefold()
+        if mode not in {"silent", "normal"}:
+            await ctx.send("Choose `silent` or `normal`.")
+            return
+        guild_config = self.config.guild(ctx.guild)
+        previous = await guild_config.notification_mode()
+        await guild_config.notification_mode.set(mode)
+        detail = "without Discord notifications or role mentions" if mode == "silent" else "with normal Discord notifications and the configured role mention"
+        await ctx.send(f"Automatic movie posts changed from **{previous}** to **{mode}** delivery: {detail}.")
+
     @movieset.command(name="role")
     async def movieset_role(self, ctx: commands.Context, role: discord.Role):
         """Set the role mentioned by automatic movie release announcements.
@@ -592,8 +607,12 @@ class MovieReleases(commands.Cog):
     @movieset.command(name="maxperday")
     async def movieset_maxperday(self, ctx: commands.Context, amount: commands.Range[int, 1, 25]):
         """Set the maximum automatic release posts per day."""
-        await self.config.guild(ctx.guild).max_per_day.set(amount)
-        await ctx.send(f"Movie release posts are limited to {amount} per day.")
+        guild_config = self.config.guild(ctx.guild)
+        previous_amount = await guild_config.max_per_day()
+        await guild_config.max_per_day.set(amount)
+        await ctx.send(
+            f"Movie release post limit changed from {previous_amount} to {amount} per day."
+        )
 
     @movieset.command(name="window")
     async def movieset_window(
@@ -674,6 +693,7 @@ class MovieReleases(commands.Cog):
         embed.add_field(name="Enabled", value=str(settings["enabled"]), inline=True)
         embed.add_field(name="Channel", value=channel.mention if channel else "Not set", inline=True)
         embed.add_field(name="Role", value=role.mention if role else "None", inline=True)
+        embed.add_field(name="Notifications", value=str(settings.get("notification_mode", "normal")).title(), inline=True)
         embed.add_field(name="Max per day", value=str(settings["max_per_day"]), inline=True)
         embed.add_field(
             name="Check frequency",
