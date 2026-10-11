@@ -180,6 +180,15 @@ class ClipDeliveryTests(unittest.IsolatedAsyncioTestCase):
         guild = SimpleNamespace(get_channel=lambda channel_id: channel)
         return cog, guild, channel
 
+    async def test_notification_confirmation_distinguishes_change_and_noop(self):
+        value = AsyncMock(return_value=False);value.set = AsyncMock();cog = object.__new__(RocketLeague)
+        cog.config = SimpleNamespace(guild=MagicMock(return_value=SimpleNamespace(clip_silent=value)))
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=1), send=AsyncMock())
+        await RocketLeague.rocketleagueset_clips_notifications.callback(cog, ctx, "silent")
+        self.assertIn("changed from **normal** to **silent**", ctx.send.await_args.args[0])
+        value.return_value=True;ctx.send.reset_mock();await RocketLeague.rocketleagueset_clips_notifications.callback(cog, ctx, "silent")
+        self.assertIn("remains **silent**", ctx.send.await_args.args[0])
+
     async def test_automatic_clip_uses_server_delivery_preference(self):
         cog, guild, channel = self.make_cog(silent=True)
         await cog._post_clip_for_guild(guild, automatic=True)

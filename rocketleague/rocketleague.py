@@ -61,7 +61,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.6.1"
+    __version__ = "1.6.2"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -1668,13 +1668,16 @@ class RocketLeague(commands.Cog):
         if mode not in {"silent", "normal"}:
             await ctx.send("Choose `silent` or `normal`.")
             return
-        await self.config.guild(ctx.guild).clip_silent.set(mode == "silent")
+        setting = self.config.guild(ctx.guild).clip_silent
+        previous = "silent" if await setting() else "normal"
+        await setting.set(mode == "silent")
+        change = f"changed from **{previous}** to **{mode}**" if previous != mode else f"remains **{mode}**"
         detail = (
             "Automatic clips remain visible without push or desktop notifications."
             if mode == "silent"
             else "Automatic clips use Discord’s normal channel notification behavior."
         )
-        await ctx.send(f"Rocket League clip delivery is now **{mode}**. {detail}")
+        await ctx.send(f"Rocket League clip delivery {change}. {detail}")
 
     @rocketleagueset_clips.command(name="maxlength")
     async def rocketleagueset_clips_maxlength(
