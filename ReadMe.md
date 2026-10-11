@@ -30,7 +30,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 ## Available Cogs
 
 - `ark` - Official ARK: Survival Ascended Steam announcements with category filters and optional role notifications.
-- `advancedhelp` - Audience-first, permission-filtered interactive Red help.
+- `advancedhelp` - Audience-first, permission-filtered interactive Red help with a sanitized owner-only command inventory export.
 - `avatar` - Display a Discord user's avatar as a direct, clickable image URL.
 - `azerothcore` - AzerothCore/WoW server utilities using SOAP.
 - `clanker` - Base Sepolia token launches with reviewed CryptoWallet execution, token rundowns, rewards, and owner controls.

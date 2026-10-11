@@ -19,5 +19,24 @@ groups (including their appearance/order) with its subcommands. Prefix help
 cannot be ephemeral. If embeds/components are unavailable, AdvancedHelp sends a filtered
 text summary. DM failures are reported in the invoking channel.
 
+## Command inventory export
+
+Bot owners can run:
+
+```text
+[p]docsreport
+```
+
+AdvancedHelp responds with `sickgamingbot-command-inventory.json`, a deterministic,
+sanitized inventory of every registered command and subcommand. It includes command
+paths, aliases, module/category, short descriptions, signatures, hidden/enabled state,
+inherited declared access, and AdvancedHelp audience classification. It also records
+the Red and AdvancedHelp versions plus loaded cog and extension names.
+
+The report contains command metadata only. It does not export guild configuration,
+Discord IDs, messages, credentials, tokens, endpoints, filesystem paths, or callback
+source. Live Red permissions, disabled state, parent checks, role hierarchy, and server
+rules remain authoritative.
+
 Only one custom Red help formatter can be active. Loading fails cleanly if another
 formatter owns the slot. Unloading AdvancedHelp restores Red's default formatter.
