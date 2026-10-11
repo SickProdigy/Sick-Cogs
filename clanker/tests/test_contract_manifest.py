@@ -28,6 +28,7 @@ class ClankerContractManifestTests(unittest.TestCase):
         sdk = self.manifest["sdk"]
         self.assertEqual(sdk["repository"], "https://github.com/clanker-devco/clanker-sdk")
         self.assertEqual(sdk["tag"], "v4.2.19")
+        self.assertEqual(sdk["packageVersionDeclared"], "4.2.18")
         self.assertRegex(sdk["commit"], r"^[0-9a-f]{40}$")
         self.assertEqual(len(sdk["sourceHashes"]), 3)
         for digest in sdk["sourceHashes"].values():
@@ -92,6 +93,7 @@ class ClankerContractManifestTests(unittest.TestCase):
         self.assertIs(candidate["executionEnabled"], False)
         self.assertEqual(candidate["network"], "base-mainnet")
         self.assertEqual(candidate["chainId"], 8453)
+        self.assertEqual(candidate["sdk"], self.manifest["sdk"])
         self.assertIs(candidate["rpcVerification"]["allRuntimeCodeMatched"], True)
         self.assertEqual(len(candidate["rpcVerification"]["sources"]), 2)
         self.assertIn("owner-configured treasury", candidate["rewardMutability"]["platformGuarantee"])

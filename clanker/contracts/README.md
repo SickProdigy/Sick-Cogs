@@ -4,6 +4,8 @@ This directory records reviewed external contract surfaces used by Clanker. The 
 
 `clanker-v4-base-sepolia.json` pins the official Clanker SDK v4.2.19 Base Sepolia deployment
 configuration. The source tag resolves to commit `4f4d2bbf41c7f10543559dc043c85f443a6d452e`.
+Upstream published that tag while its own `package.json` still declared `4.2.18`; both facts are
+pinned in the manifests so reviewers do not confuse the Git tag with the package-declared version.
 The factory bytecode hash was independently read from Base Sepolia at the pinned address.
 
 The Clanker capability remains a default-off release candidate. Clanker rejects every unreviewed network, factory,

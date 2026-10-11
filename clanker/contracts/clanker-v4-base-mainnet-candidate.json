@@ -9,6 +9,7 @@
     "repository": "https://github.com/clanker-devco/clanker-sdk",
     "tag": "v4.2.19",
     "commit": "4f4d2bbf41c7f10543559dc043c85f443a6d452e",
+    "packageVersionDeclared": "4.2.18",
     "sourceHashes": {
       "src/abi/v4/Clanker.ts": "35c2bfc5fcc0a0706a921b84e2e9e803d0034eec87906ba3661d073b8940e3e3",
       "src/config/clankerTokenV4.ts": "4a3d2a30f3805508cd06d91a0ce3795b84be98c12732a2781dc6ffa719e1d81c",
