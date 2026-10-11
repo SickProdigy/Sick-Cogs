@@ -77,6 +77,17 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(catalog.metadata("group:support"), ("Helpers", "🧰", "Support tools."))
         self.assertNotIn("Missing", catalog.categories("group:support"))
 
+    def test_single_visible_command_uses_command_name_as_category_label(self):
+        single = command("selfrole", commands.PrivilegeLevel.NONE, "Admin")
+        multiple = command("ping", commands.PrivilegeLevel.NONE, "General")
+        second = command("info", commands.PrivilegeLevel.NONE, "General")
+        catalog = build_catalog(
+            [("Admin", {"selfrole": single}), ("General", {"ping": multiple, "info": second})]
+        )
+        self.assertEqual(catalog.category_metadata("Admin", "member")[0], "Selfrole")
+        self.assertEqual(catalog.category_metadata("General", "member")[0], "General")
+        self.assertEqual(catalog.categories("member"), ["General", "Admin"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,8 +1,11 @@
 # AdvancedHelp
 
-AdvancedHelp replaces only Red's bare prefix help landing page with an audience-first,
-interactive menu. Direct help such as [p]help command, [p]help group subcommand, and
-[p]help CogName continues through Red's standard formatter.
+AdvancedHelp is disabled by default and leaves Red's standard help formatter active when
+installed or loaded. A bot owner can enable its audience-first interactive bare-help menu
+with `[p]advancedhelpset enable` and restore Red help with `[p]advancedhelpset disable`.
+The choice persists across reloads and restarts. When enabled, direct help such as
+`[p]help command`, `[p]help group subcommand`, and `[p]help CogName` continues through
+Red's standard formatter.
 
 The menu is built from Red's own filtered help mapping in the current context. It never
 grants access. Hidden, disabled, denied, parent-checked, and Red Permissions-controlled
@@ -38,5 +41,6 @@ Discord IDs, messages, credentials, tokens, endpoints, filesystem paths, or call
 source. Live Red permissions, disabled state, parent checks, role hierarchy, and server
 rules remain authoritative.
 
-Only one custom Red help formatter can be active. Loading fails cleanly if another
-formatter owns the slot. Unloading AdvancedHelp restores Red's default formatter.
+Only one custom Red help formatter can be active. Enabling or reloading an enabled
+AdvancedHelp fails cleanly if another formatter owns the slot. Disabling or unloading
+AdvancedHelp restores Red's default formatter when AdvancedHelp owns the slot.

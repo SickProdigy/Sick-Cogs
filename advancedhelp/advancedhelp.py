@@ -12,6 +12,7 @@ from .views import AdvancedHelpView
 
 CONFIG_IDENTIFIER = 438917205171
 DEFAULT_GLOBAL = {
+    "enabled": False,
     "schema_version": 1,
     "audience_overrides": {},
     "category_overrides": {},
@@ -31,7 +32,7 @@ class AdvancedHelp(commands.Cog):
     """Audience-first interactive help using Red's permission filtering."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -43,7 +44,8 @@ class AdvancedHelp(commands.Cog):
         self.formatter = AdvancedHelpFormatter(self)
 
     async def cog_load(self):
-        self.bot.set_help_formatter(self.formatter)
+        if await self.config.enabled():
+            self.bot.set_help_formatter(self.formatter)
 
     def cog_unload(self):
         if getattr(self.bot, "_help_formatter", None) is self.formatter:
@@ -88,7 +90,11 @@ class AdvancedHelp(commands.Cog):
         lines = ["Available help areas:"]
         for audience in catalog.audiences:
             label, _emoji, _description = catalog.metadata(audience)
-            lines.append(f"{label}: {', '.join(catalog.categories(audience))}")
+            categories = (
+                catalog.category_metadata(category, audience)[0]
+                for category in catalog.categories(audience)
+            )
+            lines.append(f"{label}: {', '.join(categories)}")
         pages = list(pagify("\n".join(lines), page_length=1900))
         try:
             target = ctx.author.send if destination == "dm" else ctx.send
@@ -134,11 +140,42 @@ class AdvancedHelp(commands.Cog):
         global_data = await self.config.all()
         guild_data = await self.config.guild(ctx.guild).all() if ctx.guild else DEFAULT_GUILD
         await ctx.send(
+            f"Interactive formatter: **{'enabled' if global_data['enabled'] else 'disabled'}**\n"
             f"Destination: {guild_data['destination']}\n"
             f"Timeout: {guild_data['timeout_seconds']} seconds\n"
             f"Audience overrides: {len(global_data['audience_overrides'])}\n"
             f"Category overrides: {len(global_data['category_overrides'])}\n"
             f"Role groups: {len(guild_data['role_groups'])}"
+        )
+
+    @advancedhelpset.command(name="enable")
+    async def enable_formatter(self, ctx):
+        """Replace bare prefix help with the interactive formatter."""
+        if getattr(self.bot, "_help_formatter", None) is self.formatter:
+            await self.config.enabled.set(True)
+            await ctx.send("Interactive help is already enabled.")
+            return
+        try:
+            self.bot.set_help_formatter(self.formatter)
+        except RuntimeError:
+            await ctx.send(
+                "Interactive help could not be enabled because another custom help "
+                "formatter is active."
+            )
+            return
+        await self.config.enabled.set(True)
+        await ctx.send("Interactive help enabled. Bare prefix help now uses AdvancedHelp.")
+
+    @advancedhelpset.command(name="disable")
+    async def disable_formatter(self, ctx):
+        """Restore Red's standard help formatter."""
+        active = getattr(self.bot, "_help_formatter", None) is self.formatter
+        if active:
+            self.bot.reset_help_formatter()
+        await self.config.enabled.set(False)
+        await ctx.send(
+            "Interactive help disabled. Red's standard help formatter is active."
+            if active else "Interactive help was already disabled."
         )
 
     @advancedhelpset.command(name="destination")

@@ -92,7 +92,7 @@ class AdvancedHelpView(discord.ui.View):
         return items[start:start + PAGE_SIZE], pages
 
     def _category_option(self, name):
-        label, emoji, description = self.catalog.category_metadata(name)
+        label, emoji, description = self.catalog.category_metadata(name, self.audience)
         count = len(self.catalog.commands(self.audience, name))
         return discord.SelectOption(
             label=label[:100], value=name, emoji=emoji,
@@ -187,7 +187,7 @@ class AdvancedHelpView(discord.ui.View):
             embed = discord.Embed(
                 title=f"{emoji} {label}",
                 description="\n".join(
-                    f"**{self.catalog.category_metadata(name)[0]}** — "
+                    f"**{self.catalog.category_metadata(name, self.audience)[0]}** — "
                     f"{len(self.catalog.commands(self.audience, name))} commands"
                     for name in visible
                 ),
@@ -199,7 +199,7 @@ class AdvancedHelpView(discord.ui.View):
             commands = self.catalog.commands(self.audience, self.category)
             visible, pages = self._slice(commands)
             embed = discord.Embed(
-                title=self.catalog.category_metadata(self.category)[0],
+                title=self.catalog.category_metadata(self.category, self.audience)[0],
                 description="\n".join(
                     f"**{command.qualified_name}** — "
                     f"{command.format_shortdoc_for_context(self.ctx) or 'No description.'}"

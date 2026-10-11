@@ -32,10 +32,15 @@ class HelpCatalog:
             audience, (audience.title(), "🔖", "Available guidance.")
         )
 
-    def category_metadata(self, category):
+    def category_metadata(self, category, audience=None):
         data = self.category_labels.get(category, {})
+        name = data.get("name")
+        if not name and audience is not None:
+            commands = self.commands(audience, category)
+            if len(commands) == 1:
+                name = commands[0].qualified_name.replace("_", " ").title()
         return (
-            data.get("name", category),
+            name or category,
             data.get("emoji"),
             data.get("description", ""),
         )
@@ -47,7 +52,10 @@ class HelpCatalog:
         }
         return sorted(
             self.sections.get(audience, {}),
-            key=lambda name: (configured.get(name, 1000), name.lower()),
+            key=lambda name: (
+                configured.get(name, 1000),
+                self.category_metadata(name, audience)[0].lower(),
+            ),
         )
 
     def commands(self, audience, category):

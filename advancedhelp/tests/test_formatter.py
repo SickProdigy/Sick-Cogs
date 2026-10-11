@@ -9,13 +9,23 @@ from advancedhelp.formatter import AdvancedHelpFormatter
 
 
 class Value:
-    async def all(self):
-        return {}
+    def __init__(self, value):
+        self.value = value
+
+    async def __call__(self):
+        return self.value
+
+    async def set(self, value):
+        self.value = value
 
 
 class Config:
+    def __init__(self, enabled=False):
+        self.enabled = Value(enabled)
+
     async def all(self):
         return {
+            "enabled": self.enabled.value,
             "audience_overrides": {},
             "category_overrides": {},
             "audience_order": ["member", "staff", "server_owner", "bot_owner"],
@@ -76,9 +86,20 @@ class FormatterTests(unittest.IsolatedAsyncioTestCase):
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):
-    async def test_install_and_restore(self):
+    async def test_disabled_install_keeps_red_formatter(self):
         cog = AdvancedHelp.__new__(AdvancedHelp)
         cog.bot = Bot()
+        cog.config = Config(enabled=False)
+        cog.formatter = AdvancedHelpFormatter(cog)
+        await cog.cog_load()
+        self.assertIs(type(cog.bot._help_formatter), RedHelpFormatter)
+        cog.cog_unload()
+        self.assertFalse(cog.bot.reset)
+
+    async def test_enabled_install_and_restore(self):
+        cog = AdvancedHelp.__new__(AdvancedHelp)
+        cog.bot = Bot()
+        cog.config = Config(enabled=True)
         cog.formatter = AdvancedHelpFormatter(cog)
         await cog.cog_load()
         self.assertIs(cog.bot._help_formatter, cog.formatter)
@@ -89,9 +110,23 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_formatter_collision_fails_load(self):
         cog = AdvancedHelp.__new__(AdvancedHelp)
         cog.bot = Bot(collision=True)
+        cog.config = Config(enabled=True)
         cog.formatter = AdvancedHelpFormatter(cog)
         with self.assertRaises(RuntimeError):
             await cog.cog_load()
+
+    async def test_owner_can_enable_and_disable_formatter(self):
+        cog = AdvancedHelp.__new__(AdvancedHelp)
+        cog.bot = Bot()
+        cog.config = Config(enabled=False)
+        cog.formatter = AdvancedHelpFormatter(cog)
+        ctx = SimpleNamespace(send=AsyncMock())
+        await AdvancedHelp.enable_formatter.callback(cog, ctx)
+        self.assertTrue(cog.config.enabled.value)
+        self.assertIs(cog.bot._help_formatter, cog.formatter)
+        await AdvancedHelp.disable_formatter.callback(cog, ctx)
+        self.assertFalse(cog.config.enabled.value)
+        self.assertIs(type(cog.bot._help_formatter), RedHelpFormatter)
 
 
 if __name__ == "__main__":

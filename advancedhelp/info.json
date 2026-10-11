@@ -4,7 +4,7 @@
   "disabled": false,
   "end_user_data_statement": "This cog stores server-level help presentation settings and Discord role IDs for optional presentation groups. It does not store member activity or message content.",
   "hidden": false,
-  "install_msg": "AdvancedHelp replaces bare [p]help while delegating direct command and cog help to Red. Only one custom help formatter can be loaded. Configure delivery with [p]advancedhelpset; bot owners can export sanitized command metadata with [p]docsreport.",
+  "install_msg": "AdvancedHelp is installed disabled and leaves Red's standard help active. A bot owner can opt into the interactive bare-help menu with [p]advancedhelpset enable, configure it with [p]advancedhelpset, and restore Red help with [p]advancedhelpset disable. Direct command and cog help continue through Red. Bot owners can export sanitized command metadata with [p]docsreport.",
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 8, 0],
   "name": "AdvancedHelp",
@@ -13,5 +13,5 @@
   "short": "Permission-aware interactive help organized by audience.",
   "tags": ["help", "permissions", "navigation", "utility"],
   "type": "COG",
-  "version": "0.2.0"
+  "version": "0.2.1"
 }
