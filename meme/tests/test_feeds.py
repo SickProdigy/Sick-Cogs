@@ -7,8 +7,8 @@ from meme.models import MemeResult
 
 
 class MemeFeedReconciliationTests(unittest.TestCase):
-    def test_automatic_feeds_default_to_silent(self):
-        self.assertTrue(Meme.default_guild["feed_silent"])
+    def test_automatic_feeds_default_to_normal(self):
+        self.assertFalse(Meme.default_guild["feed_silent"])
 
     def test_create_new_feed(self):
         feeds = {}
