@@ -49,6 +49,7 @@ class MovieReleaseTests(unittest.IsolatedAsyncioTestCase):
         repaired = {call.args[0]: call.kwargs["value"] for call in guild_config.set_raw.await_args_list}
         self.assertEqual(repaired["max_per_day"], 3)
         self.assertEqual(repaired["min_vote_count"], 5)
+        self.assertEqual(repaired["notification_mode"], "normal")
         guild_config.next_check_at.set.assert_awaited_once()
         schema_version.set.assert_awaited_once_with(1)
 
@@ -66,11 +67,38 @@ class MovieReleaseTests(unittest.IsolatedAsyncioTestCase):
         sent = await cog.check_guild(SimpleNamespace(id=1))
 
         self.assertEqual(sent, 1)
-        cog.send_movie.assert_awaited_once()
+        cog.send_movie.assert_awaited_once_with(cog.get_channel.return_value, {"id": 101, "title": "First"}, None, "normal")
         group.posted_ids.set.assert_awaited_once_with([101])
         saved_daily = group.posted_today.set.await_args.args[0]
         self.assertEqual(saved_daily["count"], 1)
         self.assertEqual(group.next_check_at.set.await_count, 1)
+
+    async def test_scheduled_check_passes_silent_delivery(self):
+        settings = {"enabled": True, "channel_id": 10, "role_id": 7, "notification_mode": "silent", "max_per_day": 3, "posted_today": {"date": None, "count": 0}, "posted_ids": []}
+        cog, _ = self.make_cog(settings)
+        await cog.check_guild(SimpleNamespace(id=1))
+        cog.send_movie.assert_awaited_once_with(cog.get_channel.return_value, {"id": 101, "title": "First"}, 7, "silent")
+
+    async def test_movie_delivery_suppresses_role_when_silent(self):
+        role = SimpleNamespace(mention="<@&7>")
+        channel = SimpleNamespace(guild=SimpleNamespace(get_role=lambda role_id: role), send=AsyncMock())
+        movie = {"id": 101, "title": "First"}
+        cog = object.__new__(MovieReleases)
+        await cog.send_movie(channel, movie, 7, "silent")
+        silent_call = channel.send.await_args.kwargs
+        self.assertTrue(silent_call["silent"]);self.assertIsNone(silent_call["content"]);self.assertFalse(silent_call["allowed_mentions"].roles)
+        await cog.send_movie(channel, movie, 7, "normal")
+        normal_call = channel.send.await_args.kwargs
+        self.assertFalse(normal_call["silent"]);self.assertEqual(normal_call["content"], "<@&7>");self.assertTrue(normal_call["allowed_mentions"].roles)
+
+    async def test_notification_command_is_per_server(self):
+        mode = AsyncMock(return_value="normal");mode.set = AsyncMock();cog = object.__new__(MovieReleases)
+        cog.config = SimpleNamespace(guild=MagicMock(return_value=SimpleNamespace(notification_mode=mode)))
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=1), send=AsyncMock())
+        await MovieReleases.movieset_notifications.callback(cog, ctx, "silent")
+        mode.set.assert_awaited_once_with("silent");self.assertIn("without Discord notifications", ctx.send.await_args.args[0])
+        ctx.send.reset_mock();await MovieReleases.movieset_notifications.callback(cog, ctx, "loud")
+        ctx.send.assert_awaited_once_with("Choose `silent` or `normal`.")
 
     async def test_future_schedule_survives_reload_without_posting(self):
         settings = {
