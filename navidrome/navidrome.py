@@ -5,6 +5,8 @@ import logging
 import random
 import re
 import secrets
+import time
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple, Union
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -17,13 +19,14 @@ from redbot.core.utils import can_user_send_messages_in
 from redbot.core.utils.chat_formatting import pagify
 
 from .client import NavidromeClient, NavidromeError, validate_base_url
-from .setup import NavidromeSetupView
+from .lidarr import LidarrClient, LidarrError
+from .setup import NavidromeSetupView, account_credentials_message
 
 
 log = logging.getLogger("red.sick-cogs.Navidrome")
 CONFIG_IDENTIFIER = 9172048261
 TOKEN_PREFIX = "navidrome_"
-USER_AGENT = "Sick-Cogs-Navidrome/1.0.1"
+USER_AGENT = "Sick-Cogs-Navidrome/1.2.1"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -62,6 +65,284 @@ def quiet_hours_active(settings: Dict[str, Any], now: Optional[datetime.datetime
     return start <= current < end if start < end else current >= start or current < end
 
 
+async def navidrome_config_permission(ctx: commands.Context) -> bool:
+    """Allow administrators or a guild's explicitly delegated Navidrome manager role."""
+    if await ctx.bot.is_owner(ctx.author) or ctx.author.guild_permissions.manage_guild:
+        return True
+    role_id = await ctx.cog.config.guild(ctx.guild).manager_role_id()
+    if role_id and any(role.id == role_id for role in ctx.author.roles):
+        return True
+    raise commands.CheckFailure(
+        "Manage Server or the configured Navidrome manager role is required."
+    )
+
+
+MUSICBRAINZ_ID_PATTERN = (
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+
+def normalize_musicbrainz_query(media_type: str, query: str) -> Tuple[str, Optional[str]]:
+    value = query.strip().strip("<>")
+    match = re.fullmatch(
+        rf"https?://(?:www\.)?musicbrainz\.org/(artist|release-group)/"
+        rf"({MUSICBRAINZ_ID_PATTERN})(?:[/?#].*)?",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        entity, mb_id = match.groups()
+        expected = "artist" if media_type == "artist" else "release-group"
+        if entity.casefold() != expected:
+            label = "artist" if media_type == "artist" else "release-group"
+            return value, f"Use a MusicBrainz {label} ID for this request type."
+        return f"lidarr:{mb_id.lower()}", None
+    if re.fullmatch(MUSICBRAINZ_ID_PATTERN, value):
+        return f"lidarr:{value.lower()}", None
+    return value, None
+
+
+def normalized_music_name(value: Any) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    ascii_value = normalized.encode("ascii", "ignore").decode().casefold()
+    return "".join(character for character in ascii_value if character.isalnum())
+
+
+def exact_local_match(media_type: str, query: str, matches) -> Optional[Dict[str, Any]]:
+    wanted = normalized_music_name(query)
+    for item in matches:
+        title = item.get("name") or item.get("album") or item.get("title") or ""
+        candidates = [title]
+        if media_type == "album":
+            artist = item.get("artist") or item.get("artistName") or ""
+            candidates.extend((f"{artist} {title}", f"{title} {artist}"))
+        if any(normalized_music_name(candidate) == wanted for candidate in candidates):
+            return item
+    return None
+
+
+def lidarr_requester_tag(username: str) -> str:
+    normalized = unicodedata.normalize("NFKD", username).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized.casefold()).strip("-")
+    return f"discord-user-{(slug or 'user')[:40]}"
+
+
+class LidarrConfirmView(discord.ui.View):
+    def __init__(self, cog, author_id: int, media_type: str, candidate: Dict[str, Any]):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.author_id = author_id
+        self.media_type = media_type
+        self.candidate = candidate
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the member who made this request can confirm it.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm Lidarr request", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        message = await self.cog.execute_lidarr_request(
+            interaction.guild, interaction.user, self.media_type, self.candidate
+        )
+        await interaction.followup.send(message, ephemeral=True)
+        try:
+            await interaction.delete_original_response()
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        await interaction.followup.send("Lidarr request cancelled.", ephemeral=True)
+        try:
+            await interaction.delete_original_response()
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+
+def lidarr_candidate_text(media_type: str, candidate: Dict[str, Any]) -> Tuple[str, str]:
+    if media_type == "artist":
+        label = str(candidate.get("artistName") or "Unknown artist")
+        detail = str(candidate.get("disambiguation") or "Artist").replace("\n", " ")
+    else:
+        label = str(candidate.get("title") or "Unknown release")
+        artist = str((candidate.get("artist") or {}).get("artistName") or "Unknown artist")
+        date = str(candidate.get("releaseDate") or "")[:4]
+        detail = f"{artist}{f' · {date}' if date else ''}"
+    return label[:100], detail[:100]
+
+
+def musicbrainz_url(media_type: str, candidate: Dict[str, Any]) -> Optional[str]:
+    foreign_id = str(
+        candidate.get("foreignArtistId") if media_type == "artist"
+        else candidate.get("foreignAlbumId")
+        or ""
+    )
+    if not re.fullmatch(
+        MUSICBRAINZ_ID_PATTERN,
+        foreign_id,
+    ):
+        return None
+    entity = "artist" if media_type == "artist" else "release-group"
+    return f"https://musicbrainz.org/{entity}/{foreign_id.lower()}"
+
+
+def lidarr_item_url(
+    base_url: str, media_type: str, candidate: Dict[str, Any]
+) -> Optional[str]:
+    mb_url = musicbrainz_url(media_type, candidate)
+    if not mb_url or not base_url:
+        return None
+    foreign_id = mb_url.rsplit("/", 1)[-1]
+    entity = "artist" if media_type == "artist" else "album"
+    return f"{base_url.rstrip('/')}/{entity}/{foreign_id}"
+
+
+def lidarr_confirmation_embed(
+    member: discord.Member, account: Optional[Dict[str, Any]], media_type: str,
+    candidate: Dict[str, Any],
+) -> discord.Embed:
+    title, detail = lidarr_candidate_text(media_type, candidate)
+    embed = discord.Embed(
+        title=f"Confirm Lidarr {'artist' if media_type == 'artist' else 'release'} request",
+        description=f"**{title}**\n{detail}", colour=discord.Colour.orange(),
+    )
+    mb_url = musicbrainz_url(media_type, candidate)
+    if mb_url:
+        embed.add_field(
+            name="MusicBrainz", value=f"[Open the selected result]({mb_url})", inline=False
+        )
+    embed.add_field(
+        name="Attribution tags",
+        value=f"`discord`, `{lidarr_requester_tag(member.name)}`", inline=False,
+    )
+    embed.add_field(
+        name="Identity",
+        value=(f"Linked Navidrome account: `{account.get('username')}`" if account
+               else "Discord-only identity"), inline=False,
+    )
+    embed.set_footer(text="Nothing will be changed in Lidarr until you confirm.")
+    return embed
+
+
+class LidarrResultSelect(discord.ui.Select):
+    def __init__(self, parent):
+        options = []
+        for index, candidate in enumerate(parent.candidates[:25]):
+            label, detail = lidarr_candidate_text(parent.media_type, candidate)
+            options.append(discord.SelectOption(
+                label=label, value=str(index), description=detail,
+            ))
+        super().__init__(placeholder="Choose the correct Lidarr result", options=options)
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        candidate = self.parent_view.candidates[int(self.values[0])]
+        await interaction.response.edit_message(
+            content=None,
+            embed=lidarr_confirmation_embed(
+                interaction.user, self.parent_view.account,
+                self.parent_view.media_type, candidate,
+            ),
+            view=LidarrConfirmView(
+                self.parent_view.cog, interaction.user.id,
+                self.parent_view.media_type, candidate,
+            ),
+        )
+
+
+class LidarrResultView(discord.ui.View):
+    def __init__(self, cog, author_id: int, media_type: str, candidates, account):
+        super().__init__(timeout=120)
+        self.cog, self.author_id = cog, author_id
+        self.media_type, self.candidates, self.account = media_type, candidates, account
+        self.add_item(LidarrResultSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the member who started this search can choose a result.", ephemeral=True
+            )
+            return False
+        return True
+
+
+class LidarrRequestModal(discord.ui.Modal):
+    def __init__(
+        self, cog, author_id: int, media_type: str,
+        source_message: Optional[discord.Message] = None,
+    ):
+        label = "Artist" if media_type == "artist" else "Release, album, single, or song"
+        title = "Search Lidarr artists" if media_type == "artist" else "Search Lidarr releases"
+        super().__init__(title=title)
+        self.cog, self.author_id, self.media_type = cog, author_id, media_type
+        self.source_message = source_message
+        self.query = discord.ui.TextInput(label=label, min_length=2, max_length=200)
+        self.add_item(self.query)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if self.source_message is not None:
+            try:
+                await self.source_message.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                pass
+        content, embed, view = await self.cog.prepare_lidarr_request(
+            interaction.guild, interaction.user, self.media_type, str(self.query.value)
+        )
+        if embed is None and view is None:
+            await interaction.followup.send(content, ephemeral=True)
+        else:
+            kwargs = {"ephemeral": True, "view": view}
+            if content is not None:
+                kwargs["content"] = content
+            if embed is not None:
+                kwargs["embed"] = embed
+            await interaction.followup.send(**kwargs)
+
+
+class LidarrRequestTypeView(discord.ui.View):
+    def __init__(self, cog, author_id: int, only_type: Optional[str] = None):
+        super().__init__(timeout=120)
+        self.cog, self.author_id = cog, author_id
+        if only_type:
+            keep = "Artist" if only_type == "artist" else "Release"
+            for item in list(self.children):
+                if getattr(item, "label", None) != keep:
+                    self.remove_item(item)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the member who opened this request menu can use it.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Artist", style=discord.ButtonStyle.primary)
+    async def artist(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(
+            LidarrRequestModal(
+                self.cog, interaction.user.id, "artist", interaction.message
+            )
+        )
+
+    @discord.ui.button(label="Release", style=discord.ButtonStyle.primary)
+    async def release(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(
+            LidarrRequestModal(
+                self.cog, interaction.user.id, "album", interaction.message
+            )
+        )
+
+
 def safe_profile_name(value: str) -> str:
     name = value.strip().lower()
     if not name or len(name) > 32 or not all(char.isalnum() or char in "_-" for char in name):
@@ -73,11 +354,13 @@ class Navidrome(commands.Cog):
     """Connect each Discord server to its own approved Navidrome library."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.1"
+    __version__ = "1.2.2"
 
-    default_global = {"connections": {}}
+    default_global = {"connections": {}, "guild_connections_enabled": False}
     default_guild = {
         "connection": None,
+        "connection_mode": "owner_managed",
+        "guild_connection": None,
         "announcement_enabled": False,
         "announcement_channel_id": None,
         "notification_mode": "silent",
@@ -90,6 +373,17 @@ class Navidrome(commands.Cog):
         "announced_album_ids": [],
         "last_success_at": None,
         "accounts": {},
+        "manager_role_id": None,
+        "lidarr_identity_policy": "linked_required",
+        "lidarr_requester_role_id": None,
+        "lidarr_request_channel_id": None,
+        "lidarr_cooldown_seconds": 30,
+        "lidarr_daily_limit": 5,
+        "lidarr_artist_hourly_limit": 10,
+        "lidarr_artist_weekly_limit": 50,
+        "lidarr_release_hourly_limit": 30,
+        "lidarr_release_weekly_limit": 100,
+        "lidarr_audit": [],
     }
 
     def __init__(self, bot: Red):
@@ -100,6 +394,8 @@ class Navidrome(commands.Cog):
         self.session: Optional[aiohttp.ClientSession] = None
         self._poll_semaphore = asyncio.Semaphore(4)
         self._connection_failures: Dict[str, int] = {}
+        self._connection_test_times: Dict[int, float] = {}
+        self._lidarr_cooldowns: Dict[Tuple[int, int], float] = {}
         self.poll_loop.start()
 
     async def red_delete_data_for_user(self, **kwargs):
@@ -111,6 +407,17 @@ class Navidrome(commands.Cog):
             accounts = dict(settings.get("accounts", {}))
             if accounts.pop(user_id, None) is not None:
                 await self.config.guild_from_id(guild_id).accounts.set(accounts)
+            audit = list(settings.get("lidarr_audit", []))
+            changed = False
+            for entry in audit:
+                if str(entry.get("discord_user_id")) == user_id:
+                    entry["discord_user_id"] = None
+                    entry["discord_username"] = "deleted-user"
+                    entry["navidrome_user_id"] = None
+                    entry["navidrome_username"] = None
+                    changed = True
+            if changed:
+                await self.config.guild_from_id(guild_id).lidarr_audit.set(audit)
 
     def cog_unload(self):
         self.poll_loop.cancel()
@@ -123,6 +430,15 @@ class Navidrome(commands.Cog):
                 timeout=aiohttp.ClientTimeout(total=20), headers={"User-Agent": USER_AGENT}
             )
         return self.session
+
+    def claim_connection_test(self, guild_id: int) -> bool:
+        """Allow one guild-owned credential test per minute per guild."""
+        now = time.monotonic()
+        previous = self._connection_test_times.get(int(guild_id), 0.0)
+        if now - previous < 60:
+            return False
+        self._connection_test_times[int(guild_id)] = now
+        return True
 
     async def _profile(self, name: str) -> Optional[Dict[str, Any]]:
         return (await self.config.connections()).get(name)
@@ -138,11 +454,267 @@ class Navidrome(commands.Cog):
             raise NavidromeError("The approved connection is missing its credentials.")
         return NavidromeClient(await self.get_session(), profile["base_url"], username, password)
 
+    @staticmethod
+    def guild_token_namespace(guild_id: int) -> str:
+        return f"{TOKEN_PREFIX}guild_{int(guild_id)}"
+
+    async def _owner_lidarr_tokens(self, name: str) -> Tuple[str, Dict[str, str]]:
+        profiles = await self.config.connections()
+        namespaces = ["lidarr", f"{TOKEN_PREFIX}{name}"] if len(profiles) == 1 else [f"{TOKEN_PREFIX}{name}"]
+        last_tokens: Dict[str, str] = {}
+        for namespace in namespaces:
+            tokens = await self.bot.get_shared_api_tokens(namespace)
+            last_tokens = tokens
+            if tokens.get("lidarr_url") and tokens.get("lidarr_api_key"):
+                return namespace, tokens
+        return namespaces[0], last_tokens
+
+    async def _lidarr_client(
+        self, guild: discord.Guild
+    ) -> Tuple[str, LidarrClient, Dict[str, Any]]:
+        settings = await self.config.guild(guild).all()
+        if settings.get("connection_mode") == "guild_managed":
+            name = "Guild managed"
+            profile = settings.get("guild_connection") or {}
+            namespace = self.guild_token_namespace(guild.id)
+            public_only = True
+            allow_http = False
+        else:
+            selected = settings.get("connection")
+            profile = await self._profile(selected) if selected else None
+            if not profile:
+                raise LidarrError("This server has no approved Navidrome connection.")
+            name = str(selected)
+            namespace, tokens = await self._owner_lidarr_tokens(str(selected))
+            public_only = False
+            allow_http = bool(profile.get("lidarr_allow_http"))
+        lidarr = dict((profile or {}).get("lidarr") or {})
+        if settings.get("connection_mode") == "guild_managed":
+            tokens = await self.bot.get_shared_api_tokens(namespace)
+        base_url = str(tokens.get("lidarr_url") or "").strip()
+        api_key = str(tokens.get("lidarr_api_key") or "")
+        if not lidarr.get("enabled") or not base_url or not api_key:
+            raise LidarrError("Lidarr requests are not configured for this connection.")
+        client = LidarrClient(
+            await self.get_session(), base_url, api_key,
+            public_only=public_only, allow_http=allow_http,
+        )
+        return name, client, lidarr
+
+    async def _request_identity(
+        self, guild: discord.Guild, member: discord.Member
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        settings = await self.config.guild(guild).all()
+        role_id = settings.get("lidarr_requester_role_id")
+        if role_id and not member.guild_permissions.manage_guild and not any(
+            role.id == role_id for role in member.roles
+        ):
+            return None, "You do not have the configured Lidarr requester role."
+        account = dict((settings.get("accounts") or {}).get(str(member.id)) or {})
+        policy = settings.get("lidarr_identity_policy", "linked_required")
+        if policy == "linked_required" and not account:
+            return None, "A linked Navidrome account is required to make requests here."
+        if account:
+            try:
+                _, navidrome = await self._guild_client(guild)
+                remote = next(
+                    (item for item in await navidrome.users()
+                     if str(item.get("id")) == str(account.get("id"))), None
+                )
+            except NavidromeError as exc:
+                return None, f"Could not revalidate your linked Navidrome account: {exc}"
+            if remote is None:
+                return None, "Your linked Navidrome account is no longer valid; ask an administrator to relink it."
+        return account or None, None
+
+    async def _record_lidarr_audit(
+        self, guild: discord.Guild, member: discord.Member, media_type: str,
+        candidate: Dict[str, Any], outcome: str, account: Optional[Dict[str, Any]],
+    ) -> None:
+        group = self.config.guild(guild)
+        audit = await group.lidarr_audit()
+        foreign_id = candidate.get("foreignArtistId") or candidate.get("foreignAlbumId")
+        title = candidate.get("artistName") or candidate.get("title") or "Unknown"
+        audit.append({
+            "timestamp": utc_now().isoformat(), "discord_user_id": member.id,
+            "discord_username": str(member), "guild_id": guild.id,
+            "navidrome_user_id": account.get("id") if account else None,
+            "navidrome_username": account.get("username") if account else None,
+            "media_type": media_type, "title": str(title)[:200],
+            "lidarr_id": str(foreign_id or "")[:100], "outcome": outcome,
+        })
+        await group.lidarr_audit.set(audit[-500:])
+
+    async def _notify_lidarr_request(
+        self, guild: discord.Guild, member: discord.Member, media_type: str,
+        candidate: Dict[str, Any], outcome: str, lidarr_base_url: str,
+    ) -> None:
+        channel_id = await self.config.guild(guild).lidarr_request_channel_id()
+        if not channel_id:
+            return
+        channel = await self._channel(guild, int(channel_id))
+        if not channel:
+            return
+        title, detail = lidarr_candidate_text(media_type, candidate)
+        embed = discord.Embed(
+            title="New Lidarr request",
+            description=f"**{title}**\n{detail}",
+            colour=discord.Colour.green(),
+        )
+        embed.add_field(name="Requested by", value=member.mention, inline=True)
+        embed.add_field(
+            name="Type", value="Artist" if media_type == "artist" else "Release", inline=True
+        )
+        embed.add_field(name="Result", value=outcome.replace("-", " ").title(), inline=True)
+        links = []
+        mb_url = musicbrainz_url(media_type, candidate)
+        lidarr_url = lidarr_item_url(lidarr_base_url, media_type, candidate)
+        if mb_url:
+            links.append(f"[MusicBrainz]({mb_url})")
+        if lidarr_url:
+            links.append(f"[Open in Lidarr]({lidarr_url})")
+        if links:
+            embed.add_field(name="Links", value=" · ".join(links), inline=False)
+        try:
+            await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            log.warning("Could not send Lidarr request notification for guild %s", guild.id)
+
+    async def execute_lidarr_request(
+        self, guild: discord.Guild, member: discord.Member, media_type: str,
+        candidate: Dict[str, Any],
+    ) -> str:
+        account, error = await self._request_identity(guild, member)
+        if error:
+            return error
+        settings = await self.config.guild(guild).all()
+        now = time.monotonic()
+        privileged = (
+            member.id == getattr(guild, "owner_id", None)
+            or member.guild_permissions.manage_guild
+        )
+        if not privileged:
+            cooldown = int(settings.get("lidarr_cooldown_seconds", 30))
+            previous = self._lidarr_cooldowns.get((guild.id, member.id), 0.0)
+            if cooldown and now - previous < cooldown:
+                return f"Please wait {int(cooldown - (now - previous)) + 1} seconds before another request."
+
+            successful = {"added", "already-managed", "tagged-existing", "search-queued"}
+            requested_type = "artist" if media_type == "artist" else "album"
+            now_utc = utc_now()
+            recent = []
+            for item in settings.get("lidarr_audit", []):
+                if (
+                    item.get("discord_user_id") != member.id
+                    or item.get("media_type") != requested_type
+                    or item.get("outcome") not in successful
+                ):
+                    continue
+                try:
+                    timestamp = datetime.datetime.fromisoformat(str(item.get("timestamp", "")))
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=datetime.timezone.utc)
+                except ValueError:
+                    continue
+                recent.append(timestamp)
+
+            prefix = "lidarr_artist" if requested_type == "artist" else "lidarr_release"
+            label = "artist" if requested_type == "artist" else "release"
+            hourly_limit = int(
+                settings.get(f"{prefix}_hourly_limit", 10 if label == "artist" else 30)
+            )
+            weekly_limit = int(
+                settings.get(f"{prefix}_weekly_limit", 50 if label == "artist" else 100)
+            )
+            hourly_used = sum(
+                now_utc - stamp < datetime.timedelta(hours=1) for stamp in recent
+            )
+            weekly_used = sum(
+                now_utc - stamp < datetime.timedelta(days=7) for stamp in recent
+            )
+            if hourly_limit and hourly_used >= hourly_limit:
+                return f"You have reached this server's hourly {label} request limit."
+            if weekly_limit and weekly_used >= weekly_limit:
+                return f"You have reached this server's weekly {label} request limit."
+        try:
+            _, client, lidarr_settings = await self._lidarr_client(guild)
+            source_tag = await client.ensure_tag("discord")
+            requester_tag = await client.ensure_tag(lidarr_requester_tag(member.name))
+            tag_ids = [source_tag, requester_tag]
+            if media_type == "artist":
+                foreign_id = str(candidate.get("foreignArtistId") or "")
+                existing = next(iter(await client.artists(mb_id=foreign_id)), None)
+                if existing:
+                    before = set(existing.get("tags") or [])
+                    await client.update_artist_tags(existing, tag_ids)
+                    outcome = "already-managed" if set(tag_ids).issubset(before) else "tagged-existing"
+                else:
+                    await client.add_artist(candidate, lidarr_settings, tag_ids)
+                    outcome = "added"
+            else:
+                foreign_id = str(candidate.get("foreignAlbumId") or "")
+                existing = (await client.albums(foreign_album_id=foreign_id))
+                if existing:
+                    artist_foreign_id = str((candidate.get("artist") or {}).get("foreignArtistId") or "")
+                    managed_artist = next(
+                        iter(await client.artists(mb_id=artist_foreign_id)), None
+                    )
+                    if managed_artist:
+                        before = set(managed_artist.get("tags") or [])
+                        await client.update_artist_tags(managed_artist, tag_ids)
+                        outcome = (
+                            "already-managed" if set(tag_ids).issubset(before)
+                            else "tagged-existing"
+                        )
+                    else:
+                        outcome = "already-managed"
+                    album_id = existing[0].get("id")
+                    if album_id:
+                        await client.search_album(int(album_id))
+                        outcome = "search-queued"
+                else:
+                    await client.add_album(candidate, lidarr_settings, tag_ids)
+                    outcome = "added"
+        except LidarrError as exc:
+            await self._record_lidarr_audit(guild, member, media_type, candidate, "failed", account)
+            return f"Lidarr request failed: {exc}"
+        self._lidarr_cooldowns[(guild.id, member.id)] = now
+        await self._record_lidarr_audit(guild, member, media_type, candidate, outcome, account)
+        await self._notify_lidarr_request(
+            guild, member, media_type, candidate, outcome, getattr(client, "base_url", "")
+        )
+        labels = "discord, " + lidarr_requester_tag(member.name)
+        return f"Lidarr request {outcome.replace('-', ' ')}. Attribution tags: `{labels}`."
+
     async def _guild_client(self, guild: discord.Guild) -> Tuple[str, NavidromeClient]:
-        name = await self.config.guild(guild).connection()
+        settings = await self.config.guild(guild).all()
+        if settings.get("connection_mode") == "guild_managed":
+            profile = settings.get("guild_connection") or {}
+            base_url = str(profile.get("base_url") or "")
+            if not base_url:
+                raise NavidromeError("This server's guild-managed Navidrome connection is missing.")
+            tokens = await self.bot.get_shared_api_tokens(self.guild_token_namespace(guild.id))
+            username = str(tokens.get("username") or "").strip()
+            password = str(tokens.get("password") or "")
+            if not username or not password:
+                raise NavidromeError("This server's guild-managed connection is missing credentials.")
+            client = NavidromeClient(
+                await self.get_session(), base_url, username, password, public_only=True
+            )
+            return "Guild managed", client
+        name = settings.get("connection")
         if not name:
             raise NavidromeError("This server has not selected a Navidrome connection.")
         return name, await self._client(name)
+
+    async def _reset_connection_state(self, guild: discord.Guild, *, clear_accounts: bool):
+        group = self.config.guild(guild)
+        await group.announcement_enabled.set(False)
+        await group.announced_album_ids.set([])
+        await group.last_success_at.set(None)
+        await group.next_check_at.set(None)
+        if clear_accounts:
+            await group.accounts.set({})
 
     async def _channel(self, guild: discord.Guild, channel_id: int) -> Optional[GuildMessageable]:
         channel = guild.get_channel_or_thread(channel_id)
@@ -250,12 +822,19 @@ class Navidrome(commands.Cog):
     async def setup_embed(self, guild: discord.Guild) -> discord.Embed:
         settings = await self.config.guild(guild).all()
         profiles = await self.config.connections()
+        guild_connections_enabled = await self.config.guild_connections_enabled()
         channel = (
             guild.get_channel_or_thread(settings["announcement_channel_id"])
             if settings.get("announcement_channel_id")
             else None
         )
+        mode = settings.get("connection_mode", "owner_managed")
         selected = settings.get("connection")
+        guild_profile = settings.get("guild_connection") or {}
+        active_name = "Guild managed" if mode == "guild_managed" else selected
+        ready = bool(guild_profile.get("base_url")) if mode == "guild_managed" else selected in profiles
+        active_profile = guild_profile if mode == "guild_managed" else (profiles.get(selected) or {})
+        lidarr_ready = bool((active_profile.get("lidarr") or {}).get("enabled"))
         embed = discord.Embed(
             title="Navidrome setup",
             description=(
@@ -266,12 +845,25 @@ class Navidrome(commands.Cog):
         )
         embed.add_field(
             name="Connection",
-            value=selected or ("Not selected" if profiles else "No owner-approved connections"),
+            value=active_name or ("Not selected" if profiles else "No owner-approved connections"),
+            inline=True,
+        )
+        embed.add_field(
+            name="Connection mode",
+            value="Guild managed" if mode == "guild_managed" else "Bot-owner managed",
             inline=True,
         )
         embed.add_field(
             name="Connection status",
-            value="Ready to test" if selected in profiles else "Setup required",
+            value="Ready to test" if ready else "Setup required",
+            inline=True,
+        )
+        embed.add_field(
+            name="Lidarr requests",
+            value=(
+                f"Enabled · `{settings.get('lidarr_identity_policy', 'linked_required')}`"
+                if lidarr_ready else "Not configured"
+            ),
             inline=True,
         )
         embed.add_field(
@@ -312,7 +904,7 @@ class Navidrome(commands.Cog):
             value=settings.get("last_success_at") or "Never",
             inline=False,
         )
-        if not profiles:
+        if not profiles and mode != "guild_managed":
             embed.add_field(
                 name="Owner setup needed",
                 value=(
@@ -321,17 +913,23 @@ class Navidrome(commands.Cog):
                 ),
                 inline=False,
             )
+        if guild_connections_enabled:
+            embed.add_field(
+                name="Guild-managed setup",
+                value="Available to members with Manage Server. Public HTTPS endpoints only.",
+                inline=False,
+            )
         return embed
 
     async def enable_announcements(self, guild: discord.Guild) -> Tuple[bool, str]:
         settings = await self.config.guild(guild).all()
-        if not settings.get("connection") or not settings.get("announcement_channel_id"):
+        if not settings.get("announcement_channel_id"):
             return False, "Select a connection and announcement channel first."
         channel = await self._channel(guild, int(settings["announcement_channel_id"]))
         if not channel:
             return False, "I cannot send messages in the configured channel."
         try:
-            client = await self._client(settings["connection"])
+            _, client = await self._guild_client(guild)
             albums = await client.newest_albums(25)
         except NavidromeError as exc:
             return False, f"Connection test failed: {exc}"
@@ -349,13 +947,13 @@ class Navidrome(commands.Cog):
     async def preview_announcement(self, guild: discord.Guild) -> Tuple[bool, str]:
         settings = await self.config.guild(guild).all()
         channel_id = settings.get("announcement_channel_id")
-        if not settings.get("connection") or not channel_id:
+        if not channel_id:
             return False, "Select a connection and announcement channel first."
         channel = await self._channel(guild, int(channel_id))
         if not channel:
             return False, "I cannot send messages in the configured channel."
         try:
-            client = await self._client(settings["connection"])
+            _, client = await self._guild_client(guild)
             albums = await client.newest_albums(1)
         except NavidromeError as exc:
             return False, str(exc)
@@ -402,32 +1000,56 @@ class Navidrome(commands.Cog):
             if await self.bot.cog_disabled_in_guild(self, guild):
                 continue
             settings = await self.config.guild(guild).all()
-            if settings.get("announcement_enabled") and settings.get("connection") and self._due(settings):
-                due.setdefault(settings["connection"], []).append(guild)
+            configured = (
+                bool((settings.get("guild_connection") or {}).get("base_url"))
+                if settings.get("connection_mode") == "guild_managed"
+                else bool(settings.get("connection"))
+            )
+            if settings.get("announcement_enabled") and configured and self._due(settings):
+                key = (
+                    f"guild:{guild.id}"
+                    if settings.get("connection_mode") == "guild_managed"
+                    else f"owner:{settings['connection']}"
+                )
+                due.setdefault(key, []).append(guild)
         if due:
             await asyncio.gather(
                 *(self._poll_connection(name, guilds) for name, guilds in due.items())
             )
 
-    async def _poll_connection(self, name: str, guilds: List[discord.Guild]):
+    async def _poll_connection(self, key: str, guilds: List[discord.Guild]):
         async with self._poll_semaphore:
             try:
-                client = await self._client(name)
+                if key.startswith("guild:"):
+                    _, client = await self._guild_client(guilds[0])
+                else:
+                    name = key.split(":", 1)[1] if key.startswith("owner:") else key
+                    client = await self._client(name)
                 albums = await client.newest_albums(25)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                failures = self._connection_failures.get(name, 0) + 1
-                self._connection_failures[name] = failures
+                failures = self._connection_failures.get(key, 0) + 1
+                self._connection_failures[key] = failures
                 delay = min(240, 15 * (2 ** min(failures - 1, 4))) + random.randint(0, 5)
                 for guild in guilds:
-                    await self._set_next_check(guild, delay)
-                log.warning(
-                    "Navidrome poll failed for connection %s (%s); retry in about %s minutes",
-                    name, type(exc).__name__, delay,
-                )
+                    if failures >= 3:
+                        await self.config.guild(guild).announcement_enabled.set(False)
+                        await self.config.guild(guild).next_check_at.set(None)
+                    else:
+                        await self._set_next_check(guild, delay)
+                if failures >= 3:
+                    log.error(
+                        "Navidrome announcements disabled after repeated connection failures for %s (%s)",
+                        key, type(exc).__name__,
+                    )
+                else:
+                    log.warning(
+                        "Navidrome poll failed for connection %s (%s); retry in about %s minutes",
+                        key, type(exc).__name__, delay,
+                    )
                 return
-            self._connection_failures.pop(name, None)
+            self._connection_failures.pop(key, None)
             for guild in guilds:
                 try:
                     await self._check_guild(guild, albums, client)
@@ -440,7 +1062,7 @@ class Navidrome(commands.Cog):
     async def before_poll_loop(self):
         await self.bot.wait_until_red_ready()
 
-    @commands.group(name="navidrome", invoke_without_command=True)
+    @commands.group(name="navidrome", aliases=("navi",), invoke_without_command=True)
     @commands.guild_only()
     @commands.bot_has_permissions(embed_links=True)
     async def navidrome(self, ctx: commands.Context):
@@ -494,11 +1116,108 @@ class Navidrome(commands.Cog):
         for album in albums:
             await self.send_album(ctx.channel, album, client)
 
+    async def prepare_lidarr_request(
+        self, guild: discord.Guild, member: discord.Member, media_type: str, query: str
+    ):
+        media_type = media_type.casefold()
+        media_type = "album" if media_type in {"release", "album", "song", "single"} else media_type
+        if media_type not in {"artist", "album"}:
+            return "Choose `artist` or `release`.", None, None
+        query = query.strip()
+        if len(query) < 2 or len(query) > 200:
+            return "Enter a search between 2 and 200 characters.", None, None
+        display_query = query
+        query, query_error = normalize_musicbrainz_query(media_type, query)
+        if query_error:
+            return query_error, None, None
+        account, error = await self._request_identity(guild, member)
+        if error:
+            return error, None, None
+        try:
+            _, navidrome = await self._guild_client(guild)
+            local = await navidrome.search(
+                query, artist_count=5 if media_type == "artist" else 0,
+                album_count=5 if media_type == "album" else 0,
+            )
+            matches = local["artists" if media_type == "artist" else "albums"]
+            local_match = exact_local_match(media_type, query, matches)
+            if local_match:
+                title = local_match.get("name") or local_match.get("album") or query
+                return (
+                    f"`{title}` already appears in this Navidrome library; "
+                    "no Lidarr request was made.", None, None
+                )
+            _, lidarr, _ = await self._lidarr_client(guild)
+            candidates = await lidarr.lookup(media_type, query)
+        except (NavidromeError, LidarrError) as exc:
+            return str(exc), None, None
+        if not candidates:
+            return "Lidarr found no matching result. Try including the artist name.", None, None
+        if len(candidates) == 1:
+            candidate = candidates[0]
+            return None, lidarr_confirmation_embed(member, account, media_type, candidate), LidarrConfirmView(
+                self, member.id, media_type, candidate
+            )
+        safe_query = discord.utils.escape_markdown(discord.utils.escape_mentions(display_query))
+        return (
+            f'Lidarr found {len(candidates)} results for "{safe_query}". '
+            "Choose the correct one.", None,
+            LidarrResultView(self, member.id, media_type, candidates, account),
+        )
+
+    @navidrome.command(name="request", aliases=("req",))
+    @commands.bot_has_permissions(embed_links=True)
+    async def navidrome_request(
+        self, ctx: commands.Context, media_type: Optional[str] = None, *, query: str = ""
+    ):
+        """Search Navidrome, then request an artist or release through Lidarr.
+
+        Use `artist` for an artist, or `release` for an album, EP, or single.
+        `album`, `single`, and `song` are accepted as release aliases. Raw MusicBrainz
+        IDs and MusicBrainz artist/release-group links are recognized automatically.
+
+        Examples:
+        `!navi req artist Willie Nelson`
+        `!navi req release Willie Nelson Red Headed Stranger`
+        `!navi req song Artist Name Song Name`
+
+        Run `!navi req` to choose Artist or Release with buttons. Lidarr acquires
+        releases rather than individual tracks, so song searches resolve to releases.
+        """
+        if media_type is None:
+            return await ctx.send(
+                "What would you like to request? Releases include albums, EPs, and singles.",
+                view=LidarrRequestTypeView(self, ctx.author.id),
+            )
+        normalized = media_type.casefold()
+        if not query and normalized in {"artist", "release", "album", "song", "single"}:
+            chosen = "artist" if normalized == "artist" else "album"
+            label = "Artist" if chosen == "artist" else "Release"
+            return await ctx.send(
+                f"Click **{label}** to enter your search.",
+                view=LidarrRequestTypeView(self, ctx.author.id, chosen),
+            )
+        content, embed, view = await self.prepare_lidarr_request(
+            ctx.guild, ctx.author, normalized, query
+        )
+        if embed is None and view is None:
+            await ctx.send(content)
+        else:
+            await ctx.send(content=content, embed=embed, view=view)
+
     @commands.group(name="navidromeowner", invoke_without_command=True)
     @checks.is_owner()
     async def navidromeowner(self, ctx: commands.Context):
         """Manage bot-owner-approved Navidrome connections."""
         await ctx.send_help()
+
+    @navidromeowner.command(name="guildconnections")
+    async def navidromeowner_guildconnections(self, ctx: commands.Context, enabled: bool):
+        """Allow or deny guild administrators from storing their own public-HTTPS connection."""
+        await self.config.guild_connections_enabled.set(enabled)
+        await ctx.send(
+            f"Guild-managed Navidrome connections are now {'enabled' if enabled else 'disabled'}."
+        )
 
     @navidromeowner.group(name="connection", invoke_without_command=True)
     async def owner_connection(self, ctx: commands.Context):
@@ -573,9 +1292,89 @@ class Navidrome(commands.Cog):
             f"Native user management is available ({len(users)} users visible)."
         )
 
+    @navidromeowner.group(name="lidarr", invoke_without_command=True)
+    async def navidromeowner_lidarr(self, ctx: commands.Context):
+        """Configure Lidarr for an owner-managed Navidrome connection."""
+        await ctx.send_help()
+
+    @navidromeowner_lidarr.command(name="configure", aliases=("set",))
+    async def owner_lidarr_configure(
+        self, ctx: commands.Context, name: Optional[str] = None,
+        root_folder_path: Optional[str] = None, quality_profile_id: Optional[str] = None,
+        metadata_profile_id: Optional[str] = None, allow_http: Optional[bool] = None,
+    ):
+        """Discover defaults, validate, and enable Lidarr for a Navidrome profile."""
+        profiles = await self.config.connections()
+        if name is None:
+            if len(profiles) == 1:
+                name = next(iter(profiles))
+            elif not profiles:
+                return await ctx.send("No Navidrome connections are registered.")
+            else:
+                choices = ", ".join(f"`{item}`" for item in sorted(profiles))
+                return await ctx.send(f"Choose a Navidrome connection: {choices}")
+        try:
+            name = safe_profile_name(name)
+        except ValueError as exc:
+            return await ctx.send(str(exc))
+        profile = profiles.get(name)
+        if not profile:
+            return await ctx.send("That Navidrome connection is not registered.")
+        namespace, tokens = await self._owner_lidarr_tokens(name)
+        base_url = str(tokens.get("lidarr_url") or "").strip()
+        api_key = str(tokens.get("lidarr_api_key") or "")
+        if not base_url or not api_key:
+            return await ctx.send(
+                f"Set `lidarr_url` and `lidarr_api_key` first with Red's shared API token "
+                f"command for `{namespace}` in a private channel."
+            )
+        inferred_http = base_url.casefold().startswith("http://")
+        allow_http = inferred_http if allow_http is None else allow_http
+        try:
+            client = LidarrClient(
+                await self.get_session(), base_url, api_key, allow_http=allow_http
+            )
+            discovered = await client.discover_configuration(
+                root_folder_path=root_folder_path, quality_profile_id=quality_profile_id,
+                metadata_profile_id=metadata_profile_id,
+            )
+            status = discovered.pop("status")
+            settings = {"enabled": True, **discovered, "monitor": "all"}
+        except LidarrError as exc:
+            return await ctx.send(f"Lidarr was not enabled: {exc}")
+        profile = dict(profile)
+        profile["lidarr"] = settings
+        profile["lidarr_allow_http"] = bool(allow_http)
+        profiles[name] = profile
+        await self.config.connections.set(profiles)
+        await ctx.send(
+            f"Lidarr {status.get('version', 'unknown')} is enabled for `{name}` using "
+            f"root `{settings['root_folder_path']}`, quality profile "
+            f"`{settings['quality_profile_name']}` (ID {settings['quality_profile_id']}), and "
+            f"metadata profile `{settings['metadata_profile_name']}` "
+            f"(ID {settings['metadata_profile_id']}). The API key remains hidden."
+        )
+
+    @navidromeowner_lidarr.command(name="disable")
+    async def owner_lidarr_disable(self, ctx: commands.Context, name: str):
+        """Disable requests without displaying or deleting separately stored credentials."""
+        try:
+            name = safe_profile_name(name)
+        except ValueError as exc:
+            return await ctx.send(str(exc))
+        profiles = await self.config.connections()
+        if name not in profiles:
+            return await ctx.send("That Navidrome connection is not registered.")
+        profile = dict(profiles[name])
+        profile.pop("lidarr", None)
+        profile.pop("lidarr_allow_http", None)
+        profiles[name] = profile
+        await self.config.connections.set(profiles)
+        await ctx.send(f"Lidarr requests are disabled for `{name}`.")
+
     @commands.group(name="navidromeset", invoke_without_command=True)
     @commands.guild_only()
-    @checks.admin_or_permissions(manage_guild=True)
+    @commands.check(navidrome_config_permission)
     async def navidromeset(self, ctx: commands.Context):
         """Configure this server's Navidrome connection and announcements."""
         await self._send_settings(ctx)
@@ -590,6 +1389,7 @@ class Navidrome(commands.Cog):
         )
 
     @navidromeset.command(name="connection")
+    @checks.admin_or_permissions(manage_guild=True)
     async def navidromeset_connection(self, ctx: commands.Context, name: str):
         """Select a bot-owner-approved connection for this server."""
         try:
@@ -602,16 +1402,161 @@ class Navidrome(commands.Cog):
             await (await self._client(name)).ping()
         except NavidromeError as exc:
             return await ctx.send(f"Connection test failed: {exc}")
-        await self.config.guild(ctx.guild).connection.set(name)
-        await self.config.guild(ctx.guild).announcement_enabled.set(False)
-        await self.config.guild(ctx.guild).announced_album_ids.set([])
+        group = self.config.guild(ctx.guild)
+        previous_mode = await group.connection_mode()
+        previous_name = await group.connection()
+        changed_server = previous_mode != "owner_managed" or previous_name != name
+        if previous_mode == "guild_managed":
+            await self.bot.remove_shared_api_tokens(
+                self.guild_token_namespace(ctx.guild.id), "username", "password", "lidarr_url", "lidarr_api_key"
+            )
+            await group.guild_connection.set(None)
+        await group.connection_mode.set("owner_managed")
+        await group.connection.set(name)
+        await self._reset_connection_state(ctx.guild, clear_accounts=changed_server)
         await ctx.send(f"This server now uses Navidrome connection `{name}`. Announcements remain disabled.")
 
     @navidromeset.command(name="disconnect")
-    async def navidromeset_disconnect(self, ctx: commands.Context):
-        """Disconnect this Discord server without deleting owner credentials."""
+    @checks.admin_or_permissions(manage_guild=True)
+    async def navidromeset_disconnect(self, ctx: commands.Context, confirmation: str = ""):
+        """Disconnect this server and delete any guild-owned credentials."""
+        if confirmation.casefold() != "confirm":
+            await ctx.send(
+                f"Run `{ctx.clean_prefix}navidromeset disconnect confirm` to disconnect, clear linked-account mappings, and delete this guild's stored connection credentials."
+            )
+            return
+        await self.bot.remove_shared_api_tokens(
+            self.guild_token_namespace(ctx.guild.id), "username", "password", "lidarr_url", "lidarr_api_key"
+        )
         await self.config.guild(ctx.guild).clear()
-        await ctx.send("Disconnected this server from Navidrome and cleared its announcement history.")
+        await ctx.send(
+            "Disconnected this server from Navidrome, deleted any guild-owned credentials, and cleared its local mappings and announcement history."
+        )
+
+    @navidromeset.group(name="lidarr", invoke_without_command=True)
+    async def navidromeset_lidarr(self, ctx: commands.Context):
+        """Configure this server's Lidarr request policy."""
+        settings = await self.config.guild(ctx.guild).all()
+        role_id = settings.get("lidarr_requester_role_id")
+        channel_id = settings.get("lidarr_request_channel_id")
+        request_channel = f"<#{channel_id}>" if channel_id else "Not set"
+        await ctx.send(
+            f"Identity policy: `{settings.get('lidarr_identity_policy', 'linked_required')}`\n"
+            f"Requester role: {f'<@&{role_id}>' if role_id else 'Any member'}\n"
+            f"Request channel: {request_channel}\n"
+            f"Cooldown: {settings.get('lidarr_cooldown_seconds', 30)} seconds\n"
+            f"Artist limits: {settings.get('lidarr_artist_hourly_limit', 10)}/hour, "
+            f"{settings.get('lidarr_artist_weekly_limit', 50)}/week\n"
+            f"Release limits: {settings.get('lidarr_release_hourly_limit', 30)}/hour, "
+            f"{settings.get('lidarr_release_weekly_limit', 100)}/week\n"
+            "A limit of 0 is unlimited. Administrators and the server owner bypass limits."
+        )
+
+    @navidromeset_lidarr.command(name="identity")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def guild_lidarr_identity(self, ctx: commands.Context, policy: str):
+        """Set linked_required, linked_optional, or discord_only request identity."""
+        policy = policy.casefold()
+        allowed = {"linked_required", "linked_optional", "discord_only"}
+        if policy not in allowed:
+            return await ctx.send("Choose `linked_required`, `linked_optional`, or `discord_only`.")
+        await self.config.guild(ctx.guild).lidarr_identity_policy.set(policy)
+        await ctx.send(
+            f"New Lidarr requests use `{policy}`. Historical attribution is unchanged."
+        )
+
+    @navidromeset_lidarr.command(name="requesterrole")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def guild_lidarr_requester_role(
+        self, ctx: commands.Context, role: Optional[discord.Role] = None
+    ):
+        """Set or clear the role allowed to submit Lidarr requests."""
+        await self.config.guild(ctx.guild).lidarr_requester_role_id.set(
+            role.id if role else None
+        )
+        await ctx.send(
+            f"Lidarr requester role set to {role.mention}." if role
+            else "The Lidarr requester role restriction is cleared."
+        )
+
+    @navidromeset_lidarr.command(name="requestchannel")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def guild_lidarr_request_channel(
+        self, ctx: commands.Context, channel: Optional[GuildMessageable] = None
+    ):
+        """Set the channel notified after confirmed Lidarr requests."""
+        channel = channel or ctx.channel
+        await self.config.guild(ctx.guild).lidarr_request_channel_id.set(channel.id)
+        await ctx.send(f"Confirmed Lidarr requests will be reported in {channel.mention}.")
+
+    @navidromeset_lidarr.command(name="clearrequestchannel")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def guild_lidarr_clear_request_channel(self, ctx: commands.Context):
+        """Disable confirmed Lidarr request notifications."""
+        await self.config.guild(ctx.guild).lidarr_request_channel_id.set(None)
+        await ctx.send("Lidarr request channel notifications are disabled.")
+
+    @navidromeset_lidarr.command(name="limits")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def guild_lidarr_limits(
+        self, ctx: commands.Context, cooldown_seconds: int, artist_hourly: int,
+        artist_weekly: int, release_hourly: int, release_weekly: int,
+    ):
+        """Set cooldown and hourly/weekly artist and release limits; 0 is unlimited."""
+        values = (artist_hourly, artist_weekly, release_hourly, release_weekly)
+        if not 0 <= cooldown_seconds <= 86400 or any(
+            value < 0 or value > 10000 for value in values
+        ):
+            return await ctx.send(
+                "Cooldown must be 0-86400 seconds and request limits must be 0-10000. "
+                "Use 0 to disable a limit."
+            )
+        group = self.config.guild(ctx.guild)
+        await group.lidarr_cooldown_seconds.set(cooldown_seconds)
+        await group.lidarr_artist_hourly_limit.set(artist_hourly)
+        await group.lidarr_artist_weekly_limit.set(artist_weekly)
+        await group.lidarr_release_hourly_limit.set(release_hourly)
+        await group.lidarr_release_weekly_limit.set(release_weekly)
+        await ctx.send(
+            f"Lidarr limits set: {cooldown_seconds}-second cooldown; artists "
+            f"{artist_hourly}/hour and {artist_weekly}/week; releases "
+            f"{release_hourly}/hour and {release_weekly}/week. 0 means unlimited."
+        )
+
+    @navidromeset_lidarr.command(name="audit")
+    async def guild_lidarr_audit(self, ctx: commands.Context, count: int = 10):
+        """Show recent request outcomes without credentials."""
+        entries = (await self.config.guild(ctx.guild).lidarr_audit())[-max(1, min(count, 25)):]
+        if not entries:
+            return await ctx.send("No Lidarr requests have been audited yet.")
+        lines = [
+            f"{item.get('timestamp', '')[:16]} — {item.get('discord_username', 'unknown')} — "
+            f"{item.get('media_type')} `{item.get('title')}` — {item.get('outcome')}"
+            for item in reversed(entries)
+        ]
+        await ctx.send("\n".join(lines))
+
+    @navidromeset.command(name="managerrole")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def navidromeset_managerrole(
+        self, ctx: commands.Context, role: Optional[discord.Role] = None
+    ):
+        """Set or clear the role allowed to perform non-secret routine configuration."""
+        await self.config.guild(ctx.guild).manager_role_id.set(role.id if role else None)
+        if role:
+            await ctx.send(
+                f"{role.mention} may now use routine Navidrome configuration. "
+                "Manage Server is still required to create, replace, or disconnect credentials."
+            )
+        else:
+            await ctx.send("The optional Navidrome manager role is cleared.")
+
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild):
+        await self.bot.remove_shared_api_tokens(
+            self.guild_token_namespace(guild.id), "username", "password", "lidarr_url", "lidarr_api_key"
+        )
+        await self.config.guild(guild).clear()
 
     @navidromeset.command(name="channel", aliases=("announcechannel",))
     async def navidromeset_channel(self, ctx: commands.Context, channel: Optional[GuildMessageable] = None):
@@ -640,6 +1585,7 @@ class Navidrome(commands.Cog):
         section = self.config.guild(ctx.guild)
         previous = await section.notification_mode()
         await section.notification_mode.set(mode)
+        change = f"changed from **{previous}** to **{mode}**" if previous != mode else f"remains **{mode}**"
         if mode == "role" and not await section.notification_role_id():
             suffix = " No alert role is configured, so announcements will remain silent until you set one."
         elif mode == "silent":
@@ -648,7 +1594,7 @@ class Navidrome(commands.Cog):
             suffix = " Automatic album posts use Discord’s normal channel notification behavior."
         else:
             suffix = " The configured opt-in role will be mentioned outside quiet hours."
-        await ctx.send(f"Album notifications changed from **{previous}** to **{mode}**.{suffix}")
+        await ctx.send(f"Album notifications {change}.{suffix}")
 
     @navidromeset.command(name="notificationrole", aliases=("alertrole",))
     async def navidromeset_notification_role(self, ctx: commands.Context, role: str):
@@ -678,9 +1624,8 @@ class Navidrome(commands.Cog):
         section = self.config.guild(ctx.guild)
         settings = await section.all()
         if timezone_name.casefold() in {"off", "clear", "none", "reset"}:
-            await section.quiet_timezone.set(None)
-            await section.quiet_start.set(None)
-            await section.quiet_end.set(None)
+            settings.update({"quiet_timezone": None, "quiet_start": None, "quiet_end": None})
+            await section.set(settings)
             return await ctx.send("Navidrome quiet hours are disabled.")
         if start is None or end is None:
             return await ctx.send("Use `navidromeset quiethours <timezone> <HH:MM> <HH:MM>`, or `off`.")
@@ -694,9 +1639,12 @@ class Navidrome(commands.Cog):
             return await ctx.send(str(error))
         if start_minute == end_minute:
             return await ctx.send("Quiet-hour start and end times must differ.")
-        await section.quiet_timezone.set(timezone_name)
-        await section.quiet_start.set(start_minute)
-        await section.quiet_end.set(end_minute)
+        settings.update({
+            "quiet_timezone": timezone_name,
+            "quiet_start": start_minute,
+            "quiet_end": end_minute,
+        })
+        await section.set(settings)
         await ctx.send(
             f"Navidrome quiet hours are **{format_quiet_clock(start_minute)}–"
             f"{format_quiet_clock(end_minute)} {timezone_name}**. Automatic posts remain visible "
@@ -793,9 +1741,7 @@ class Navidrome(commands.Cog):
             )
             try:
                 await member.send(
-                    f"Your Navidrome account for **{ctx.guild.name}** is ready.\n"
-                    f"Username: `{username}`\nTemporary password: `{password}`\n"
-                    "Sign in and change this password as soon as possible."
+                    account_credentials_message(ctx.guild.name, username, password)
                 )
             except discord.HTTPException:
                 await client.delete_user(str(user.get("id") or ""))
@@ -812,6 +1758,43 @@ class Navidrome(commands.Cog):
         await group.accounts.set(accounts)
         await ctx.send(
             f"Created Navidrome user `{username}` for {member.mention}; credentials were sent by DM.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @navidromeset_user.command(name="link")
+    async def navidromeset_user_link(
+        self, ctx: commands.Context, member: discord.Member, *, username: str
+    ):
+        """Link a Discord member to an existing Navidrome user."""
+        group = self.config.guild(ctx.guild)
+        accounts = await group.accounts()
+        if str(member.id) in accounts:
+            return await ctx.send("That member already has a linked Navidrome account.")
+        try:
+            _, client = await self._guild_client(ctx.guild)
+            user = await client.user_by_username(username.strip())
+        except NavidromeError as exc:
+            return await ctx.send(f"Could not read the Navidrome user: {exc}")
+        if not user:
+            return await ctx.send("That Navidrome username does not exist.")
+        remote_id = str(user.get("id") or "")
+        remote_name = str(user.get("userName") or username.strip())
+        if any(
+            str(account.get("id") or "") == remote_id
+            or str(account.get("username") or "").casefold() == remote_name.casefold()
+            for account in accounts.values()
+        ):
+            return await ctx.send(
+                "That Navidrome account is already linked to another Discord member."
+            )
+        accounts[str(member.id)] = {
+            "id": remote_id,
+            "username": remote_name,
+            "created_at": utc_now().isoformat(),
+        }
+        await group.accounts.set(accounts)
+        await ctx.send(
+            f"Linked Navidrome user `{remote_name}` to {member.mention}.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
 

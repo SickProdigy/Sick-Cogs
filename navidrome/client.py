@@ -1,5 +1,8 @@
 import asyncio
 import hashlib
+import ipaddress
+import json
+import socket
 import secrets
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlsplit
@@ -9,6 +12,10 @@ import aiohttp
 
 class NavidromeError(RuntimeError):
     """A safe, user-facing Navidrome error."""
+
+
+MAX_JSON_BYTES = 2_000_000
+MAX_ART_BYTES = 8_000_000
 
 
 def validate_base_url(value: str, *, allow_http: bool = False) -> str:
@@ -21,15 +28,73 @@ def validate_base_url(value: str, *, allow_http: bool = False) -> str:
     return value
 
 
+async def validate_public_base_url(value: str) -> str:
+    """Require guild-managed endpoints to resolve only to public addresses."""
+    value = validate_base_url(value)
+    parsed = urlsplit(value)
+    hostname = str(parsed.hostname or "").rstrip(".").casefold()
+    try:
+        addresses = [ipaddress.ip_address(hostname)]
+    except ValueError:
+        try:
+            records = await asyncio.get_running_loop().getaddrinfo(
+                hostname, parsed.port or 443, type=socket.SOCK_STREAM
+            )
+        except socket.gaierror as exc:
+            raise ValueError(f"Could not resolve Navidrome host {hostname}.") from exc
+        addresses = list({ipaddress.ip_address(record[4][0]) for record in records})
+    if not addresses or any(not address.is_global for address in addresses):
+        raise ValueError(
+            "Guild-managed Navidrome servers must resolve only to public addresses."
+        )
+    return value
+
+
+def _response_peer_is_public(response: aiohttp.ClientResponse) -> bool:
+    connection = getattr(response, "connection", None)
+    transport = getattr(connection, "transport", None)
+    peer = transport.get_extra_info("peername") if transport else None
+    if not peer:
+        return False
+    try:
+        return ipaddress.ip_address(peer[0]).is_global
+    except (ValueError, TypeError, IndexError):
+        return False
+
+
+async def _read_limited(response: aiohttp.ClientResponse, limit: int) -> bytes:
+    length = response.headers.get("Content-Length")
+    try:
+        if length is not None and int(length) > limit:
+            raise NavidromeError("Navidrome returned a response that was too large.")
+    except ValueError as exc:
+        raise NavidromeError("Navidrome returned an invalid response.") from exc
+    chunks = bytearray()
+    async for chunk in response.content.iter_chunked(64 * 1024):
+        chunks.extend(chunk)
+        if len(chunks) > limit:
+            raise NavidromeError("Navidrome returned a response that was too large.")
+    return bytes(chunks)
+
+
 class NavidromeClient:
     API_VERSION = "1.16.1"
     CLIENT_NAME = "SickCogs"
 
-    def __init__(self, session: aiohttp.ClientSession, base_url: str, username: str, password: str):
+    def __init__(
+        self,
+        session: aiohttp.ClientSession,
+        base_url: str,
+        username: str,
+        password: str,
+        *,
+        public_only: bool = False,
+    ):
         self.session = session
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
+        self.public_only = public_only
         self._native_token: Optional[str] = None
         self._native_login_lock = asyncio.Lock()
 
@@ -45,19 +110,44 @@ class NavidromeClient:
             "f": "json",
         }
 
+    async def _validate_target(self):
+        if self.public_only:
+            try:
+                await validate_public_base_url(self.base_url)
+            except ValueError as exc:
+                raise NavidromeError(str(exc)) from exc
+
+    def _validate_response_peer(self, response: aiohttp.ClientResponse) -> None:
+        if self.public_only and not _response_peer_is_public(response):
+            raise NavidromeError(
+                "The guild-managed Navidrome connection reached an unsafe destination."
+            )
+
+    async def _json_response(self, response: aiohttp.ClientResponse) -> Any:
+        self._validate_response_peer(response)
+        try:
+            data = await _read_limited(response, MAX_JSON_BYTES)
+            return json.loads(data.decode("utf-8"))
+        except NavidromeError:
+            raise
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise NavidromeError("Navidrome returned an invalid response.") from exc
+
     async def request(self, endpoint: str, **params: Any) -> Dict[str, Any]:
+        await self._validate_target()
         query = self._auth_params()
         query.update({key: str(value) for key, value in params.items() if value is not None})
         url = f"{self.base_url}/rest/{endpoint}.view"
         try:
             async with self.session.get(url, params=query, allow_redirects=False) as response:
+                self._validate_response_peer(response)
                 if 300 <= response.status < 400:
                     raise NavidromeError("Navidrome returned an unexpected redirect.")
                 if response.status in {401, 403}:
                     raise NavidromeError("Navidrome rejected the configured credentials.")
                 if response.status >= 400:
                     raise NavidromeError(f"Navidrome returned HTTP {response.status}.")
-                payload = await response.json(content_type=None)
+                payload = await self._json_response(response)
         except NavidromeError:
             raise
         except (aiohttp.ClientError, TimeoutError) as exc:
@@ -80,6 +170,17 @@ class NavidromeClient:
         root = await self.request("getAlbumList2", type="newest", size=max(1, min(size, 50)))
         return list(root.get("albumList2", {}).get("album", []) or [])
 
+    async def search(self, query: str, *, artist_count: int = 5, album_count: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+        root = await self.request(
+            "search3", query=query, artistCount=max(0, min(artist_count, 20)),
+            albumCount=max(0, min(album_count, 20)), songCount=0,
+        )
+        result = root.get("searchResult3", {})
+        return {
+            "artists": list(result.get("artist", []) or []),
+            "albums": list(result.get("album", []) or []),
+        }
+
     async def library_summary(self) -> Dict[str, Any]:
         ping = await self.ping()
         folders = await self.request("getMusicFolders")
@@ -99,6 +200,10 @@ class NavidromeClient:
     async def cover_art(self, cover_art_id: Optional[str]) -> Optional[bytes]:
         if not cover_art_id:
             return None
+        try:
+            await self._validate_target()
+        except NavidromeError:
+            return None
         params = self._auth_params()
         params.update({"id": str(cover_art_id), "size": "500"})
         try:
@@ -107,16 +212,16 @@ class NavidromeClient:
                 params=params,
                 allow_redirects=False,
             ) as response:
+                self._validate_response_peer(response)
                 if response.status != 200:
                     return None
-                if int(response.headers.get("Content-Length", "0") or 0) > 8_000_000:
-                    return None
-                data = await response.read()
-        except (aiohttp.ClientError, TimeoutError, ValueError):
+                data = await _read_limited(response, MAX_ART_BYTES)
+        except (aiohttp.ClientError, TimeoutError, ValueError, NavidromeError):
             return None
-        return data if 0 < len(data) <= 8_000_000 else None
+        return data if data else None
 
     async def _native_login(self) -> str:
+        await self._validate_target()
         if self._native_token:
             return self._native_token
         async with self._native_login_lock:
@@ -128,6 +233,7 @@ class NavidromeClient:
                     json={"username": self.username, "password": self.password},
                     allow_redirects=False,
                 ) as response:
+                    self._validate_response_peer(response)
                     if 300 <= response.status < 400:
                         raise NavidromeError("Navidrome returned an unexpected redirect.")
                     if response.status in {401, 403}:
@@ -136,7 +242,7 @@ class NavidromeClient:
                         raise NavidromeError(
                             f"Navidrome native login returned HTTP {response.status}."
                         )
-                    payload = await response.json(content_type=None)
+                    payload = await self._json_response(response)
             except NavidromeError:
                 raise
             except (aiohttp.ClientError, TimeoutError, TypeError, ValueError) as exc:
@@ -163,6 +269,7 @@ class NavidromeClient:
                 headers={"X-ND-Authorization": f"Bearer {token}"},
                 allow_redirects=False,
             ) as response:
+                self._validate_response_peer(response)
                 if 300 <= response.status < 400:
                     raise NavidromeError("Navidrome returned an unexpected redirect.")
                 if response.status in {401, 403}:
@@ -180,10 +287,15 @@ class NavidromeClient:
                     )
                 if response.status == 204:
                     return None
-                text = await response.text()
-                if not text.strip():
+                data = await _read_limited(response, MAX_JSON_BYTES)
+                if not data.strip():
                     return None
-                return await response.json(content_type=None)
+                try:
+                    return json.loads(data.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise NavidromeError(
+                        "Navidrome returned an invalid native API response."
+                    ) from exc
         except NavidromeError:
             raise
         except (aiohttp.ClientError, TimeoutError, TypeError, ValueError) as exc:

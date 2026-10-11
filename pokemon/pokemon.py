@@ -299,7 +299,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="1.1.0";__author__="SickProdigy"
+    __version__="1.1.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1940,12 +1940,12 @@ class Pokemon(commands.Cog):
         """Choose silent, normal, or opt-in-role encounter alerts."""
         mode=mode.casefold()
         if mode not in {"silent","normal","role"}:await ctx.send("Choose silent, normal, or role.");return
-        section=self.config.guild(ctx.guild);previous=await section.notification_mode();await section.notification_mode.set(mode)
+        section=self.config.guild(ctx.guild);previous=await section.notification_mode();await section.notification_mode.set(mode);change=f"changed from **{previous}** to **{mode}**" if previous!=mode else f"remains **{mode}**"
         if mode=="role" and not await section.notification_role_id():suffix=" No alert role is configured, so encounters will remain silent until you set one."
         elif mode=="silent":suffix=" Automatic encounters remain visible without push or desktop notifications."
         elif mode=="normal":suffix=" Automatic encounters use Discord's normal channel notification behavior."
         else:suffix=" The configured opt-in role will be mentioned outside quiet hours."
-        await ctx.send(f"This server: encounter notifications changed from **{previous}** to **{mode}**.{suffix}")
+        await ctx.send(f"This server: encounter notifications {change}.{suffix}")
 
     @pokemon_set.command(name="notificationrole",aliases=["alertrole"])
     async def encounter_notification_role(self,ctx,role:str):

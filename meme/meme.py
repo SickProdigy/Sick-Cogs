@@ -26,7 +26,7 @@ class Meme(commands.Cog):
     """Find online memes and GIFs and publish scheduled feeds."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.3"
+    __version__ = "1.0.4"
     default_guild = {"feeds": {}, "seen": [], "feed_silent": False}
 
     def __init__(self, bot):
@@ -211,13 +211,16 @@ class Meme(commands.Cog):
             await ctx.send("Choose `silent` or `normal`.")
             return
         silent = mode == "silent"
-        await self.config.guild(ctx.guild).feed_silent.set(silent)
+        setting = self.config.guild(ctx.guild).feed_silent
+        previous = "silent" if await setting() else "normal"
+        await setting.set(silent)
+        change = f"changed from **{previous}** to **{mode}**" if previous != mode else f"remains **{mode}**"
         detail = (
             "Automatic meme posts will remain visible without push or desktop notifications."
             if silent
             else "Automatic meme posts will use Discord’s normal channel notification behavior."
         )
-        await ctx.send(f"Meme feed delivery is now **{mode}**. {detail}")
+        await ctx.send(f"Meme feed delivery {change}. {detail}")
 
     @memeset.group(name="feed")
     async def memeset_feed(self, ctx):

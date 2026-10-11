@@ -96,7 +96,9 @@ class MovieReleaseTests(unittest.IsolatedAsyncioTestCase):
         cog.config = SimpleNamespace(guild=MagicMock(return_value=SimpleNamespace(notification_mode=mode)))
         ctx = SimpleNamespace(guild=SimpleNamespace(id=1), send=AsyncMock())
         await MovieReleases.movieset_notifications.callback(cog, ctx, "silent")
-        mode.set.assert_awaited_once_with("silent");self.assertIn("without Discord notifications", ctx.send.await_args.args[0])
+        mode.set.assert_awaited_once_with("silent");self.assertIn("changed from **normal** to **silent**", ctx.send.await_args.args[0])
+        mode.return_value="silent";ctx.send.reset_mock();await MovieReleases.movieset_notifications.callback(cog, ctx, "silent")
+        self.assertIn("remains **silent**", ctx.send.await_args.args[0])
         ctx.send.reset_mock();await MovieReleases.movieset_notifications.callback(cog, ctx, "loud")
         ctx.send.assert_awaited_once_with("Choose `silent` or `normal`.")
 

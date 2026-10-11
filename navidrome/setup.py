@@ -7,7 +7,20 @@ from typing import Dict
 
 import discord
 
-from .client import NavidromeError, validate_base_url
+from .client import NavidromeError, validate_base_url, validate_public_base_url
+from .lidarr import LidarrClient, LidarrError
+
+
+def account_credentials_message(guild_name: str, username: str, password: str) -> str:
+    return (
+        "# Your Navidrome account is ready\n"
+        f"**Server:** {discord.utils.escape_markdown(guild_name)}\n\n"
+        "**Username**\n"
+        f"```text\n{username}\n```\n"
+        "**Temporary password**\n"
+        f"```text\n{password}\n```\n"
+        "Sign in and change your temporary password as soon as possible."
+    )
 
 
 async def owner_check(interaction: discord.Interaction, author: discord.abc.User) -> bool:
@@ -109,9 +122,20 @@ class ConnectionModal(discord.ui.Modal):
             return
 
         group = self.cog.config.guild(interaction.guild)
+        previous_mode = await group.connection_mode()
+        previous_name = await group.connection()
+        changed_server = previous_mode != "owner_managed" or previous_name != name
+        if previous_mode == "guild_managed":
+            await self.cog.bot.remove_shared_api_tokens(
+                self.cog.guild_token_namespace(interaction.guild.id),
+                "username", "password", "lidarr_url", "lidarr_api_key",
+            )
+            await group.guild_connection.set(None)
+        await group.connection_mode.set("owner_managed")
         await group.connection.set(name)
-        await group.announcement_enabled.set(False)
-        await group.announced_album_ids.set([])
+        await self.cog._reset_connection_state(
+            interaction.guild, clear_accounts=changed_server
+        )
         server = str(ping.get("type") or "Navidrome")
         version = str(ping.get("serverVersion") or "unknown version")
         await interaction.edit_original_response(
@@ -123,6 +147,197 @@ class ConnectionModal(discord.ui.Modal):
             view=await NavidromeSetupView.create(
                 self.cog, interaction.user, interaction.guild
             ),
+        )
+
+
+class GuildConnectionModal(discord.ui.Modal, title="Connect this server to Navidrome"):
+    url = discord.ui.TextInput(
+        label="Public Navidrome HTTPS URL",
+        placeholder="https://music.example.com",
+        max_length=500,
+    )
+    username = discord.ui.TextInput(label="Navidrome admin username", max_length=100)
+    password = discord.ui.TextInput(label="Admin password (stored securely)", max_length=500)
+    confirmation = discord.ui.TextInput(
+        label="Type CONNECT to confirm replacement", min_length=7, max_length=7
+    )
+
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message(
+                "Manage Server permission is required.", ephemeral=True
+            )
+            return
+        if not await self.cog.config.guild_connections_enabled():
+            await interaction.response.send_message(
+                "The bot owner has disabled guild-managed Navidrome connections.",
+                ephemeral=True,
+            )
+            return
+        if str(self.confirmation.value).strip().casefold() != "connect":
+            await interaction.response.send_message(
+                "Type `CONNECT` to confirm storing or replacing this server's credentials.",
+                ephemeral=True,
+            )
+            return
+        if not self.cog.claim_connection_test(interaction.guild.id):
+            await interaction.response.send_message(
+                "Please wait one minute before testing another guild-managed connection.",
+                ephemeral=True,
+            )
+            return
+        try:
+            base_url = await validate_public_base_url(str(self.url.value))
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        username = str(self.username.value).strip()
+        password = str(self.password.value)
+        if not username or not password:
+            await interaction.response.send_message(
+                "The Navidrome admin username and password are required.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+        guild = interaction.guild
+        group = self.cog.config.guild(guild)
+        previous = await group.all()
+        namespace = self.cog.guild_token_namespace(guild.id)
+        previous_tokens = await self.cog.bot.get_shared_api_tokens(namespace)
+        await self.cog.bot.set_shared_api_tokens(
+            namespace, username=username, password=password
+        )
+        await group.connection_mode.set("guild_managed")
+        staged_profile = {"base_url": base_url}
+        old_profile = previous.get("guild_connection") or {}
+        if (
+            previous.get("connection_mode") == "guild_managed"
+            and old_profile.get("base_url") == base_url
+            and old_profile.get("lidarr")
+        ):
+            staged_profile["lidarr"] = old_profile["lidarr"]
+        await group.guild_connection.set(staged_profile)
+        try:
+            _, client = await self.cog._guild_client(guild)
+            ping = await client.ping()
+            users = await client.users()
+        except NavidromeError as exc:
+            if previous_tokens:
+                await self.cog.bot.set_shared_api_tokens(namespace, **previous_tokens)
+            else:
+                await self.cog.bot.remove_shared_api_tokens(
+                    namespace, "username", "password"
+                )
+            await group.connection_mode.set(
+                previous.get("connection_mode", "owner_managed")
+            )
+            await group.guild_connection.set(previous.get("guild_connection"))
+            await interaction.followup.send(
+                f"Guild connection was not saved: {exc}", ephemeral=True
+            )
+            return
+
+        changed_server = (
+            previous.get("connection_mode") != "guild_managed"
+            or (previous.get("guild_connection") or {}).get("base_url") != base_url
+        )
+        if changed_server:
+            await self.cog.bot.remove_shared_api_tokens(
+                namespace, "lidarr_url", "lidarr_api_key"
+            )
+        await group.connection.set(None)
+        await self.cog._reset_connection_state(guild, clear_accounts=changed_server)
+        server = str(ping.get("type") or "Navidrome")
+        version = str(ping.get("serverVersion") or "unknown version")
+        await interaction.edit_original_response(
+            content=(
+                f"Connected this Discord server to {server} {version}. "
+                f"User management is ready ({len(users)} users visible)."
+            ),
+            embed=await self.cog.setup_embed(guild),
+            view=await NavidromeSetupView.create(self.cog, interaction.user, guild),
+        )
+
+
+class GuildLidarrModal(discord.ui.Modal, title="Connect this server to Lidarr"):
+    url = discord.ui.TextInput(label="Public Lidarr HTTPS URL", max_length=500)
+    api_key = discord.ui.TextInput(label="Lidarr API key (stored securely)", max_length=500)
+    root = discord.ui.TextInput(
+        label="Root folder (blank uses default)", placeholder="/music", required=False, max_length=500
+    )
+    profiles = discord.ui.TextInput(
+        label="Quality, metadata (names or IDs)", placeholder="Lossless, Standard",
+        required=False, max_length=100,
+    )
+    confirmation = discord.ui.TextInput(label="Type CONNECT to confirm", min_length=7, max_length=7)
+
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message(
+                "Manage Server permission is required.", ephemeral=True
+            )
+        if str(self.confirmation.value).strip().casefold() != "connect":
+            return await interaction.response.send_message(
+                "Type `CONNECT` to confirm storing or replacing Lidarr credentials.", ephemeral=True
+            )
+        group = self.cog.config.guild(interaction.guild)
+        profile = await group.guild_connection()
+        if not profile or await group.connection_mode() != "guild_managed":
+            return await interaction.response.send_message(
+                "Connect this guild's Navidrome server before adding guild-owned Lidarr.",
+                ephemeral=True,
+            )
+        try:
+            base_url = await validate_public_base_url(str(self.url.value))
+        except ValueError as exc:
+            return await interaction.response.send_message(str(exc), ephemeral=True)
+        values = [value.strip() for value in str(self.profiles.value).split(",") if value.strip()]
+        if values and len(values) != 2:
+            return await interaction.response.send_message(
+                "Enter profiles as `Quality, Metadata`, or leave the field blank for defaults.",
+                ephemeral=True,
+            )
+        api_key = str(self.api_key.value).strip()
+        if not api_key:
+            return await interaction.response.send_message(
+                "The API key is required.", ephemeral=True
+            )
+        await interaction.response.defer(ephemeral=True)
+        try:
+            client = LidarrClient(
+                await self.cog.get_session(), base_url, api_key, public_only=True
+            )
+            discovered = await client.discover_configuration(
+                root_folder_path=str(self.root.value).strip() or None,
+                quality_profile_id=values[0] if values else None,
+                metadata_profile_id=values[1] if values else None,
+            )
+            status = discovered.pop("status")
+        except LidarrError as exc:
+            return await interaction.followup.send(
+                f"Lidarr was not saved: {exc}", ephemeral=True
+            )
+        namespace = self.cog.guild_token_namespace(interaction.guild.id)
+        new_profile = dict(profile)
+        new_profile["lidarr"] = {"enabled": True, **discovered, "monitor": "all"}
+        await self.cog.bot.set_shared_api_tokens(
+            namespace, lidarr_url=base_url, lidarr_api_key=api_key
+        )
+        await group.guild_connection.set(new_profile)
+        await interaction.followup.send(
+            f"Lidarr {status.get('version', 'unknown')} is enabled with quality "
+            f"`{discovered['quality_profile_name']}` and metadata "
+            f"`{discovered['metadata_profile_name']}`. The API key will not be displayed.",
+            ephemeral=True,
         )
 
 
@@ -178,9 +393,20 @@ class ConnectionSelect(discord.ui.Select):
             await interaction.followup.send(f"Connection test failed: {exc}", ephemeral=True)
             return
         group = self.parent_view.cog.config.guild(interaction.guild)
+        previous_mode = await group.connection_mode()
+        previous_name = await group.connection()
+        changed_server = previous_mode != "owner_managed" or previous_name != name
+        if previous_mode == "guild_managed":
+            await self.parent_view.cog.bot.remove_shared_api_tokens(
+                self.parent_view.cog.guild_token_namespace(interaction.guild.id),
+                "username", "password", "lidarr_url", "lidarr_api_key",
+            )
+            await group.guild_connection.set(None)
+        await group.connection_mode.set("owner_managed")
         await group.connection.set(name)
-        await group.announcement_enabled.set(False)
-        await group.announced_album_ids.set([])
+        await self.parent_view.cog._reset_connection_state(
+            interaction.guild, clear_accounts=changed_server
+        )
         await interaction.edit_original_response(
             content=f"Selected `{name}`. Announcements remain disabled.",
             embed=await self.parent_view.cog.setup_embed(interaction.guild),
@@ -302,9 +528,9 @@ class AccountCreateModal(discord.ui.Modal):
             )
             try:
                 await self.member.send(
-                    f"Your Navidrome account for **{interaction.guild.name}** is ready.\n"
-                    f"Username: `{username}`\nTemporary password: `{password}`\n"
-                    "Sign in and change this password as soon as possible."
+                    account_credentials_message(
+                        interaction.guild.name, username, password
+                    )
                 )
             except discord.HTTPException:
                 await client.delete_user(str(remote.get("id") or ""))
@@ -712,6 +938,83 @@ class AccountManagerView(discord.ui.View):
         )
 
 
+class ExistingAccountSelect(discord.ui.Select):
+    def __init__(self, parent, users):
+        options = []
+        for remote in users[:25]:
+            username = str(remote.get("userName") or "Unknown")
+            description = "Administrator" if remote.get("isAdmin") else "Existing Navidrome user"
+            options.append(discord.SelectOption(
+                label=username[:100], value=str(remote.get("id") or username),
+                description=description,
+            ))
+        super().__init__(placeholder="Choose an existing Navidrome account", options=options)
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        group = self.parent_view.cog.config.guild(interaction.guild)
+        accounts = await group.accounts()
+        member_key = str(self.parent_view.member.id)
+        if member_key in accounts:
+            await interaction.response.send_message(
+                "That member already has a linked account.", ephemeral=True
+            )
+            return
+        remote = next(
+            (user for user in self.parent_view.users
+             if str(user.get("id") or user.get("userName")) == self.values[0]),
+            None,
+        )
+        if not remote:
+            await interaction.response.send_message(
+                "That Navidrome account is no longer available.", ephemeral=True
+            )
+            return
+        remote_id = str(remote.get("id") or "")
+        username = str(remote.get("userName") or "")
+        if any(
+            str(account.get("id") or "") == remote_id
+            or str(account.get("username") or "").casefold() == username.casefold()
+            for account in accounts.values()
+        ):
+            await interaction.response.send_message(
+                "That Navidrome account is already linked to another Discord member.",
+                ephemeral=True,
+            )
+            return
+        accounts[member_key] = {
+            "id": remote_id,
+            "username": username,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        await group.accounts.set(accounts)
+        await interaction.response.edit_message(
+            content=f"Linked existing Navidrome user `{username}`.",
+            embed=account_embed(self.parent_view.member, accounts[member_key], remote),
+            view=UserActionView(
+                self.parent_view.cog, interaction.user, self.parent_view.member,
+                accounts[member_key], remote,
+            ),
+        )
+
+
+class ExistingAccountLinkView(discord.ui.View):
+    def __init__(self, cog, author, member, users):
+        super().__init__(timeout=300)
+        self.cog, self.author, self.member, self.users = cog, author, member, users
+        self.add_item(ExistingAccountSelect(self, users))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await owner_check(interaction, self.author)
+
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content=None, embed=account_embed(self.member, None, None),
+            view=UserActionView(self.cog, interaction.user, self.member, None, None),
+        )
+
+
 class AccountConfirmView(discord.ui.View):
     def __init__(self, cog, author, member, account, remote, action: str):
         super().__init__(timeout=120)
@@ -764,14 +1067,16 @@ class UserActionView(discord.ui.View):
         )
         if not account:
             for item in self.children:
-                if getattr(item, "custom_id", None) not in {"navidrome:user:create", "navidrome:user:back"}:
+                if getattr(item, "custom_id", None) not in {
+                    "navidrome:user:create", "navidrome:user:link", "navidrome:user:back"
+                }:
                     item.disabled = True
         else:
-            create = next(
-                item for item in self.children
-                if getattr(item, "custom_id", None) == "navidrome:user:create"
-            )
-            create.disabled = True
+            for item in self.children:
+                if getattr(item, "custom_id", None) in {
+                    "navidrome:user:create", "navidrome:user:link"
+                }:
+                    item.disabled = True
             if not remote:
                 for item in self.children:
                     if getattr(item, "custom_id", None) in {
@@ -788,6 +1093,46 @@ class UserActionView(discord.ui.View):
     async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
             AccountCreateModal(self.cog, interaction.user, self.member)
+        )
+
+    @discord.ui.button(
+        label="Link existing", style=discord.ButtonStyle.primary,
+        custom_id="navidrome:user:link",
+    )
+    async def link(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        try:
+            _, client = await self.cog._guild_client(interaction.guild)
+            users = await client.users()
+        except NavidromeError as exc:
+            await interaction.followup.send(
+                f"Could not load Navidrome users: {exc}", ephemeral=True
+            )
+            return
+        accounts = await self.cog.config.guild(interaction.guild).accounts()
+        linked_ids = {str(account.get("id") or "") for account in accounts.values()}
+        linked_names = {
+            str(account.get("username") or "").casefold() for account in accounts.values()
+        }
+        available = sorted(
+            (user for user in users
+             if str(user.get("id") or "") not in linked_ids
+             and str(user.get("userName") or "").casefold() not in linked_names),
+            key=lambda user: str(user.get("userName") or "").casefold(),
+        )
+        if not available:
+            await interaction.followup.send(
+                "There are no unlinked Navidrome accounts available.", ephemeral=True
+            )
+            return
+        note = "Choose the existing Navidrome account to link."
+        if len(available) > 25:
+            note += " Showing the first 25 unlinked accounts."
+        await interaction.edit_original_response(
+            content=note, embed=None,
+            view=ExistingAccountLinkView(
+                self.cog, interaction.user, self.member, available
+            ),
         )
 
     @discord.ui.button(
@@ -906,11 +1251,25 @@ class NavidromeSetupView(discord.ui.View):
             if getattr(item, "custom_id", None) == "navidrome:connect"
         )
         connect.disabled = not await cog.bot.is_owner(author)
+        guild_connect = next(
+            item for item in view.children
+            if getattr(item, "custom_id", None) == "navidrome:guild-connect"
+        )
+        guild_connect.disabled = not await cog.config.guild_connections_enabled()
+        guild_lidarr = next(
+            item for item in view.children
+            if getattr(item, "custom_id", None) == "navidrome:guild-lidarr"
+        )
+        guild_lidarr.disabled = settings.get("connection_mode") != "guild_managed"
         manage = next(
             item for item in view.children
             if getattr(item, "custom_id", None) == "navidrome:manage-users"
         )
-        manage.disabled = not bool(settings.get("connection"))
+        manage.disabled = not (
+            bool((settings.get("guild_connection") or {}).get("base_url"))
+            if settings.get("connection_mode") == "guild_managed"
+            else bool(settings.get("connection"))
+        )
         return view
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -928,6 +1287,25 @@ class NavidromeSetupView(discord.ui.View):
             return
         await interaction.response.send_modal(ConnectionModal(self.cog))
 
+    @discord.ui.button(
+        label="Connect this server", style=discord.ButtonStyle.success, row=3,
+        custom_id="navidrome:guild-connect",
+    )
+    async def connect_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.cog.config.guild_connections_enabled():
+            await interaction.response.send_message(
+                "The bot owner has disabled guild-managed connections.", ephemeral=True
+            )
+            return
+        await interaction.response.send_modal(GuildConnectionModal(self.cog))
+
+    @discord.ui.button(
+        label="Connect Lidarr", style=discord.ButtonStyle.secondary, row=3,
+        custom_id="navidrome:guild-lidarr",
+    )
+    async def connect_lidarr(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GuildLidarrModal(self.cog))
+
     @discord.ui.button(label="Set interval", style=discord.ButtonStyle.secondary, row=2)
     async def interval(self, interaction: discord.Interaction, button: discord.ui.Button):
         current = await self.cog.config.guild(interaction.guild).interval_minutes()
@@ -939,12 +1317,9 @@ class NavidromeSetupView(discord.ui.View):
     )
     async def test_connection(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        name = await self.cog.config.guild(interaction.guild).connection()
-        if not name:
-            await interaction.followup.send("Choose a connection first.", ephemeral=True)
-            return
         try:
-            await (await self.cog._client(name)).ping()
+            name, client = await self.cog._guild_client(interaction.guild)
+            await client.ping()
         except NavidromeError as exc:
             await interaction.followup.send(f"Connection test failed: {exc}", ephemeral=True)
             return

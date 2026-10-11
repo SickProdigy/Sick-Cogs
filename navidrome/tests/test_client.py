@@ -1,7 +1,19 @@
+import json
 import unittest
 from types import SimpleNamespace
 
-from navidrome.client import NavidromeClient, NavidromeError, validate_base_url
+from navidrome.client import (
+    NavidromeClient, NavidromeError, validate_base_url, validate_public_base_url,
+)
+
+
+class FakeContent:
+    def __init__(self, data):
+        self.data = data
+
+    async def iter_chunked(self, size):
+        for offset in range(0, len(self.data), size):
+            yield self.data[offset:offset + size]
 
 
 class FakeResponse:
@@ -10,6 +22,9 @@ class FakeResponse:
         self.payload = payload
         self._text = text
         self.headers = {}
+        data = text.encode() if text is not None else json.dumps(payload).encode()
+        self.content = FakeContent(data)
+        self.connection = None
 
     async def __aenter__(self):
         return self
@@ -41,6 +56,9 @@ class FakeSession:
     def post(self, url, **kwargs):
         return self._next("POST", url, kwargs)
 
+    def get(self, url, **kwargs):
+        return self._next("GET", url, kwargs)
+
     def request(self, method, url, **kwargs):
         return self._next(method, url, kwargs)
 
@@ -70,6 +88,31 @@ class NavidromeClientTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_base_url(value)
 
+    async def test_public_validation_rejects_private_ip_literal(self):
+        with self.assertRaisesRegex(ValueError, "public"):
+            await validate_public_base_url("https://127.0.0.1:4533")
+
+    async def test_public_validation_allows_global_ip_literal(self):
+        self.assertEqual(
+            await validate_public_base_url("https://8.8.8.8"), "https://8.8.8.8"
+        )
+
+    async def test_json_response_rejects_declared_oversize_payload(self):
+        response = FakeResponse(payload={"ok": True})
+        response.headers["Content-Length"] = "2000001"
+        client = NavidromeClient(
+            SimpleNamespace(), "https://music.example.com", "bot", "secret"
+        )
+        with self.assertRaisesRegex(NavidromeError, "too large"):
+            await client._json_response(response)
+
+    def test_public_only_rejects_response_without_verified_public_peer(self):
+        client = NavidromeClient(
+            SimpleNamespace(), "https://music.example.com", "bot", "secret", public_only=True
+        )
+        with self.assertRaisesRegex(NavidromeError, "unsafe destination"):
+            client._validate_response_peer(FakeResponse(payload={}))
+
     def test_subsonic_auth_uses_salted_token_not_plaintext_password(self):
         client = NavidromeClient(
             SimpleNamespace(), "https://music.example.com", "bot", "top-secret"
@@ -80,6 +123,18 @@ class NavidromeClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(params["s"])
         self.assertNotIn("p", params)
         self.assertNotIn("top-secret", params.values())
+
+    async def test_search_returns_artist_and_album_results(self):
+        session = FakeSession([FakeResponse(payload={
+            "subsonic-response": {"status": "ok", "searchResult3": {
+                "artist": [{"id": "a"}], "album": [{"id": "b"}]
+            }}
+        })])
+        client = NavidromeClient(session, "https://music.example.com", "bot", "secret")
+        result = await client.search("example")
+        self.assertEqual(result["artists"][0]["id"], "a")
+        self.assertEqual(result["albums"][0]["id"], "b")
+        self.assertEqual(session.calls[0][2]["params"]["songCount"], "0")
 
     async def test_native_user_list_authenticates_as_admin(self):
         session = FakeSession([

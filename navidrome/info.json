@@ -2,25 +2,27 @@
     "author": [
         "SickProdigy"
     ],
-    "description": "Connect each Discord server to an approved Navidrome library, manage linked users, browse recent albums, and announce new additions.",
+    "description": "Connect Navidrome, manage linked users and announcements, and optionally submit confirmed artist or album requests through Lidarr.",
     "disabled": false,
-    "end_user_data_statement": "This cog stores guild connection selections, announcement settings, announced album IDs, and Discord-to-Navidrome account mappings. It does not store generated user passwords. Navidrome administrator credentials are read from Red shared API tokens.",
+    "end_user_data_statement": "This cog stores guild connection selections, announcement settings, account mappings, Lidarr request policy, and a bounded request audit. Owner and guild Navidrome/Lidarr credentials are stored separately in isolated Red shared API token namespaces. User-data deletion removes account mappings and anonymizes matching audit attribution.",
     "hidden": false,
-    "install_msg": "Run `[p]navidromeset setup` as the bot owner, choose Connect server, enter the Navidrome URL and dedicated admin credentials, then use Manage users. Album notifications are optional.",
+    "install_msg": "Run `[p]navidromeset setup` to select an owner-approved connection. Bot owners may enable isolated guild-managed public-HTTPS connections with `[p]navidromeowner guildconnections true`. Album notifications are optional.",
     "min_bot_version": "3.5.0",
     "permissions": [
         "embed_links"
     ],
     "name": "Navidrome",
     "requirements": [],
-    "short": "Per-server Navidrome connections, linked users, and album announcements",
+    "short": "Per-server Navidrome management with optional Lidarr requests",
     "tags": [
+        "albums",
+        "lidarr",
         "music",
         "navidrome",
-        "subsonic",
-        "albums",
-        "notifications"
+        "notifications",
+        "requests",
+        "subsonic"
     ],
     "type": "COG",
-    "version": "1.0.1"
+    "version": "1.2.2"
 }
