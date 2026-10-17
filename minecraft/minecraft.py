@@ -20,6 +20,7 @@ log = logging.getLogger("red.sick-cogs.Minecraft")
 CONFIG_IDENTIFIER = 6202609250214001
 MIN_INTERVAL_MINUTES = 5
 MAX_INTERVAL_MINUTES = 1440
+MAX_CONCURRENT_QUERIES = 8
 _NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 
@@ -50,7 +51,7 @@ class Minecraft(commands.Cog):
     """Show safe status cards for Java and Bedrock Minecraft servers."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.1.1"
 
     guild_defaults = {
         "servers": {},
@@ -99,6 +100,17 @@ class Minecraft(commands.Cog):
             return None, str(error)
         result["checked_at"] = utc_now().isoformat()
         return result, None
+
+    @staticmethod
+    def endpoint_key(record):
+        edition = str(record.get("edition") or "").casefold()
+        host = str(record.get("host") or "").strip().rstrip(".").casefold()
+        raw_port = record.get("port")
+        if edition == "bedrock":
+            port = int(raw_port or 19132)
+        else:
+            port = int(raw_port) if raw_port is not None else None
+        return edition, host, port
 
     @staticmethod
     def connect_address(record):
@@ -163,7 +175,7 @@ class Minecraft(commands.Cog):
             return None
         return channel
 
-    async def poll_guild(self, guild, *, force=False):
+    async def poll_guild(self, guild, *, force=False, query_results=None):
         lock = self._locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
             group = self.config.guild(guild)
@@ -180,7 +192,13 @@ class Minecraft(commands.Cog):
             sent = 0
             servers = settings.get("servers", {})
             for name, record in servers.items():
-                status, error = await self.query_server(record)
+                endpoint = self.endpoint_key(record)
+                if query_results is None:
+                    status, error = await self.query_server(record)
+                elif endpoint in query_results:
+                    status, error = query_results[endpoint]
+                else:
+                    continue
                 state = "online" if status else "offline"
                 record["last_state"] = state
                 if status:
@@ -214,17 +232,72 @@ class Minecraft(commands.Cog):
             await group.last_poll_at.set(utc_now().isoformat())
             return sent
 
-    @tasks.loop(minutes=1)
-    async def poll_loop(self):
+    async def poll_once(self):
+        due_guilds = []
+        endpoints = {}
         for guild in list(self.bot.guilds):
             if await self.bot.cog_disabled_in_guild(self, guild):
                 continue
             try:
-                await self.poll_guild(guild)
+                settings = await self.config.guild(guild).all()
+                if not settings.get("monitoring_enabled"):
+                    continue
+                interval = max(
+                    MIN_INTERVAL_MINUTES, int(settings.get("interval_minutes", 5))
+                )
+                if not due(settings.get("last_poll_at"), interval):
+                    continue
+                due_guilds.append(guild)
+                for record in settings.get("servers", {}).values():
+                    endpoint = self.endpoint_key(record)
+                    endpoints.setdefault(endpoint, dict(record))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception(
+                    "Could not prepare Minecraft poll for guild %s", guild.id
+                )
+
+        if not due_guilds:
+            return
+
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
+
+        async def query_endpoint(endpoint, record):
+            try:
+                async with semaphore:
+                    result = await self.query_server(record)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Minecraft endpoint query failed for %r", endpoint)
+                result = (None, "Unexpected query failure.")
+            return endpoint, result
+
+        query_results = dict(
+            await asyncio.gather(
+                *(
+                    query_endpoint(endpoint, record)
+                    for endpoint, record in endpoints.items()
+                )
+            )
+        )
+        for guild in due_guilds:
+            try:
+                await self.poll_guild(guild, query_results=query_results)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.exception("Minecraft polling failed for guild %s", guild.id)
+
+    @tasks.loop(minutes=1)
+    async def poll_loop(self):
+        try:
+            await self.poll_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Minecraft polling cycle failed")
 
     @poll_loop.before_loop
     async def before_poll_loop(self):

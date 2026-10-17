@@ -11,5 +11,5 @@
   "short": "Minecraft Java and Bedrock server status",
   "tags": ["minecraft", "java", "bedrock", "status", "notifications"],
   "type": "COG",
-  "version": "0.1.0"
+  "version": "0.1.1"
 }
