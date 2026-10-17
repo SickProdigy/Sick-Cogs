@@ -51,7 +51,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `pokemon` - Persistent global Pokémon catching, battles, trading, progression, and server-configured encounters.
 - `predictions` - Interactive server prediction games with optional fictional Red Bank stakes and staff-reviewed payouts.
 - `reminder` - Persistent personal reminders with restart recovery and timezone-aware display.
-- `rocketleague` - Cached RLCS tournament schedules and configurable server announcements.
+- `rocketleague` - Cached RLCS schedules, official game updates, community tournaments, and clips.
 - `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
 - `tokenfactory` - Protected fixed-supply Base Sepolia token deployments through Discord or external wallets.

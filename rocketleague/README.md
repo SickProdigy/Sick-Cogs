@@ -88,6 +88,30 @@ each rich refresh can use one tournament request and one participant-count reque
 `tournamentrefresh` remains available when an organizer changes a date or status. Each server
 can save up to 25 tournament URLs.
 
+## Official game updates
+
+Official Rocket League developer announcements are polled from Steam's machine-readable news feed once
+per ten-minute cycle when at least one server subscription is due. Cards link to the canonical Steam Community post and preserve Steam paragraphs and list
+items. They include publication time and artwork when the developer post provides an image;
+some official posts contain no artwork. Each server keeps a bounded delivery history across
+restarts. Selecting or starting a
+feed remembers current posts first, so enabling the feature never floods a channel with old news.
+
+```text
+[p]rocketleagueset gameupdateschannel #rocket-league-news
+[p]rocketleagueset gameupdates start
+# Or post the five newest announcements while starting:
+[p]rocketleagueset gameupdates start 5
+```
+
+Users can browse a full announcement card without changing automatic posting.
+`[p]rocketleague updates` shows the newest, while `[p]rocketleague updates 2` shows the
+second-newest. Use `[p]rocketleague updates list [1-10]` for a compact list of recent posts.
+
+`true` is accepted in place of `start`; `false` is accepted in place of `stop`. The channel
+and enable switch are independent from RLCS schedule announcements and community clips. Use
+`[p]rocketleagueset gameupdates stop` to pause delivery without removing the channel or history.
+
 ## Automatic community clips
 
 Each Discord server can follow a mix of creator feeds and general Rocket League feeds.

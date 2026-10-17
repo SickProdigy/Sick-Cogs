@@ -61,7 +61,7 @@ class GMod(commands.Cog):
     """Monitor Garry's Mod servers and publish official Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.1"
+    __version__ = "1.0.2"
 
     guild_defaults = {
         "servers": {},
@@ -404,14 +404,43 @@ class GMod(commands.Cog):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @gmod.command(name="updates")
-    async def gmod_updates(self, ctx, count: int = 5):
-        """Show 1 to 10 recent official Steam announcements."""
-        if not 1 <= count <= 10:
-            await ctx.send("Choose between 1 and 10 announcements.")
-            return
+    @gmod.group(name="updates", invoke_without_command=True)
+    async def gmod_updates(
+        self, ctx, position: commands.Range[int, 1, 10] = 1
+    ):
+        """Show an official announcement by recency; newest is 1."""
         try:
-            items = list(reversed(recent_items(await (await self.steam_client()).fetch(), count)))
+            items = await (await self.steam_client()).fetch()
+        except SteamNewsError as error:
+            await ctx.send(str(error))
+            return
+        newest = sorted(
+            items,
+            key=lambda item: (int(item.get("date") or 0), item_id(item)),
+            reverse=True,
+        )
+        if len(newest) < int(position):
+            plural = "" if len(newest) == 1 else "s"
+            verb = "is" if len(newest) == 1 else "are"
+            await ctx.send(
+                f"Only {len(newest)} official announcement{plural} {verb} available."
+            )
+            return
+        await ctx.send(embed=self.news_embed(newest[int(position) - 1]))
+
+    @gmod_updates.command(name="list")
+    async def gmod_updates_list(
+        self, ctx, count: commands.Range[int, 1, 10] = 5
+    ):
+        """List recent official announcements."""
+        try:
+            items = list(
+                reversed(
+                    recent_items(
+                        await (await self.steam_client()).fetch(), int(count)
+                    )
+                )
+            )
         except SteamNewsError as error:
             await ctx.send(str(error))
             return
@@ -419,8 +448,8 @@ class GMod(commands.Cog):
         for item in items:
             title = clean_text(item.get("title") or "Garry's Mod announcement", limit=180)
             lines.append(
-                f"• <t:{int(item.get('date') or 0)}:D> — "
-                f"[{title}]({str(item.get('url') or ANNOUNCEMENTS_URL)})"
+                f'• <t:{int(item.get("date") or 0)}:D> — '
+                f'[{title}]({str(item.get("url") or ANNOUNCEMENTS_URL)})'
             )
         await ctx.send(
             embed=discord.Embed(

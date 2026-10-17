@@ -10,6 +10,9 @@ from rocketleague.rocketleague import RocketLeague
 
 
 class RocketLeagueHelpStructureTests(unittest.TestCase):
+    def test_canonical_group_exposes_recent_game_updates(self):
+        self.assertIsNotNone(RocketLeague.rocketleague.get_command("updates"))
+
     def test_canonical_group_exposes_complete_rlcs_surface(self):
         rocketleague = RocketLeague.rocketleague
         self.assertIn("rl", rocketleague.aliases)
@@ -29,9 +32,23 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertIn("posting channel", help_text)
         self.assertIn("rocketleagueset clips", help_text)
 
+    def test_game_update_settings_commands_are_registered(self):
+        self.assertIsNotNone(RocketLeague.rocketleagueset.get_command("gameupdates"))
+        self.assertIsNotNone(RocketLeague.rocketleagueset.get_command("gameupdateschannel"))
+
     def test_settings_group_advertises_its_short_alias(self):
         self.assertIn("rlset", RocketLeague.rocketleagueset.aliases)
-        self.assertIn("rlset", RocketLeague.rocketleagueset.help)
+        self.assertEqual(
+            RocketLeague.rocketleagueset.help,
+            "Configure tournaments, game updates, and clips.",
+        )
+
+    def test_settings_subcommand_summaries_fit_one_help_card(self):
+        summaries = [
+            f"{command.name} {command.short_doc}"
+            for command in RocketLeague.rocketleagueset.commands
+        ]
+        self.assertLess(len("\n".join(summaries)), 900)
 
     def test_community_tournament_commands_are_registered(self):
         tournaments = RocketLeague.rocketleague.get_command("tournaments")
