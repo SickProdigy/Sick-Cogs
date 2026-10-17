@@ -41,14 +41,15 @@ In-Game Event; a Steam Regular Update is not necessarily a hotfix.
 
 ## Updating or removing
 
-Version 1.1.4 completes the identity change by copying existing guild settings from `ArkAnnouncements` into the active `Ark` Config namespace before polling starts. The migration is restart-safe and leaves the old folder untouched as a recovery copy; future writes use `cogs/Ark/settings.json`. A normal `[p]cog update` followed by `[p]reload ark` retains channels, roles, categories, and posted-item history. Use `[p]unload ark` to stop the cog while leaving it installed, or `[p]cog uninstall ark` to remove its installed code. Persistent Red data is retained unless it is deleted separately.
+Version 1.1.5 includes positional update browsing. Version 1.1.4 completed the identity change by copying existing guild settings from `ArkAnnouncements` into the active `Ark` Config namespace before polling starts. The migration is restart-safe and leaves the old folder untouched as a recovery copy; future writes use `cogs/Ark/settings.json`. A normal `[p]cog update` followed by `[p]reload ark` retains channels, roles, categories, and posted-item history. Use `[p]unload ark` to stop the cog while leaving it installed, or `[p]cog uninstall ark` to remove its installed code. Persistent Red data is retained unless it is deleted separately.
 
 ## Commands
 
 ```text
 [p]ark
 [p]ark latest [category]
-[p]ark updates [2-10]  # newest first
+[p]ark updates [position]  # newest is 1
+[p]ark updates list [1-10]
 [p]arkset status
 [p]arkset channel [channel]
 [p]arkset autopost start [recent-posts]

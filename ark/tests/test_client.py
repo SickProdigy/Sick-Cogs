@@ -18,6 +18,11 @@ from ark.client import (
 
 
 class ArkClientTests(unittest.TestCase):
+    def test_updates_support_positional_cards_and_compact_list(self):
+        updates = Ark.ark.get_command("updates")
+        self.assertIn("position", updates.clean_params)
+        self.assertIn("count", updates.get_command("list").clean_params)
+
     def test_public_help_includes_quick_setup(self):
         help_text = Ark.ark.help
         self.assertIn("[p]arkset channel #updates", help_text)

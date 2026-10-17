@@ -6,6 +6,11 @@ from gmod.steam import APP_ID, image_url, is_official_news, new_items, plain_tex
 
 
 class SteamNewsTests(unittest.TestCase):
+    def test_updates_support_positional_cards_and_compact_list(self):
+        updates = GMod.gmod.get_command("updates")
+        self.assertIn("position", updates.clean_params)
+        self.assertIn("count", updates.get_command("list").clean_params)
+
     def test_public_help_includes_quick_setup(self):
         help_text = GMod.gmod.help
         self.assertIn("[p]gmodset add main", help_text)

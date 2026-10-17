@@ -40,14 +40,15 @@ In-Game Event; a Steam label is not used as the bot category.
 
 ## Updating or removing
 
-Version 1.0.2 completes the identity change by copying existing guild settings from `IcarusAnnouncements` into the active `Icarus` Config namespace before polling starts. The migration is restart-safe and leaves the old folder untouched as a recovery copy; future writes use `cogs/Icarus/settings.json`. A normal `[p]cog update` followed by `[p]reload icarus` retains channels, roles, categories, and posted-item history. Use `[p]unload icarus` to stop the cog while leaving it installed, or `[p]cog uninstall icarus` to remove its installed code. Persistent Red data is retained unless it is deleted separately.
+Version 1.0.3 includes positional update browsing. Version 1.0.2 completed the identity change by copying existing guild settings from `IcarusAnnouncements` into the active `Icarus` Config namespace before polling starts. The migration is restart-safe and leaves the old folder untouched as a recovery copy; future writes use `cogs/Icarus/settings.json`. A normal `[p]cog update` followed by `[p]reload icarus` retains channels, roles, categories, and posted-item history. Use `[p]unload icarus` to stop the cog while leaving it installed, or `[p]cog uninstall icarus` to remove its installed code. Persistent Red data is retained unless it is deleted separately.
 
 ## Commands
 
 ```text
 [p]icarus
 [p]icarus latest [category]
-[p]icarus updates [2-10]  # newest first
+[p]icarus updates [position]  # newest is 1
+[p]icarus updates list [1-10]
 [p]icarusset status
 [p]icarusset channel [channel]
 [p]icarusset autopost start [recent-posts]
