@@ -16,7 +16,7 @@ from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
 from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeCollectionView, GymChallengeView
+from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeCollectionView, GymChallengeView
 
 
 class StoredValue:
@@ -725,7 +725,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_battle_potion_consumes_inventory_and_wild_turn(self):
         current=battle();maximum=current.max_hp(current.player);current.player_hp=max(1,maximum-8);current.party_hp[current.player.instance_id]=current.player_hp
         conf={"collection":[current.player.raw()],"party":[current.player.instance_id],"items":{"potion":1,"revive":0}};section=StoredSection(conf)
-        cog=Pokemon.__new__(Pokemon);cog.battles={1:current};cog.locks={};cog.config=SimpleNamespace(user=lambda user:section);cog.save_battle=AsyncMock();cog.clear_guild=AsyncMock();cog.rendered_battle=AsyncMock(return_value=(discord.Embed(),[]))
+        cog=Pokemon.__new__(Pokemon);cog.battles={1:current};cog.locks={};cog.config=SimpleNamespace(user=lambda user:section);cog.save_battle=AsyncMock();cog.clear_guild=AsyncMock();cog.mark_encounter_message_synced=AsyncMock();cog.rendered_battle=AsyncMock(return_value=(discord.Embed(),[]))
         interaction=SimpleNamespace(user=SimpleNamespace(id=current.user_id),response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock()))
         previous_turn=current.turn;await cog.use_battle_item(interaction,1,"potion",0)
         self.assertEqual(section.value["items"]["potion"],0);self.assertEqual(current.turn,previous_turn+1);self.assertIn("Used a Potion",current.last_action)
@@ -1227,6 +1227,23 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         message.delete.reset_mock();message.edit.reset_mock()
         await cog.expire_unclaimed_message(raw,"keep")
         message.delete.assert_not_awaited();message.edit.assert_awaited_once()
+
+    async def test_pending_encounter_message_retries_until_discord_edit_succeeds(self):
+        raw={"guild_id":1,"channel_id":55,"message_id":99,"state":"open","message_sync_pending":True}
+        store=StoredEncounters();store.value={"7":raw};response=SimpleNamespace(status=500,reason="temporary")
+        message=SimpleNamespace(edit=AsyncMock(side_effect=discord.HTTPException(response,"temporary")))
+        channel=SimpleNamespace(fetch_message=AsyncMock(return_value=message));cog=Pokemon.__new__(Pokemon);cog.locks={}
+        cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel);cog.config=SimpleNamespace(encounters=store)
+        await cog.retry_pending_encounter_messages();self.assertTrue(store.value["7"]["message_sync_pending"])
+        message.edit.side_effect=None
+        await cog.retry_pending_encounter_messages();self.assertNotIn("message_sync_pending",store.value["7"])
+        self.assertEqual(message.edit.await_count,2);self.assertIsInstance(message.edit.await_args.kwargs["view"],EncounterView)
+
+    async def test_saved_battle_marks_message_for_reconciliation(self):
+        current=battle();store=StoredEncounters();store.value={str(current.encounter_id):{"state":"battle"}}
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(encounters=store,guild_from_id=lambda guild_id:SimpleNamespace(battle_timeout=StoredValue(900)))
+        await cog.save_battle(current)
+        self.assertTrue(store.value[str(current.encounter_id)]["message_sync_pending"])
 
     async def test_clear_encounter_disables_original_message(self):
         active=StoredValue(7);raw={"guild_id":1,"channel_id":55,"message_id":99,"species_id":25,"state":"open"}
