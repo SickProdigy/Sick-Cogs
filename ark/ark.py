@@ -74,7 +74,7 @@ class Ark(commands.Cog):
     """Publish official ARK: Survival Ascended Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.5"
+    __version__ = "1.1.6"
 
     default_guild = {
         "enabled": False,
@@ -307,12 +307,24 @@ class Ark(commands.Cog):
         await self.config.guild(guild).last_success_at.set(utc_now().isoformat())
         return len(ids)
 
-    async def poll_guild(self, guild: discord.Guild, *, force: bool = False) -> int:
+    async def poll_guild(
+        self,
+        guild: discord.Guild,
+        *,
+        force: bool = False,
+        items: Optional[tuple] = None,
+    ) -> int:
         lock = self._poll_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
-            return await self._poll_guild_unlocked(guild, force=force)
+            return await self._poll_guild_unlocked(guild, force=force, items=items)
 
-    async def _poll_guild_unlocked(self, guild: discord.Guild, *, force: bool = False) -> int:
+    async def _poll_guild_unlocked(
+        self,
+        guild: discord.Guild,
+        *,
+        force: bool = False,
+        items: Optional[tuple] = None,
+    ) -> int:
         group = self.config.guild(guild)
         settings = await group.all()
         if not settings["enabled"] and not force:
@@ -329,7 +341,8 @@ class Ark(commands.Cog):
             await group.last_poll_at.set(utc_now().isoformat())
             return 0
 
-        items = await (await self.get_client()).fetch()
+        if items is None:
+            items = tuple(await (await self.get_client()).fetch())
         posted_ids = [str(value) for value in settings.get("posted_ids", [])]
         if not posted_ids:
             await group.posted_ids.set([item_id(item) for item in items][-MAX_POSTED_IDS:])
@@ -365,17 +378,42 @@ class Ark(commands.Cog):
         await group.last_success_at.set(utc_now().isoformat())
         return sent
 
-    @tasks.loop(minutes=1)
-    async def poll_loop(self):
+    async def poll_once(self):
+        due_guilds = []
         for guild in list(self.bot.guilds):
             if await self.bot.cog_disabled_in_guild(self, guild):
                 continue
+            settings = await self.config.guild(guild).all()
+            interval = max(
+                MIN_INTERVAL_MINUTES, int(settings.get("interval_minutes", 10))
+            )
+            if (
+                settings.get("enabled")
+                and settings.get("channel_id")
+                and due(settings.get("last_poll_at"), interval)
+            ):
+                due_guilds.append(guild)
+
+        if not due_guilds:
+            return
+
+        items = tuple(await (await self.get_client()).fetch())
+        for guild in due_guilds:
             try:
-                await self.poll_guild(guild)
+                await self.poll_guild(guild, items=items)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.exception("ARK announcement poll failed for guild %s", guild.id)
+
+    @tasks.loop(minutes=1)
+    async def poll_loop(self):
+        try:
+            await self.poll_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("ARK announcement feed poll failed")
 
     @poll_loop.before_loop
     async def before_poll_loop(self):
