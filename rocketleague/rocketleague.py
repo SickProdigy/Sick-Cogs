@@ -792,7 +792,9 @@ class RocketLeague(commands.Cog):
         embed.set_footer(text="Official Rocket League news • Steam feed")
         return embed
 
-    async def _poll_game_updates(self, guild, *, force: bool = False) -> int:
+    async def _poll_game_updates(
+        self, guild, *, force: bool = False, items: Optional[list[dict]] = None
+    ) -> int:
         lock = self._game_update_locks.setdefault(guild.id, asyncio.Lock())
         if lock.locked():
             return 0
@@ -809,7 +811,8 @@ class RocketLeague(commands.Cog):
             if channel is None:
                 raise SteamNewsError("Choose a game updates channel first.")
             await self.config.guild(guild).game_updates_last_poll.set(now)
-            items = await (await self.get_news_client()).fetch(count=50)
+            if items is None:
+                items = await (await self.get_news_client()).fetch(count=50)
             history = list(settings.get("game_updates_posted") or [])
             if not history:
                 history = [item_id(item) for item in items if item_id(item)]
@@ -834,12 +837,28 @@ class RocketLeague(commands.Cog):
 
     @tasks.loop(minutes=5)
     async def game_update_loop(self) -> None:
+        now = int(time.time())
+        due = []
         for guild in self.bot.guilds:
+            settings = await self.config.guild(guild).all()
+            if settings.get("game_updates_enabled") and (
+                now - int(settings.get("game_updates_last_poll") or 0)
+                >= GAME_UPDATE_POLL_INTERVAL
+            ):
+                due.append(guild)
+        if not due:
+            return
+        try:
+            items = await (await self.get_news_client()).fetch(count=50)
+        except SteamNewsError as exc:
+            log.warning("Rocket League game update feed poll failed: %s", exc)
+            return
+        for guild in due:
             try:
-                await self._poll_game_updates(guild)
+                await self._poll_game_updates(guild, force=True, items=items)
             except (SteamNewsError, discord.Forbidden, discord.HTTPException) as exc:
                 log.warning(
-                    "Rocket League game update poll failed for guild %s: %s", guild.id, exc
+                    "Rocket League game update delivery failed for guild %s: %s", guild.id, exc
                 )
 
     @game_update_loop.before_loop
