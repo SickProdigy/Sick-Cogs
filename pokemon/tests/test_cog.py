@@ -1234,10 +1234,15 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         message=SimpleNamespace(edit=AsyncMock(side_effect=discord.HTTPException(response,"temporary")))
         channel=SimpleNamespace(fetch_message=AsyncMock(return_value=message));cog=Pokemon.__new__(Pokemon);cog.locks={}
         cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel);cog.config=SimpleNamespace(encounters=store)
-        await cog.retry_pending_encounter_messages();self.assertTrue(store.value["7"]["message_sync_pending"])
+        now=datetime(2026,10,17,tzinfo=timezone.utc)
+        await cog.retry_pending_encounter_messages(now);self.assertTrue(store.value["7"]["message_sync_pending"])
+        self.assertEqual(store.value["7"]["message_sync_attempts"],1)
+        self.assertEqual(datetime.fromisoformat(store.value["7"]["message_sync_retry_at"]),now+timedelta(seconds=60))
         message.edit.side_effect=None
-        await cog.retry_pending_encounter_messages();self.assertNotIn("message_sync_pending",store.value["7"])
-        self.assertEqual(message.edit.await_count,2);self.assertIsInstance(message.edit.await_args.kwargs["view"],EncounterView)
+        await cog.retry_pending_encounter_messages(now+timedelta(seconds=30));self.assertEqual(message.edit.await_count,1)
+        await cog.retry_pending_encounter_messages(now+timedelta(seconds=61));self.assertNotIn("message_sync_pending",store.value["7"])
+        self.assertNotIn("message_sync_retry_at",store.value["7"]);self.assertEqual(message.edit.await_count,2)
+        self.assertIsInstance(message.edit.await_args.kwargs["view"],EncounterView)
 
     async def test_saved_battle_marks_message_for_reconciliation(self):
         current=battle();store=StoredEncounters();store.value={str(current.encounter_id):{"state":"battle"}}
