@@ -35,7 +35,17 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
 
     def test_settings_group_advertises_its_short_alias(self):
         self.assertIn("rlset", RocketLeague.rocketleagueset.aliases)
-        self.assertIn("rlset", RocketLeague.rocketleagueset.help)
+        self.assertEqual(
+            RocketLeague.rocketleagueset.help,
+            "Configure tournaments, game updates, and clips.",
+        )
+
+    def test_settings_subcommand_summaries_fit_one_help_card(self):
+        summaries = [
+            f"{command.name} {command.short_doc}"
+            for command in RocketLeague.rocketleagueset.commands
+        ]
+        self.assertLess(len("\n".join(summaries)), 900)
 
     def test_community_tournament_commands_are_registered(self):
         tournaments = RocketLeague.rocketleague.get_command("tournaments")

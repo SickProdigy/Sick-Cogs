@@ -34,7 +34,7 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.7.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.7.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
 BLAST_HISTORY_LIMIT = 100
@@ -64,7 +64,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.7.0"
+    __version__ = "1.7.1"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -1669,15 +1669,12 @@ class RocketLeague(commands.Cog):
     @commands.guild_only()
     @checks.admin_or_permissions(manage_guild=True)
     async def rocketleagueset(self, ctx: commands.Context):
-        """Admin: configure tournaments, official game updates, and automatic clips.
-
-        ``rlset`` is the shorter alias for this command group.
-        """
+        """Configure tournaments, game updates, and clips."""
         await ctx.send_help()
 
     @rocketleagueset.command(name="gameupdates")
     async def rocketleagueset_gameupdates(self, ctx: commands.Context, state: str):
-        """Start or stop official Rocket League game update announcements."""
+        """Start or stop official game updates."""
         normalized = state.casefold()
         enabled_values = {"true", "start", "on", "enable", "enabled"}
         disabled_values = {"false", "stop", "off", "disable", "disabled"}
@@ -1712,7 +1709,7 @@ class RocketLeague(commands.Cog):
     async def rocketleagueset_gameupdateschannel(
         self, ctx: commands.Context, channel: discord.TextChannel
     ):
-        """Choose the channel for official Rocket League game updates."""
+        """Set the official game update channel."""
         permissions = channel.permissions_for(ctx.guild.me)
         if not permissions.send_messages or not permissions.embed_links:
             await ctx.send("I need Send Messages and Embed Links in that channel.")
@@ -1736,7 +1733,7 @@ class RocketLeague(commands.Cog):
 
     @rocketleagueset.group(name="clips", aliases=["clip"], invoke_without_command=True)
     async def rocketleagueset_clips(self, ctx: commands.Context):
-        """Admin: configure automatic short Rocket League clips."""
+        """Configure automatic Rocket League clips."""
         await ctx.send_help()
 
     @rocketleagueset_clips.command(name="channel")
@@ -2218,7 +2215,7 @@ class RocketLeague(commands.Cog):
 
     @rocketleagueset.command(name="leagueadd")
     async def rocketleagueset_leagueadd(self, ctx: commands.Context, *, url: str):
-        """Subscribe this server to a complete start.gg league URL."""
+        """Add a start.gg league."""
         try:
             key = self._league_source_from_url(url)
             source = await self._fetch_league_source(key)
@@ -2243,7 +2240,7 @@ class RocketLeague(commands.Cog):
 
     @rocketleagueset.command(name="leagues")
     async def rocketleagueset_leagues(self, ctx: commands.Context):
-        """List this server's start.gg league subscriptions."""
+        """List start.gg league subscriptions."""
         sources = await self._number_league_sources(ctx.guild)
         if not sources:
             await ctx.send("This server has no start.gg league subscriptions.")
@@ -2257,7 +2254,7 @@ class RocketLeague(commands.Cog):
 
     @rocketleagueset.command(name="leaguerefresh")
     async def rocketleagueset_leaguerefresh(self, ctx: commands.Context, league_id: Optional[int] = None):
-        """Refresh one league subscription by ID, or every subscription."""
+        """Refresh one or all league subscriptions."""
         sources = await self._number_league_sources(ctx.guild)
         selected = [item for item in sources if league_id is None or int(item.get("id") or 0) == league_id]
         if not selected:
@@ -2279,7 +2276,7 @@ class RocketLeague(commands.Cog):
 
     @rocketleagueset.command(name="leaguedisable")
     async def rocketleagueset_leaguedisable(self, ctx: commands.Context, league_id: int):
-        """Disable automatic refresh and display for a league subscription."""
+        """Disable and hide a league subscription."""
         sources = await self._number_league_sources(ctx.guild)
         if not any(int(item.get("id") or 0) == league_id for item in sources):
             await ctx.send("That league ID is not configured for this server.")
@@ -2292,7 +2289,7 @@ class RocketLeague(commands.Cog):
 
     @rocketleagueset.command(name="leagueremove")
     async def rocketleagueset_leagueremove(self, ctx: commands.Context, league_id: int):
-        """Remove a start.gg league subscription and its cached tournaments."""
+        """Remove a league subscription."""
         sources = await self._number_league_sources(ctx.guild)
         matched = next((item for item in sources if int(item.get("id") or 0) == league_id), None)
         if matched is None:
@@ -2304,7 +2301,7 @@ class RocketLeague(commands.Cog):
 
     @rocketleagueset.command(name="tournamentadd")
     async def rocketleagueset_tournamentadd(self, ctx: commands.Context, *, url: str):
-        """Validate, cache, and add a start.gg or Challonge tournament URL."""
+        """Add a start.gg or Challonge tournament."""
         try:
             provider, key = self._tournament_source_from_url(url)
             source = await self._fetch_tournament_source(provider, key)
@@ -2332,7 +2329,7 @@ class RocketLeague(commands.Cog):
 
     @rocketleagueset.command(name="tournamentremove")
     async def rocketleagueset_tournamentremove(self, ctx: commands.Context, *, reference: str):
-        """Remove a configured tournament by its short ID or original URL."""
+        """Remove a configured tournament."""
         sources = await self._number_tournament_sources(ctx.guild)
         reference = reference.strip().strip("<>")
         provider = key = None
@@ -2356,7 +2353,7 @@ class RocketLeague(commands.Cog):
 
     @rocketleagueset.command(name="tournamentrefresh")
     async def rocketleagueset_tournamentrefresh(self, ctx: commands.Context, tournament_id: Optional[int] = None):
-        """Refresh one cached tournament by ID, or every configured tournament."""
+        """Refresh one or all tournaments."""
         sources = await self._number_tournament_sources(ctx.guild)
         selected = [item for item in sources if tournament_id is None or int(item.get("id") or 0) == tournament_id]
         if not selected:
@@ -2379,7 +2376,7 @@ class RocketLeague(commands.Cog):
 
     @rocketleagueset.command(name="tournaments")
     async def rocketleagueset_tournaments(self, ctx: commands.Context):
-        """List cached tournaments, IDs, and removal instructions."""
+        """List configured tournaments."""
         sources = await self._number_tournament_sources(ctx.guild)
         if not sources:
             await ctx.send("This server has no tournament URLs configured.")
