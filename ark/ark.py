@@ -74,7 +74,7 @@ class Ark(commands.Cog):
     """Publish official ARK: Survival Ascended Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.4"
+    __version__ = "1.1.5"
 
     default_guild = {
         "enabled": False,
@@ -384,18 +384,52 @@ class Ark(commands.Cog):
     @commands.group(name="ark", invoke_without_command=True)
     @commands.guild_only()
     async def ark(self, ctx: commands.Context):
-        """View the latest official ARK: Survival Ascended announcement."""
+        """Browse official ARK: Survival Ascended Steam announcements.
+
+        Quick setup for server administrators and owners:
+        `[p]arkset channel #updates`
+        `[p]arkset mode card` (or `article`)
+        `[p]arkset autopost start`
+        """
         await ctx.invoke(self.ark_latest)
 
-    @ark.command(name="updates")
-    async def ark_updates(self, ctx: commands.Context, count: int = 5):
-        """Show 2 to 10 recent announcements as a newest-to-oldest clickable list."""
-        if not 2 <= count <= 10:
-            await ctx.send("Choose between 2 and 10 recent announcements.")
+    @ark.group(name="updates", invoke_without_command=True)
+    async def ark_updates(
+        self, ctx: commands.Context, position: commands.Range[int, 1, 10] = 1
+    ):
+        """Show an official announcement by recency; newest is 1."""
+        try:
+            items = await (await self.get_client()).fetch(count=50)
+        except SteamNewsError as error:
+            await ctx.send(str(error))
             return
+        newest = sorted(
+            items,
+            key=lambda item: (int(item.get("date") or 0), item_id(item)),
+            reverse=True,
+        )
+        if len(newest) < int(position):
+            plural = "" if len(newest) == 1 else "s"
+            verb = "is" if len(newest) == 1 else "are"
+            await ctx.send(
+                f"Only {len(newest)} official announcement{plural} {verb} available."
+            )
+            return
+        mode = await self.config.guild(ctx.guild).delivery_mode()
+        await self.send_item(ctx.channel, newest[int(position) - 1], None, mode)
+
+    @ark_updates.command(name="list")
+    async def ark_updates_list(
+        self, ctx: commands.Context, count: commands.Range[int, 1, 10] = 5
+    ):
+        """List recent official announcements."""
         try:
             items = list(
-                reversed(recent_items(await (await self.get_client()).fetch(count=50), count))
+                reversed(
+                    recent_items(
+                        await (await self.get_client()).fetch(count=50), int(count)
+                    )
+                )
             )
         except SteamNewsError as error:
             await ctx.send(str(error))

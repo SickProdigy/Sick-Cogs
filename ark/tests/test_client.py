@@ -18,6 +18,16 @@ from ark.client import (
 
 
 class ArkClientTests(unittest.TestCase):
+    def test_updates_support_positional_cards_and_compact_list(self):
+        updates = Ark.ark.get_command("updates")
+        self.assertIn("position", updates.clean_params)
+        self.assertIn("count", updates.get_command("list").clean_params)
+
+    def test_public_help_includes_quick_setup(self):
+        help_text = Ark.ark.help
+        self.assertIn("[p]arkset channel #updates", help_text)
+        self.assertIn("[p]arkset mode card", help_text)
+        self.assertIn("[p]arkset autopost start", help_text)
 
     def test_classifies_community_before_embedded_update_words(self):
         item = {"title": "Community Crunch 500: Update Preview", "contents": "A patch is coming."}
@@ -50,6 +60,28 @@ class ArkClientTests(unittest.TestCase):
         self.assertEqual(
             plain_text(source, youtube_links=True),
             "Before\nWatch trailer on YouTube: https://youtu.be/gsWm02GX1zw\nAfter",
+        )
+
+    def test_extracts_img_src_markup(self):
+        source = (
+            "[p][img src=\"{STEAM_CLAN_IMAGE}/4458811/"
+            "3affd440d2688d4b46e6878268f71cf0c065a0f4.png\"][/img][/p]"
+        )
+        expected = (
+            "https://clan.steamstatic.com/images/4458811/"
+            "3affd440d2688d4b46e6878268f71cf0c065a0f4.png"
+        )
+        self.assertEqual(extract_image(source), expected)
+        self.assertEqual(extract_images(source), [expected])
+
+    def test_fastly_clan_image_is_canonicalized(self):
+        source = (
+            "[img src=\"https://clan.fastly.steamstatic.com/"
+            "images/123/a.png\"][/img]"
+        )
+        self.assertEqual(
+            extract_image(source),
+            "https://clan.steamstatic.com/images/123/a.png",
         )
 
     def test_extracts_and_expands_steam_clan_image(self):

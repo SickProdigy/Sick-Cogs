@@ -40,14 +40,15 @@ In-Game Event; a Steam label is not used as the bot category.
 
 ## Updating or removing
 
-Version 1.0.2 completes the identity change by copying existing guild settings from `DayZAnnouncements` into the active `DayZ` Config namespace before polling starts. The migration is restart-safe and leaves the old folder untouched as a recovery copy; future writes use `cogs/DayZ/settings.json`. A normal `[p]cog update` followed by `[p]reload dayz` retains channels, roles, categories, and posted-item history. Use `[p]unload dayz` to stop the cog while leaving it installed, or `[p]cog uninstall dayz` to remove its installed code. Persistent Red data is retained unless it is deleted separately.
+Version 1.0.3 includes positional update browsing. Version 1.0.2 completed the identity change by copying existing guild settings from `DayZAnnouncements` into the active `DayZ` Config namespace before polling starts. The migration is restart-safe and leaves the old folder untouched as a recovery copy; future writes use `cogs/DayZ/settings.json`. A normal `[p]cog update` followed by `[p]reload dayz` retains channels, roles, categories, and posted-item history. Use `[p]unload dayz` to stop the cog while leaving it installed, or `[p]cog uninstall dayz` to remove its installed code. Persistent Red data is retained unless it is deleted separately.
 
 ## Commands
 
 ```text
 [p]dayz
 [p]dayz latest [category]
-[p]dayz updates [2-10]  # newest first
+[p]dayz updates [position]  # newest is 1
+[p]dayz updates list [1-10]
 [p]dayzset status
 [p]dayzset channel [channel]
 [p]dayzset autopost start [recent-posts]
