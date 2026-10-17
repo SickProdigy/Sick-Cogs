@@ -9,15 +9,30 @@ from rocketleague.news import (
     new_items,
     official_url,
     plain_text,
+    recent_items,
 )
 from rocketleague.rocketleague import RocketLeague
 
 
 class RocketLeagueNewsTests(unittest.TestCase):
+    def test_public_updates_command_is_registered(self):
+        self.assertIsNotNone(RocketLeague.rocketleague.get_command("updates"))
+
     def test_settings_commands_are_registered(self):
         settings = RocketLeague.rocketleagueset
         self.assertIsNotNone(settings.get_command("gameupdates"))
         self.assertIsNotNone(settings.get_command("gameupdateschannel"))
+
+    def test_recent_items_returns_bounded_oldest_to_newest_selection(self):
+        items = [
+            {"gid": "new", "date": 30},
+            {"gid": "old", "date": 10},
+            {"gid": "middle", "date": 20},
+        ]
+        self.assertEqual(
+            [item["gid"] for item in recent_items(items, 2)],
+            ["middle", "new"],
+        )
 
     def test_new_items_are_unseen_and_oldest_first(self):
         items = [
@@ -97,6 +112,60 @@ class RocketLeagueNewsTests(unittest.TestCase):
             ["seen", "old", "new"],
         )
         self.assertEqual(values.game_updates_posted.set.await_count, 2)
+
+    def test_start_with_count_posts_recent_then_seeds_and_enables(self):
+        class Value:
+            def __init__(self):
+                self.set = AsyncMock()
+
+        values = SimpleNamespace(
+            all=AsyncMock(return_value={
+                "game_updates_channel_id": 10,
+                "game_updates_posted": [],
+            }),
+            game_updates_last_poll=Value(),
+            game_updates_posted=Value(),
+            game_updates_last_success=Value(),
+            game_updates_enabled=Value(),
+        )
+        channel = SimpleNamespace(mention="#updates", send=AsyncMock())
+        guild = SimpleNamespace(id=1, get_channel=lambda channel_id: channel)
+        client = SimpleNamespace(fetch=AsyncMock(return_value=[
+            {"gid": "new", "date": 30, "title": "New"},
+            {"gid": "old", "date": 10, "title": "Old"},
+            {"gid": "middle", "date": 20, "title": "Middle"},
+        ]))
+
+        class Typing:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        ctx = SimpleNamespace(
+            guild=guild,
+            clean_prefix="!",
+            typing=lambda: Typing(),
+            send=AsyncMock(),
+        )
+        cog = RocketLeague.__new__(RocketLeague)
+        cog.config = SimpleNamespace(guild=lambda selected: values)
+        cog.get_news_client = AsyncMock(return_value=client)
+
+        asyncio.run(
+            RocketLeague.rocketleagueset_gameupdates.callback(cog, ctx, "start", 2)
+        )
+
+        self.assertEqual(
+            [call.kwargs["embed"].title for call in channel.send.await_args_list],
+            ["Middle", "New"],
+        )
+        values.game_updates_enabled.set.assert_awaited_once_with(True)
+        self.assertEqual(
+            values.game_updates_posted.set.await_args.args[0],
+            ["new", "old", "middle"],
+        )
 
     def test_embed_is_static_for_instance_polling(self):
         cog = RocketLeague.__new__(RocketLeague)

@@ -80,6 +80,15 @@ def official_url(item: dict[str, Any]) -> str:
     return fallback if fallback.startswith(("https://", "http://")) else ANNOUNCEMENTS_URL
 
 
+def recent_items(
+    items: Iterable[dict[str, Any]], count: int
+) -> list[dict[str, Any]]:
+    ordered = sorted(
+        items, key=lambda item: (int(item.get("date") or 0), item_id(item)), reverse=True
+    )[:count]
+    return list(reversed(ordered))
+
+
 def new_items(
     items: Iterable[dict[str, Any]], posted_ids: Iterable[str]
 ) -> list[dict[str, Any]]:

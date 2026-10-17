@@ -99,7 +99,12 @@ feed remembers current posts first, so enabling the feature never floods a chann
 ```text
 [p]rocketleagueset gameupdateschannel #rocket-league-news
 [p]rocketleagueset gameupdates start
+# Or post the five newest announcements while starting:
+[p]rocketleagueset gameupdates start 5
 ```
+
+Users can browse the newest announcements without changing automatic posting with
+`[p]rocketleague updates` (five by default) or `[p]rocketleague updates 1-10`.
 
 `true` is accepted in place of `start`; `false` is accepted in place of `stop`. The channel
 and enable switch are independent from RLCS schedule announcements and community clips. Use

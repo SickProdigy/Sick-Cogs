@@ -26,7 +26,16 @@ from .api import (
 )
 from .blast import BlastClient, BlastError, BlastResult, BlastTournament, upcoming_tournaments
 from .clips import ClipProviders, ClipSourceError, clip_identity, detect_clip_source
-from .news import SteamNewsClient, SteamNewsError, extract_image, item_id, new_items, official_url, plain_text
+from .news import (
+    SteamNewsClient,
+    SteamNewsError,
+    extract_image,
+    item_id,
+    new_items,
+    official_url,
+    plain_text,
+    recent_items,
+)
 
 
 log = logging.getLogger("red.sick-cogs.RocketLeague")
@@ -34,7 +43,7 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.7.1 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.8.0 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
 BLAST_HISTORY_LIMIT = 100
@@ -64,7 +73,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.7.1"
+    __version__ = "1.8.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -762,8 +771,9 @@ class RocketLeague(commands.Cog):
     async def get_news_client(self) -> SteamNewsClient:
         return SteamNewsClient(await self.get_session())
 
-    async def _seed_game_updates(self, guild) -> int:
-        items = await (await self.get_news_client()).fetch(count=50)
+    async def _seed_game_updates(self, guild, *, items: Optional[list[dict]] = None) -> int:
+        if items is None:
+            items = await (await self.get_news_client()).fetch(count=50)
         identifiers = [item_id(item) for item in items if item_id(item)]
         now = int(time.time())
         await self.config.guild(guild).game_updates_posted.set(
@@ -1268,12 +1278,45 @@ class RocketLeague(commands.Cog):
             inline=False,
         )
         embed.add_field(
+            name="Official game updates",
+            value=f"`{prefix}rocketleague updates [1-10]`",
+            inline=False,
+        )
+        embed.add_field(
             name="Community clips",
             value=f"`{prefix}rocketleague clips`",
             inline=False,
         )
         embed.set_footer(
             text=f"Use {prefix}help rocketleague for the full command and administrator reference."
+        )
+        await ctx.send(embed=embed)
+
+    @rocketleague.command(name="updates")
+    @commands.bot_has_permissions(embed_links=True)
+    async def rocketleague_updates(
+        self, ctx: commands.Context, count: commands.Range[int, 1, 10] = 5
+    ):
+        """List the newest official Rocket League updates."""
+        try:
+            async with ctx.typing():
+                items = await (await self.get_news_client()).fetch(count=50)
+        except SteamNewsError as exc:
+            await ctx.send(str(exc))
+            return
+        newest = list(reversed(recent_items(items, int(count))))
+        lines = []
+        for item in newest:
+            title = discord.utils.escape_markdown(
+                str(item.get("title") or "Rocket League update")[:180]
+            )
+            timestamp = int(item.get("date") or 0)
+            date = f"<t:{timestamp}:D> — " if timestamp else ""
+            lines.append(f"• {date}[{title}]({official_url(item)})")
+        embed = discord.Embed(
+            title="Recent Rocket League updates",
+            description="\n".join(lines) or "No official Rocket League updates were found.",
+            color=discord.Color.blue(),
         )
         await ctx.send(embed=embed)
 
@@ -1673,7 +1716,12 @@ class RocketLeague(commands.Cog):
         await ctx.send_help()
 
     @rocketleagueset.command(name="gameupdates")
-    async def rocketleagueset_gameupdates(self, ctx: commands.Context, state: str):
+    async def rocketleagueset_gameupdates(
+        self,
+        ctx: commands.Context,
+        state: str,
+        recent_count: commands.Range[int, 1, 10] = 0,
+    ):
         """Start or stop official game updates."""
         normalized = state.casefold()
         enabled_values = {"true", "start", "on", "enable", "enabled"}
@@ -1682,6 +1730,9 @@ class RocketLeague(commands.Cog):
             await ctx.send("Choose `true`, `false`, `start`, or `stop`.")
             return
         settings = await self.config.guild(ctx.guild).all()
+        if normalized in disabled_values and recent_count:
+            await ctx.send("A recent-post count can only be used with `true` or `start`.")
+            return
         if normalized in disabled_values:
             await self.config.guild(ctx.guild).game_updates_enabled.set(False)
             await ctx.send("Official Rocket League game updates are stopped for this server.")
@@ -1695,14 +1746,36 @@ class RocketLeague(commands.Cog):
             return
         try:
             async with ctx.typing():
-                await self._seed_game_updates(ctx.guild)
+                items = await (await self.get_news_client()).fetch(count=50)
+                if recent_count:
+                    history = list(settings.get("game_updates_posted") or [])
+                    for item in recent_items(items, int(recent_count)):
+                        await channel.send(
+                            embed=self._game_update_embed(item),
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                        history.append(item_id(item))
+                        await self.config.guild(ctx.guild).game_updates_posted.set(
+                            history[-GAME_UPDATE_HISTORY_LIMIT:]
+                        )
+                await self._seed_game_updates(ctx.guild, items=items)
         except SteamNewsError as exc:
             await ctx.send(f"I could not start game updates: {exc}")
             return
+        except (discord.Forbidden, discord.HTTPException):
+            await ctx.send(
+                "I could not post the requested recent updates, so automatic updates were not started."
+            )
+            return
         await self.config.guild(ctx.guild).game_updates_enabled.set(True)
+        plural = "s" if recent_count != 1 else ""
+        detail = (
+            f" Posted the {recent_count} most recent update{plural} first."
+            if recent_count
+            else " Current posts were remembered and will not be backfilled."
+        )
         await ctx.send(
-            f"Official Rocket League game updates are started in {channel.mention}. "
-            "Current posts were remembered and will not be backfilled."
+            f"Official Rocket League game updates are started in {channel.mention}.{detail}"
         )
 
     @rocketleagueset.command(name="gameupdateschannel")

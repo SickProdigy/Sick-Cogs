@@ -10,6 +10,9 @@ from rocketleague.rocketleague import RocketLeague
 
 
 class RocketLeagueHelpStructureTests(unittest.TestCase):
+    def test_canonical_group_exposes_recent_game_updates(self):
+        self.assertIsNotNone(RocketLeague.rocketleague.get_command("updates"))
+
     def test_canonical_group_exposes_complete_rlcs_surface(self):
         rocketleague = RocketLeague.rocketleague
         self.assertIn("rl", rocketleague.aliases)
