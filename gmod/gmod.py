@@ -32,6 +32,7 @@ CONFIG_IDENTIFIER = 6202609250215001
 MIN_INTERVAL_MINUTES = 5
 MAX_INTERVAL_MINUTES = 1440
 MAX_POSTED_IDS = 500
+MAX_CONCURRENT_STATUS_QUERIES = 8
 _NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 
@@ -61,7 +62,7 @@ class GMod(commands.Cog):
     """Monitor Garry's Mod servers and publish official Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.2"
+    __version__ = "1.0.3"
 
     guild_defaults = {
         "servers": {},
@@ -123,6 +124,11 @@ class GMod(commands.Cog):
         if not can_user_send_messages_in(guild.me, channel):
             return None
         return channel
+
+    @staticmethod
+    def endpoint_key(server: dict):
+        host = str(server.get("host") or "").strip().rstrip(".").casefold()
+        return host, int(server.get("port") or 27015)
 
     @staticmethod
     def connect_address(server: dict) -> str:
@@ -191,7 +197,7 @@ class GMod(commands.Cog):
         status["checked_at"] = utc_now().isoformat()
         return status, None
 
-    async def poll_status(self, guild, *, force=False):
+    async def poll_status(self, guild, *, force=False, query_results=None):
         lock = self._status_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
             group = self.config.guild(guild)
@@ -209,7 +215,13 @@ class GMod(commands.Cog):
             sent = 0
             servers = settings.get("servers", {})
             for name, server in servers.items():
-                status, error = await self.query_server(name, server)
+                endpoint = self.endpoint_key(server)
+                if query_results is None:
+                    status, error = await self.query_server(name, server)
+                elif endpoint in query_results:
+                    status, error = query_results[endpoint]
+                else:
+                    continue
                 state = "online" if status else "offline"
                 server["last_state"] = state
                 if status:
@@ -267,7 +279,7 @@ class GMod(commands.Cog):
         await group.updates_last_success_at.set(utc_now().isoformat())
         return len(identifiers)
 
-    async def poll_updates(self, guild, *, force=False):
+    async def poll_updates(self, guild, *, force=False, items=None):
         lock = self._updates_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
             group = self.config.guild(guild)
@@ -284,7 +296,8 @@ class GMod(commands.Cog):
             if channel is None:
                 await group.updates_last_poll_at.set(utc_now().isoformat())
                 return 0
-            items = await (await self.steam_client()).fetch(count=100)
+            if items is None:
+                items = tuple(await (await self.steam_client()).fetch(count=100))
             posted = [str(value) for value in settings.get("updates_posted_ids", [])]
             if not posted:
                 posted = [item_id(item) for item in items if item_id(item)]
@@ -317,23 +330,104 @@ class GMod(commands.Cog):
             await group.updates_last_success_at.set(utc_now().isoformat())
             return sent
 
-    @tasks.loop(minutes=1)
-    async def poll_loop(self):
+    async def poll_once(self):
+        status_guilds = []
+        update_guilds = []
+        endpoints = {}
         for guild in list(self.bot.guilds):
             if await self.bot.cog_disabled_in_guild(self, guild):
                 continue
             try:
-                await self.poll_status(guild)
+                settings = await self.config.guild(guild).all()
+                status_interval = max(
+                    MIN_INTERVAL_MINUTES,
+                    int(settings.get("status_interval_minutes", 5)),
+                )
+                if settings.get("status_enabled") and due(
+                    settings.get("status_last_poll_at"), status_interval
+                ):
+                    status_guilds.append(guild)
+                    for name, server in settings.get("servers", {}).items():
+                        endpoint = self.endpoint_key(server)
+                        endpoints.setdefault(endpoint, (name, dict(server)))
+
+                updates_interval = max(
+                    MIN_INTERVAL_MINUTES,
+                    int(settings.get("updates_interval_minutes", 10)),
+                )
+                if (
+                    settings.get("updates_enabled")
+                    and settings.get("updates_channel_id")
+                    and due(
+                        settings.get("updates_last_poll_at"), updates_interval
+                    )
+                ):
+                    update_guilds.append(guild)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                log.exception("GMod status polling failed for guild %s", guild.id)
+                log.exception("Could not prepare GMod poll for guild %s", guild.id)
+
+        if status_guilds:
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_STATUS_QUERIES)
+
+            async def query_endpoint(endpoint, name, server):
+                try:
+                    async with semaphore:
+                        result = await self.query_server(name, server)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("GMod endpoint query failed for %r", endpoint)
+                    result = (None, "Unexpected query failure.")
+                return endpoint, result
+
+            query_results = dict(
+                await asyncio.gather(
+                    *(
+                        query_endpoint(endpoint, name, server)
+                        for endpoint, (name, server) in endpoints.items()
+                    )
+                )
+            )
+            for guild in status_guilds:
+                try:
+                    await self.poll_status(guild, query_results=query_results)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception(
+                        "GMod status polling failed for guild %s", guild.id
+                    )
+
+        if update_guilds:
             try:
-                await self.poll_updates(guild)
+                items = tuple(
+                    await (await self.steam_client()).fetch(count=100)
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
-                log.exception("GMod Steam polling failed for guild %s", guild.id)
+                log.exception("GMod Steam feed polling failed")
+            else:
+                for guild in update_guilds:
+                    try:
+                        await self.poll_updates(guild, items=items)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        log.exception(
+                            "GMod Steam polling failed for guild %s", guild.id
+                        )
+
+    @tasks.loop(minutes=1)
+    async def poll_loop(self):
+        try:
+            await self.poll_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("GMod polling cycle failed")
 
     @poll_loop.before_loop
     async def before_poll_loop(self):
