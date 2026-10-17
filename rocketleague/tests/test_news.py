@@ -1,0 +1,124 @@
+import asyncio
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+from rocketleague.news import (
+    ANNOUNCEMENTS_URL,
+    extract_image,
+    new_items,
+    official_url,
+    plain_text,
+)
+from rocketleague.rocketleague import RocketLeague
+
+
+class RocketLeagueNewsTests(unittest.TestCase):
+    def test_settings_commands_are_registered(self):
+        settings = RocketLeague.rocketleagueset
+        self.assertIsNotNone(settings.get_command("gameupdates"))
+        self.assertIsNotNone(settings.get_command("gameupdateschannel"))
+
+    def test_new_items_are_unseen_and_oldest_first(self):
+        items = [
+            {"gid": "new", "date": 30},
+            {"gid": "old", "date": 10},
+            {"gid": "seen", "date": 20},
+        ]
+        self.assertEqual(
+            [item["gid"] for item in new_items(items, ["seen"])],
+            ["old", "new"],
+        )
+
+    def test_official_article_url_is_preferred(self):
+        item = {
+            "contents": "[url=https://www.rocketleague.com/news/patch-notes-v2-64]Read[/url]",
+            "url": "https://steamcommunity.com/games/252950/announcements/detail/1",
+        }
+        self.assertEqual(
+            official_url(item),
+            "https://www.rocketleague.com/news/patch-notes-v2-64",
+        )
+
+    def test_missing_article_uses_feed_item_then_announcements(self):
+        self.assertEqual(official_url({"url": "https://example.com/post"}), "https://example.com/post")
+        self.assertEqual(official_url({}), ANNOUNCEMENTS_URL)
+
+    def test_content_is_cleaned_and_bounded(self):
+        text = plain_text("[h1]Heading[/h1][*]One &amp; two " + "x" * 100, limit=40)
+        self.assertIn("Heading", text)
+        self.assertIn("One & two", text)
+        self.assertLessEqual(len(text), 40)
+        self.assertTrue(text.endswith("..."))
+
+    def test_steam_clan_image_placeholder_is_normalized(self):
+        self.assertEqual(
+            extract_image("[img]{STEAM_CLAN_IMAGE}/123/hero.jpg[/img]"),
+            "https://clan.steamstatic.com/images/123/hero.jpg",
+        )
+
+    def test_poll_posts_unseen_items_oldest_first_and_persists_each(self):
+        class Value:
+            def __init__(self):
+                self.set = AsyncMock()
+
+        values = SimpleNamespace(
+            all=AsyncMock(return_value={
+                "game_updates_enabled": True,
+                "game_updates_channel_id": 10,
+                "game_updates_last_poll": 0,
+                "game_updates_posted": ["seen"],
+            }),
+            game_updates_last_poll=Value(),
+            game_updates_posted=Value(),
+            game_updates_last_success=Value(),
+        )
+        channel = SimpleNamespace(send=AsyncMock())
+        guild = SimpleNamespace(id=1, get_channel=lambda channel_id: channel)
+        client = SimpleNamespace(fetch=AsyncMock(return_value=[
+            {"gid": "new", "date": 30, "title": "New"},
+            {"gid": "old", "date": 10, "title": "Old"},
+            {"gid": "seen", "date": 20, "title": "Seen"},
+        ]))
+        cog = RocketLeague.__new__(RocketLeague)
+        cog.config = SimpleNamespace(guild=lambda selected: values)
+        cog._game_update_locks = {}
+        cog.get_news_client = AsyncMock(return_value=client)
+
+        posted = asyncio.run(cog._poll_game_updates(guild))
+
+        self.assertEqual(posted, 2)
+        self.assertEqual(
+            [call.kwargs["embed"].title for call in channel.send.await_args_list],
+            ["Old", "New"],
+        )
+        self.assertEqual(
+            values.game_updates_posted.set.await_args_list[-1].args[0],
+            ["seen", "old", "new"],
+        )
+        self.assertEqual(values.game_updates_posted.set.await_count, 2)
+
+    def test_embed_is_static_for_instance_polling(self):
+        cog = RocketLeague.__new__(RocketLeague)
+        self.assertEqual(cog._game_update_embed({"title": "Update"}).title, "Update")
+
+    def test_embed_uses_official_content(self):
+        embed = RocketLeague._game_update_embed(
+            {
+                "gid": "1",
+                "title": "Patch Notes v2.64",
+                "date": 1_800_000_000,
+                "contents": (
+                    "[url=https://www.rocketleague.com/news/patch-notes-v2-64]Details[/url]"
+                    "[img]{STEAM_CLAN_IMAGE}/123/hero.jpg[/img]"
+                ),
+            }
+        )
+        self.assertEqual(embed.title, "Patch Notes v2.64")
+        self.assertEqual(embed.url, "https://www.rocketleague.com/news/patch-notes-v2-64")
+        self.assertEqual(embed.image.url, "https://clan.steamstatic.com/images/123/hero.jpg")
+        self.assertIn("Official Rocket League news", embed.footer.text)
+
+
+if __name__ == "__main__":
+    unittest.main()
