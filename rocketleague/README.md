@@ -90,10 +90,11 @@ can save up to 25 tournament URLs.
 
 ## Official game updates
 
-Official Rocket League announcements are polled from Steam's machine-readable news feed once
-per ten-minute cycle when at least one server subscription is due. Cards prefer the matching official
-Rocket League article URL embedded in the feed and include its text, artwork, and publication
-time. Each server keeps a bounded delivery history across restarts. Selecting or starting a
+Official Rocket League developer announcements are polled from Steam's machine-readable news feed once
+per ten-minute cycle when at least one server subscription is due. Cards link to the canonical Steam Community post and preserve Steam paragraphs and list
+items. They include publication time and artwork when the developer post provides an image;
+some official posts contain no artwork. Each server keeps a bounded delivery history across
+restarts. Selecting or starting a
 feed remembers current posts first, so enabling the feature never floods a channel with old news.
 
 ```text

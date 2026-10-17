@@ -43,7 +43,7 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.8.1 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.8.2 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
 BLAST_HISTORY_LIMIT = 100
@@ -73,7 +73,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.8.1"
+    __version__ = "1.8.2"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -799,7 +799,10 @@ class RocketLeague(commands.Cog):
         image = extract_image(str(item.get("contents") or ""))
         if image:
             embed.set_image(url=image)
-        embed.set_footer(text="Official Rocket League news • Steam feed")
+        embed.set_author(
+            name="Rocket League — Official Steam Community", url=official_url(item)
+        )
+        embed.set_footer(text="Official Rocket League developer announcement • Steam Community")
         return embed
 
     async def _poll_game_updates(

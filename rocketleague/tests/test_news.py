@@ -47,19 +47,34 @@ class RocketLeagueNewsTests(unittest.TestCase):
             ["old", "new"],
         )
 
-    def test_official_article_url_is_preferred(self):
+    def test_canonical_steam_post_is_preferred_over_article_links(self):
         item = {
-            "contents": "[url=https://www.rocketleague.com/news/patch-notes-v2-64]Read[/url]",
-            "url": "https://steamcommunity.com/games/252950/announcements/detail/1",
+            "gid": "1844751498216898",
+            "contents": (
+                "[url=\"https://www.rocketleague.com/news/known-issues-in-rocket-league\"]"
+                "Known Issues[/url]"
+            ),
+            "url": "https://steamstore-a.akamaihd.net/news/externalpost/1",
         }
         self.assertEqual(
             official_url(item),
-            "https://www.rocketleague.com/news/patch-notes-v2-64",
+            "https://steamcommunity.com/games/252950/announcements/detail/1844751498216898",
         )
 
     def test_missing_article_uses_feed_item_then_announcements(self):
         self.assertEqual(official_url({"url": "https://example.com/post"}), "https://example.com/post")
         self.assertEqual(official_url({}), ANNOUNCEMENTS_URL)
+
+    def test_compact_steam_blocks_keep_paragraphs_and_bullets(self):
+        source = (
+            "[p]Season 24 launches![/p]"
+            "[p align=\"start\"]NEW THIS SEASON[/p]"
+            "[list][*][p]Honor Duels[/p][/*][*][p]New Mode[/p][/*][/list]"
+        )
+        self.assertEqual(
+            plain_text(source),
+            "Season 24 launches!\nNEW THIS SEASON\n• Honor Duels\n• New Mode",
+        )
 
     def test_content_is_cleaned_and_bounded(self):
         text = plain_text("[h1]Heading[/h1][*]One &amp; two " + "x" * 100, limit=40)
@@ -207,9 +222,13 @@ class RocketLeagueNewsTests(unittest.TestCase):
             }
         )
         self.assertEqual(embed.title, "Patch Notes v2.64")
-        self.assertEqual(embed.url, "https://www.rocketleague.com/news/patch-notes-v2-64")
+        self.assertEqual(
+            embed.url,
+            "https://steamcommunity.com/games/252950/announcements/detail/1",
+        )
         self.assertEqual(embed.image.url, "https://clan.steamstatic.com/images/123/hero.jpg")
-        self.assertIn("Official Rocket League news", embed.footer.text)
+        self.assertIn("Steam Community", embed.footer.text)
+        self.assertIn("Official Steam Community", embed.author.name)
 
 
 if __name__ == "__main__":

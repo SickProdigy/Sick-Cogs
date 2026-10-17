@@ -17,14 +17,18 @@ _BB_IMAGE_SRC_RE = re.compile(
 )
 _BB_IMAGE_RE = re.compile(r"\[img\](.+?)\[/img\]", re.IGNORECASE | re.DOTALL)
 _HTML_IMAGE_RE = re.compile(r"<img[^>]+src=[\"\x27]([^\"\x27]+)", re.IGNORECASE)
-_URL_RE = re.compile(
-    r"https://(?:www\.)?rocketleague\.com/news/[^\s\[\]<>\x27\"]+",
-    re.IGNORECASE,
+_BLOCK_END_RE = re.compile(
+    r"\[\/(?:p|h[1-6]|list|quote|table|tr)[^\]]*\]", re.IGNORECASE
 )
-_BB_TAG_RE = re.compile(r"\[/?[a-z*][^\]]*\]", re.IGNORECASE)
+_BLOCK_START_RE = re.compile(r"\[(?:p|h[1-6]|list|quote|table|tr)[^\]]*\]", re.IGNORECASE)
+_LIST_ITEM_START_RE = re.compile(r"\[\*\]\s*\[p[^\]]*\]", re.IGNORECASE)
+_LIST_ITEM_END_RE = re.compile(r"\[\/p\]\s*\[\/\*\]", re.IGNORECASE)
+_LIST_END_RE = re.compile(r"\[\/\*\]", re.IGNORECASE)
+_BREAK_RE = re.compile(r"\[(?:br|hr)\s*\/?\]", re.IGNORECASE)
+_BB_TAG_RE = re.compile(r"\[\/?[a-z*][^\]]*\]", re.IGNORECASE)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _SPACE_RE = re.compile(r"[ \t]+")
-_BLANK_RE = re.compile(r"\n{3,}")
+_BLANK_RE = re.compile(r"\n{2,}")
 
 
 class SteamNewsError(RuntimeError):
@@ -59,12 +63,18 @@ def plain_text(contents: str, *, limit: int = 1400) -> str:
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    text = text.replace("[*]", "- ")
+    text = _LIST_ITEM_START_RE.sub("• ", text)
+    text = _LIST_ITEM_END_RE.sub("\n", text)
+    text = _BLOCK_END_RE.sub("\n", text)
+    text = _BLOCK_START_RE.sub("\n", text)
+    text = _LIST_END_RE.sub("\n", text)
+    text = _BREAK_RE.sub("\n", text)
+    text = text.replace("[*]", "• ")
     text = _BB_TAG_RE.sub("", text)
     text = _HTML_TAG_RE.sub("", text)
     text = html.unescape(text).replace("\r\n", "\n").replace("\r", "\n")
     text = "\n".join(_SPACE_RE.sub(" ", line).strip() for line in text.splitlines())
-    text = _BLANK_RE.sub("\n\n", text).strip()
+    text = _BLANK_RE.sub("\n", text).strip()
     return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
 
 
@@ -73,9 +83,9 @@ def item_id(item: dict[str, Any]) -> str:
 
 
 def official_url(item: dict[str, Any]) -> str:
-    match = _URL_RE.search(str(item.get("contents") or ""))
-    if match:
-        return html.unescape(match.group(0)).rstrip(".,);]")
+    identifier = item_id(item)
+    if identifier.isdigit():
+        return f"https://steamcommunity.com/games/{APP_ID}/announcements/detail/{identifier}"
     fallback = str(item.get("url") or "").strip()
     return fallback if fallback.startswith(("https://", "http://")) else ANNOUNCEMENTS_URL
 
