@@ -28,6 +28,33 @@ class MovieReleaseTests(unittest.IsolatedAsyncioTestCase):
         cog.send_movie = AsyncMock()
         return cog, group
 
+    def make_cycle_cog(self, settings, *, disabled_ids=()):
+        guilds = [SimpleNamespace(id=guild_id) for guild_id in settings]
+        groups = {
+            guild_id: SimpleNamespace(
+                all=AsyncMock(return_value=guild_settings),
+                next_check_at=SimpleNamespace(set=AsyncMock()),
+            )
+            for guild_id, guild_settings in settings.items()
+        }
+        disabled_ids = set(disabled_ids)
+        cog = object.__new__(MovieReleases)
+        cog.bot = SimpleNamespace(
+            guilds=guilds,
+            cog_disabled_in_guild=AsyncMock(
+                side_effect=lambda _cog, guild: guild.id in disabled_ids
+            ),
+        )
+        cog.config = SimpleNamespace(
+            guild=MagicMock(side_effect=lambda guild: groups[guild.id])
+        )
+        cog.get_api_key = AsyncMock(return_value="test-key")
+        cog.fetch_releases = AsyncMock(
+            return_value=[{"id": 101, "title": "Shared"}]
+        )
+        cog.check_guild = AsyncMock()
+        return cog, groups
+
     async def test_legacy_nulls_migrate_once_and_schedule_enabled_guild(self):
         cog = object.__new__(MovieReleases)
         guild_config = SimpleNamespace(
@@ -175,6 +202,141 @@ class MovieReleaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent, 0)
         cog.fetch_releases.assert_not_awaited()
         cog.send_movie.assert_not_awaited()
+
+
+    async def test_release_cycle_groups_identical_queries_and_isolates_delivery(self):
+        future = (
+            datetime.datetime.now(datetime.timezone.utc)
+            + datetime.timedelta(minutes=30)
+        ).isoformat()
+        settings = {
+            1: {
+                "enabled": True,
+                "channel_id": 101,
+                "days_back": 0,
+                "days_ahead": 7,
+                "min_vote_count": 5,
+                "next_check_at": None,
+            },
+            2: {
+                "enabled": True,
+                "channel_id": 202,
+                "role_id": 9,
+                "max_per_day": 8,
+                "days_back": 0,
+                "days_ahead": 7,
+                "min_vote_count": 5,
+                "next_check_at": None,
+            },
+            3: {
+                "enabled": True,
+                "channel_id": 303,
+                "days_back": 0,
+                "days_ahead": 7,
+                "min_vote_count": 25,
+                "next_check_at": None,
+            },
+            4: {
+                "enabled": True,
+                "channel_id": 404,
+                "days_back": 0,
+                "days_ahead": 7,
+                "min_vote_count": 5,
+                "next_check_at": future,
+            },
+            5: {
+                "enabled": False,
+                "channel_id": 505,
+                "days_back": 0,
+                "days_ahead": 7,
+                "min_vote_count": 5,
+                "next_check_at": None,
+            },
+            6: {
+                "enabled": True,
+                "channel_id": 606,
+                "days_back": 0,
+                "days_ahead": 7,
+                "min_vote_count": 5,
+                "next_check_at": None,
+            },
+        }
+        cog, groups = self.make_cycle_cog(settings, disabled_ids={6})
+        cog.check_guild.side_effect = [RuntimeError("delivery failed"), 0, 0]
+
+        await cog.release_once()
+
+        cog.get_api_key.assert_awaited_once_with()
+        self.assertEqual(cog.fetch_releases.await_count, 2)
+        self.assertEqual(cog.check_guild.await_count, 3)
+        first_releases = cog.check_guild.await_args_list[0].kwargs["releases"]
+        second_releases = cog.check_guild.await_args_list[1].kwargs["releases"]
+        self.assertIs(first_releases, second_releases)
+        self.assertIsInstance(first_releases, tuple)
+        self.assertEqual(
+            [call.args[0].id for call in cog.check_guild.await_args_list],
+            [1, 2, 3],
+        )
+        for call in cog.check_guild.await_args_list:
+            self.assertTrue(call.kwargs["due_reserved"])
+        for guild_id in (1, 2, 3):
+            groups[guild_id].next_check_at.set.assert_awaited_once()
+        for guild_id in (4, 5, 6):
+            groups[guild_id].next_check_at.set.assert_not_awaited()
+
+    async def test_release_cycle_without_due_configured_guild_skips_tmdb(self):
+        future = (
+            datetime.datetime.now(datetime.timezone.utc)
+            + datetime.timedelta(minutes=30)
+        ).isoformat()
+        settings = {
+            1: {
+                "enabled": True,
+                "channel_id": 101,
+                "next_check_at": future,
+            },
+            2: {
+                "enabled": False,
+                "channel_id": 202,
+                "next_check_at": None,
+            },
+            3: {
+                "enabled": True,
+                "channel_id": None,
+                "next_check_at": None,
+            },
+        }
+        cog, _groups = self.make_cycle_cog(settings)
+
+        await cog.release_once()
+
+        cog.get_api_key.assert_not_awaited()
+        cog.fetch_releases.assert_not_awaited()
+        cog.check_guild.assert_not_awaited()
+
+    async def test_shared_releases_avoid_per_guild_tmdb_request(self):
+        settings = {
+            "enabled": True,
+            "channel_id": 10,
+            "role_id": None,
+            "max_per_day": 3,
+            "posted_today": {"date": None, "count": 0},
+            "posted_ids": [],
+        }
+        cog, group = self.make_cog(settings)
+        releases = ({"id": 777, "title": "Shared"},)
+
+        sent = await cog.check_guild(
+            SimpleNamespace(id=1), releases=releases, due_reserved=True
+        )
+
+        self.assertEqual(sent, 1)
+        cog.get_api_key.assert_not_awaited()
+        cog.fetch_releases.assert_not_awaited()
+        cog.send_movie.assert_awaited_once_with(
+            cog.get_channel.return_value, releases[0], None, "normal"
+        )
+        group.next_check_at.set.assert_not_awaited()
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ TMDB_DETAILS_URL = "https://api.themoviedb.org/3/movie/{movie_id}"
 TMDB_POPULAR_URL = "https://api.themoviedb.org/3/movie/popular"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 TMDB_MOVIE_URL = "https://www.themoviedb.org/movie/{movie_id}"
-USER_AGENT = "Sick-Cogs-MovieReleases/1.2.3 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-MovieReleases/1.2.4 (+https://github.com/SickProdigy/Sick-Cogs)"
 CHECK_INTERVAL = datetime.timedelta(hours=1)
 CONFIG_SCHEMA_VERSION = 1
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
@@ -37,7 +37,7 @@ class MovieReleases(commands.Cog):
     """Post new movie release announcements from TMDb."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.3"
+    __version__ = "1.2.4"
 
     default_guild = {
         "enabled": False,
@@ -83,18 +83,81 @@ class MovieReleases(commands.Cog):
         api_key = str(tokens.get("api_key") or "").strip()
         return api_key or None
 
-    @tasks.loop(minutes=1)
-    async def release_loop(self):
-        await self.bot.wait_until_red_ready()
+    async def release_once(self):
+        now = self.utc_now()
+        grouped_jobs = {}
         for guild in list(self.bot.guilds):
             if await self.bot.cog_disabled_in_guild(self, guild):
                 continue
             try:
-                await self.check_guild(guild)
+                settings = await self.config.guild(guild).all()
+                if not settings.get("enabled") or not settings.get("channel_id"):
+                    continue
+                next_check = self.parse_timestamp(settings.get("next_check_at"))
+                if next_check and next_check > now:
+                    continue
+
+                # Reserve each guild's next slot before provider or Discord work.
+                await self.config.guild(guild).next_check_at.set(
+                    (now + CHECK_INTERVAL).isoformat()
+                )
+                query_params = self.release_query_params(settings)
+                query_key = tuple(sorted(query_params.items()))
+                group = grouped_jobs.setdefault(
+                    query_key, {"params": query_params, "jobs": []}
+                )
+                group["jobs"].append((guild, settings))
             except asyncio.CancelledError:
                 raise
             except Exception:
-                log.exception("Movie release check failed for guild %s", guild.id)
+                log.exception(
+                    "Could not prepare movie release check for guild %s", guild.id
+                )
+
+        if not grouped_jobs:
+            return
+
+        api_key = await self.get_api_key()
+        if not api_key:
+            return
+
+        for group in grouped_jobs.values():
+            jobs = group["jobs"]
+            try:
+                releases = tuple(
+                    await self.fetch_releases(
+                        jobs[0][1], api_key, query_params=group["params"]
+                    )
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception(
+                    "TMDb movie release query failed for %d guild(s)", len(jobs)
+                )
+                continue
+
+            for guild, _settings in jobs:
+                try:
+                    await self.check_guild(
+                        guild, releases=releases, due_reserved=True
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception(
+                        "Movie release delivery failed for guild %s", guild.id
+                    )
+
+    @tasks.loop(minutes=1)
+    async def release_loop(self):
+        await self.bot.wait_until_red_ready()
+        try:
+            await self.release_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Movie release polling cycle failed")
 
     @release_loop.before_loop
     async def before_release_loop(self):
@@ -133,13 +196,20 @@ class MovieReleases(commands.Cog):
 
         await self.config.schema_version.set(CONFIG_SCHEMA_VERSION)
 
-    async def check_guild(self, guild: discord.Guild, *, force: bool = False) -> int:
+    async def check_guild(
+        self,
+        guild: discord.Guild,
+        *,
+        force: bool = False,
+        releases: Optional[tuple] = None,
+        due_reserved: bool = False,
+    ) -> int:
         settings = await self.config.guild(guild).all()
         if not settings["enabled"] and not force:
             return 0
 
         now = self.utc_now()
-        if not force:
+        if not force and not due_reserved:
             next_check = self.parse_timestamp(settings.get("next_check_at"))
             if next_check and next_check > now:
                 return 0
@@ -147,8 +217,7 @@ class MovieReleases(commands.Cog):
             # therefore cannot turn a release backlog into rapid-fire posts.
             await self.config.guild(guild).next_check_at.set((now + CHECK_INTERVAL).isoformat())
 
-        api_key = await self.get_api_key()
-        if not api_key or not settings["channel_id"]:
+        if not settings["channel_id"]:
             return 0
 
         channel = await self.get_channel(guild, int(settings["channel_id"]))
@@ -164,7 +233,12 @@ class MovieReleases(commands.Cog):
         if remaining <= 0 and not force:
             return 0
 
-        movies = await self.fetch_releases(settings, api_key)
+        if releases is None:
+            api_key = await self.get_api_key()
+            if not api_key:
+                return 0
+            releases = tuple(await self.fetch_releases(settings, api_key))
+        movies = releases
         posted_ids = [int(movie_id) for movie_id in settings.get("posted_ids", [])]
         new_movies = [movie for movie in movies if int(movie["id"]) not in posted_ids]
         if not new_movies:
@@ -201,12 +275,18 @@ class MovieReleases(commands.Cog):
             return channel
         return None
 
-    async def fetch_releases(self, settings: Dict[str, Any], api_key: str) -> List[Dict[str, Any]]:
-        today = utc_today()
-        start = today - datetime.timedelta(days=max(0, int(settings.get("days_back", 0))))
-        end = today + datetime.timedelta(days=max(0, int(settings.get("days_ahead", 7))))
-        params = {
-            "api_key": api_key,
+    @staticmethod
+    def release_query_params(
+        settings: Dict[str, Any], *, today: Optional[datetime.date] = None
+    ) -> Dict[str, Any]:
+        today = today or utc_today()
+        start = today - datetime.timedelta(
+            days=max(0, int(settings.get("days_back", 0)))
+        )
+        end = today + datetime.timedelta(
+            days=max(0, int(settings.get("days_ahead", 7)))
+        )
+        return {
             "language": "en-US",
             "region": "US",
             "sort_by": "primary_release_date.asc",
@@ -220,6 +300,16 @@ class MovieReleases(commands.Cog):
             # theatrical date (3) over a limited theatrical date (2).
             "with_release_type": "3|2",
         }
+
+    async def fetch_releases(
+        self,
+        settings: Dict[str, Any],
+        api_key: str,
+        *,
+        query_params: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        params = {"api_key": api_key}
+        params.update(query_params or self.release_query_params(settings))
         session = await self.get_session()
         async with session.get(TMDB_API_URL, params=params) as response:
             if response.status == 401:
