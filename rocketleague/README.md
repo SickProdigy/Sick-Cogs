@@ -103,8 +103,9 @@ feed remembers current posts first, so enabling the feature never floods a chann
 [p]rocketleagueset gameupdates start 5
 ```
 
-Users can browse the newest announcements without changing automatic posting with
-`[p]rocketleague updates` (five by default) or `[p]rocketleague updates 1-10`.
+Users can browse a full announcement card without changing automatic posting.
+`[p]rocketleague updates` shows the newest, while `[p]rocketleague updates 2` shows the
+second-newest. Use `[p]rocketleague updates list [1-10]` for a compact list of recent posts.
 
 `true` is accepted in place of `start`; `false` is accepted in place of `stop`. The channel
 and enable switch are independent from RLCS schedule announcements and community clips. Use

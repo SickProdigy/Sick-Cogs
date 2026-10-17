@@ -43,7 +43,7 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.8.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.8.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
 BLAST_HISTORY_LIMIT = 100
@@ -73,7 +73,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.8.0"
+    __version__ = "1.8.1"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -1279,7 +1279,10 @@ class RocketLeague(commands.Cog):
         )
         embed.add_field(
             name="Official game updates",
-            value=f"`{prefix}rocketleague updates [1-10]`",
+            value=(
+                f"`{prefix}rocketleague updates [position]` • "
+                f"`{prefix}rocketleague updates list [1-10]`"
+            ),
             inline=False,
         )
         embed.add_field(
@@ -1292,9 +1295,35 @@ class RocketLeague(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @rocketleague.command(name="updates")
+    @rocketleague.group(name="updates", invoke_without_command=True)
     @commands.bot_has_permissions(embed_links=True)
     async def rocketleague_updates(
+        self, ctx: commands.Context, position: commands.Range[int, 1, 10] = 1
+    ):
+        """Show an official update by recency; newest is 1."""
+        try:
+            async with ctx.typing():
+                items = await (await self.get_news_client()).fetch(count=50)
+        except SteamNewsError as exc:
+            await ctx.send(str(exc))
+            return
+        newest = sorted(
+            items,
+            key=lambda item: (int(item.get("date") or 0), item_id(item)),
+            reverse=True,
+        )
+        if len(newest) < int(position):
+            plural = "" if len(newest) == 1 else "s"
+            verb = "is" if len(newest) == 1 else "are"
+            await ctx.send(
+                f"Only {len(newest)} official update{plural} {verb} available."
+            )
+            return
+        await ctx.send(embed=self._game_update_embed(newest[int(position) - 1]))
+
+    @rocketleague_updates.command(name="list")
+    @commands.bot_has_permissions(embed_links=True)
+    async def rocketleague_updates_list(
         self, ctx: commands.Context, count: commands.Range[int, 1, 10] = 5
     ):
         """List the newest official Rocket League updates."""

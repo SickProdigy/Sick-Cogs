@@ -15,8 +15,10 @@ from rocketleague.rocketleague import RocketLeague
 
 
 class RocketLeagueNewsTests(unittest.TestCase):
-    def test_public_updates_command_is_registered(self):
-        self.assertIsNotNone(RocketLeague.rocketleague.get_command("updates"))
+    def test_public_updates_commands_are_registered(self):
+        updates = RocketLeague.rocketleague.get_command("updates")
+        self.assertIsNotNone(updates)
+        self.assertIsNotNone(updates.get_command("list"))
 
     def test_settings_commands_are_registered(self):
         settings = RocketLeague.rocketleagueset
@@ -112,6 +114,27 @@ class RocketLeagueNewsTests(unittest.TestCase):
             ["seen", "old", "new"],
         )
         self.assertEqual(values.game_updates_posted.set.await_count, 2)
+
+    def test_positional_updates_shows_requested_full_card(self):
+        class Typing:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        ctx = SimpleNamespace(typing=lambda: Typing(), send=AsyncMock())
+        client = SimpleNamespace(fetch=AsyncMock(return_value=[
+            {"gid": "new", "date": 30, "title": "Newest"},
+            {"gid": "old", "date": 10, "title": "Oldest"},
+            {"gid": "middle", "date": 20, "title": "Second"},
+        ]))
+        cog = RocketLeague.__new__(RocketLeague)
+        cog.get_news_client = AsyncMock(return_value=client)
+
+        asyncio.run(RocketLeague.rocketleague_updates.callback(cog, ctx, 2))
+
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].title, "Second")
 
     def test_start_with_count_posts_recent_then_seeds_and_enables(self):
         class Value:
