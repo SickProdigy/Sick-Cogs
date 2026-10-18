@@ -3,7 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from roletools.roletools import RoleTools
-from roletools.setup import CatalogEditorView, NamedMenuEditorView, NamedMenuManagerView
+from roletools.setup import (CatalogEditorView, NamedMenuEditorView, NamedMenuManagerView,
+                             RoleToolsSetupView)
 
 
 class FakeRole:
@@ -241,6 +242,23 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(changed, 1)
         admin_selfroles.set.assert_awaited_once_with([])
         restricted.set.assert_awaited_once_with([2])
+
+
+class SetupViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_done_closes_setup_message(self):
+        author = SimpleNamespace(id=10)
+        view = RoleToolsSetupView(SimpleNamespace(), author)
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(defer=AsyncMock()),
+            message=SimpleNamespace(delete=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+        await view.done.callback(interaction)
+
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.message.delete.assert_awaited_once_with()
+        interaction.edit_original_response.assert_not_awaited()
 
 
 class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
