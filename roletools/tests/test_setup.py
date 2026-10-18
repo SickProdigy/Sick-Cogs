@@ -152,11 +152,13 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
             me=SimpleNamespace(top_role=object()),
         )
 
-        first = await CatalogEditorView.create(
-            cog, guild, SimpleNamespace(id=10), restricted=False
+        author = SimpleNamespace(id=10)
+        first = CatalogEditorView(
+            cog, author, restricted=False, add_roles=roles, remove_roles=roles
         )
-        second = await CatalogEditorView.create(
-            cog, guild, SimpleNamespace(id=10), restricted=False, add_page=1
+        second = CatalogEditorView(
+            cog, author, restricted=False, add_roles=roles, remove_roles=roles,
+            add_page=1, remove_page=1,
         )
 
         first_add = next(
@@ -167,9 +169,26 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
             item for item in second.children
             if getattr(item, "placeholder", "").startswith("Add")
         )
+        first_remove = next(
+            item for item in first.children
+            if getattr(item, "placeholder", "").startswith("Remove")
+        )
+        second_remove = next(
+            item for item in second.children
+            if getattr(item, "placeholder", "").startswith("Remove")
+        )
         self.assertEqual(len(first_add.options), 25)
         self.assertEqual([option.label for option in second_add.options], ["Role 26", "Role 27"])
-        self.assertFalse(first.next_add.disabled)
+        self.assertEqual([option.label for option in second_remove.options], ["Role 26", "Role 27"])
+        self.assertTrue(first_add.placeholder.endswith("(page 1 of 2)"))
+        self.assertTrue(second_add.placeholder.endswith("(page 2 of 2)"))
+        self.assertTrue(first_remove.placeholder.endswith("(page 1 of 2)"))
+        self.assertTrue(second_remove.placeholder.endswith("(page 2 of 2)"))
+        labels = {item.label for item in first.children if getattr(item, "label", None)}
+        self.assertIn("◀ Add page", labels)
+        self.assertIn("Add page ▶", labels)
+        self.assertIn("◀ Remove page", labels)
+        self.assertIn("Remove page ▶", labels)
 
     async def test_catalog_embed_sorts_configured_roles_case_insensitively(self):
         cog, _, _, _ = self.make_cog(basic=[3, 1, 2])
