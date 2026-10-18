@@ -65,29 +65,34 @@ class PickerPagingTests(unittest.TestCase):
 
 
 class ManagedRoleChannelTests(unittest.IsolatedAsyncioTestCase):
-    async def test_sync_reuses_slots_without_clearing_reactions(self):
+    async def test_sync_preserves_role_messages_and_creates_only_new_role(self):
         roles = {
             1: SimpleNamespace(id=1, mention="@Alpha"),
+            2: SimpleNamespace(id=2, mention="@Bravo"),
             3: SimpleNamespace(id=3, mention="@Charlie"),
         }
         channel = SimpleNamespace(id=99)
-        channel.send = AsyncMock()
-        messages = []
+        old_messages = {}
         for message_id in (10, 11):
-            message = SimpleNamespace(id=message_id, channel=channel)
+            message = SimpleNamespace(id=message_id, channel=channel, reactions=[])
             message.edit = AsyncMock()
             message.add_reaction = AsyncMock()
-            message.clear_reactions = AsyncMock()
             message.clear_reaction = AsyncMock()
-            message.reactions = []
-            messages.append(message)
-        channel.fetch_message = AsyncMock(side_effect=messages)
+            message.delete = AsyncMock()
+            old_messages[message_id] = message
+        new_message = SimpleNamespace(id=12, channel=channel, reactions=[])
+        new_message.edit = AsyncMock()
+        new_message.add_reaction = AsyncMock()
+        new_message.clear_reaction = AsyncMock()
+        new_message.delete = AsyncMock()
+        channel.send = AsyncMock(return_value=new_message)
+        channel.fetch_message = AsyncMock(side_effect=lambda message_id: old_messages[message_id])
         guild = SimpleNamespace(
             id=42,
             get_channel=lambda channel_id: channel if channel_id == 99 else None,
             get_role=lambda role_id: roles.get(role_id),
         )
-        reaction_roles = AsyncMock(return_value={"99-10-👍": 1, "99-11-👍": 2})
+        reaction_roles = AsyncMock(return_value={"99-10-👍": 1, "99-11-👍": 3})
         pickers = AsyncMock(return_value={})
         pickers.set = AsyncMock()
         guild_config = SimpleNamespace(reaction_roles=reaction_roles, pickers=pickers)
@@ -95,24 +100,23 @@ class ManagedRoleChannelTests(unittest.IsolatedAsyncioTestCase):
         cog.config = SimpleNamespace(guild=MagicMock(return_value=guild_config))
         cog.settings = {}
         cog._replace_role_channel_mappings = AsyncMock()
-        cog._notify_role_channel_reorder = AsyncMock()
         data = {
             "channel_id": 99,
             "message_id": 10,
-            "role_ids": [1, 3],
+            "role_ids": [1, 2, 3],
             "role_channel_message_ids": [10, 11],
         }
 
         synced = await cog.sync_role_channel(guild, "_selfroles", data)
 
         self.assertTrue(synced)
-        self.assertEqual(data["role_channel_message_ids"], [10, 11])
-        for message in messages:
-            message.clear_reactions.assert_not_awaited()
-            message.add_reaction.assert_awaited_once_with("👍")
-        self.assertIn("@Alpha", messages[0].edit.await_args.kwargs["content"])
-        self.assertIn("@Charlie", messages[1].edit.await_args.kwargs["content"])
-        cog._notify_role_channel_reorder.assert_awaited_once_with(guild, 1)
+        self.assertEqual(data["role_channel_message_ids"], [10, 12, 11])
+        channel.send.assert_awaited_once()
+        self.assertIn("@Bravo", channel.send.await_args.args[0])
+        self.assertIn("@Alpha", old_messages[10].edit.await_args.kwargs["content"])
+        self.assertIn("@Charlie", old_messages[11].edit.await_args.kwargs["content"])
+        old_messages[10].delete.assert_not_awaited()
+        old_messages[11].delete.assert_not_awaited()
 
     async def test_sync_removes_old_combined_controls_but_keeps_thumb(self):
         role = SimpleNamespace(id=1, mention="@Alpha")
