@@ -96,8 +96,12 @@ class CatalogEditorView(discord.ui.View):
             self.add_item(discord.ui.Button(
                 label="No configured roles to remove", disabled=True, row=1
             ))
-        self.previous_add.disabled = self.next_add.disabled = self.add_pages == 1
-        self.previous_remove.disabled = self.next_remove.disabled = self.remove_pages == 1
+        if self.add_pages == 1:
+            self.remove_item(self.previous_add)
+            self.remove_item(self.next_add)
+        if self.remove_pages == 1:
+            self.remove_item(self.previous_remove)
+            self.remove_item(self.next_remove)
 
     @classmethod
     async def create(cls, cog, guild: discord.Guild, author: discord.Member, *, restricted: bool,
@@ -1111,6 +1115,12 @@ class RoleToolsSetup(RoleToolsMixin):
         data.setdefault("role_channel_message_ids", [])
         return pickers, data
 
+    async def ordinary_catalog_ids(self, guild: discord.Guild) -> List[int]:
+        role_ids = list(dict.fromkeys(await self.admin_selfrole_ids(guild)))
+        role_ids = [role_id for role_id in role_ids if guild.get_role(role_id) is not None]
+        role_ids.sort(key=lambda role_id: guild.get_role(role_id).name.casefold())
+        return role_ids
+
     async def combined_catalog_ids(self, guild: discord.Guild) -> List[int]:
         combined = list(dict.fromkeys(
             await self.admin_selfrole_ids(guild) + await self.restricted_role_ids(guild)
@@ -1135,7 +1145,7 @@ class RoleToolsSetup(RoleToolsMixin):
     async def named_role_menus(self, guild: discord.Guild):
         pickers = await self.config.guild(guild).pickers()
         if SETUP_PICKER_NAME in pickers:
-            pickers[SETUP_PICKER_NAME].setdefault("display_name", "All roles (default)")
+            pickers[SETUP_PICKER_NAME]["display_name"] = "All self-roles (default)"
         return sorted(
             pickers.items(),
             key=lambda item: (item[0] != SETUP_PICKER_NAME, (item[1].get("display_name") or item[0]).lower()),
@@ -1431,7 +1441,7 @@ class RoleToolsSetup(RoleToolsMixin):
         published = f"<#{data.get('channel_id')}>" if is_published else "Not published"
         state = "Archived" if data.get("archived") else ("Published" if is_published else "Draft")
         embed = discord.Embed(
-            title=data.get("display_name") or ("All roles (default)" if name == SETUP_PICKER_NAME else "Saved role menu"),
+            title=("All self-roles (default)" if name == SETUP_PICKER_NAME else data.get("display_name") or "Saved role menu"),
             description=listing,
             color=discord.Color.blurple(),
         )
@@ -1442,7 +1452,7 @@ class RoleToolsSetup(RoleToolsMixin):
         embed.add_field(name="Destination", value=published)
         embed.add_field(name="Last sync", value=data.get("last_synced_at") or "Never")
         embed.set_footer(text=(
-            "This default menu always follows the complete Self-role and Advanced-role lists."
+            "This default menu always follows the ordinary Red self-role list."
             if name == SETUP_PICKER_NAME else
             "This menu uses a selected subset of the Self-role and Advanced-role lists."
         ))
@@ -1456,7 +1466,7 @@ class RoleToolsSetup(RoleToolsMixin):
         lines = []
         for name, data in page_menus:
             display_name = data.get("display_name") or (
-                "All roles (default)" if name == SETUP_PICKER_NAME else name
+                "All self-roles (default)" if name == SETUP_PICKER_NAME else name
             )
             is_published = bool(self.managed_message_ids(data))
             state = "Archived" if data.get("archived") else (
@@ -1469,8 +1479,8 @@ class RoleToolsSetup(RoleToolsMixin):
                 f"{'s' if role_count != 1 else ''} · {self.layout_name(data.get('layout'))} · {destination}"
             )
         description = (
-            "Select a menu below to edit it. The default All roles menu follows both role lists "
-            "automatically.\n\n" + ("\n".join(lines) if lines else "No saved role menus yet.")
+            "Select a menu below to edit it. The default All self-roles menu follows the ordinary "
+            "Red self-role list automatically.\n\n" + ("\n".join(lines) if lines else "No saved role menus yet.")
         )
         embed = discord.Embed(
             title="Manage role menus", description=description[:4096], color=discord.Color.blurple()
@@ -1494,7 +1504,7 @@ class RoleToolsSetup(RoleToolsMixin):
             if role is not None:
                 await self.config.role(role).selfassignable.set(True)
                 await self.config.role(role).selfremovable.set(True)
-        data["role_ids"] = await self.combined_catalog_ids(guild)
+        data["role_ids"] = await self.ordinary_catalog_ids(guild)
         pickers[SETUP_PICKER_NAME] = data
         await self.config.guild(guild).pickers.set(pickers)
         if guild.id in self.settings:
@@ -1578,7 +1588,7 @@ class RoleToolsSetup(RoleToolsMixin):
             ),
             color=discord.Color.blurple(),
         )
-        embed.add_field(name="Self-role library", value=str(len(set(basic + restricted))))
+        embed.add_field(name="Ordinary self-roles", value=str(len(set(basic))))
         embed.add_field(
             name="Advanced roles",
             value=(
@@ -1607,7 +1617,7 @@ class RoleToolsSetup(RoleToolsMixin):
         shop_state = (f"{len(shop.get('role_ids', []))} offer(s) · <#{shop['channel_id']}>"
                       if shop.get("message_id") else f"{len(shop.get('role_ids', []))} offer(s) · Not published")
         embed.add_field(name="Role shop", value=shop_state, inline=False)
-        embed.add_field(name="Quick all-role menu", value=published, inline=False)
+        embed.add_field(name="Quick self-role menu", value=published, inline=False)
         embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Button Role Menu"))
         if unsafe:
             embed.add_field(
@@ -1647,7 +1657,7 @@ class RoleToolsSetup(RoleToolsMixin):
         if data.get("archived"):
             return False, "Restore this archived menu before publishing it."
         if name == SETUP_PICKER_NAME:
-            data["role_ids"] = await self.combined_catalog_ids(guild)
+            data["role_ids"] = await self.ordinary_catalog_ids(guild)
         if name != SETUP_PICKER_NAME and not data.get("role_ids"):
             return False, "Add at least one shared-catalog role before publishing this menu."
         if layout == "dropdown":

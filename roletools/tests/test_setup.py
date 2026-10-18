@@ -104,6 +104,8 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([option.label for option in add_select.options], ["Alpha", "zebra"])
         self.assertEqual([option.value for option in add_select.options], ["1", "3"])
         self.assertEqual([option.label for option in remove_select.options], ["Already added"])
+        labels = {item.label for item in view.children if getattr(item, "label", None)}
+        self.assertEqual(labels, {"Done"})
 
     async def test_catalog_selection_updates_existing_ephemeral_card(self):
         role = FakeRole(1, "Minecraft")
@@ -182,6 +184,20 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(embed.description.index("Alpha"), embed.description.index("middle"))
         self.assertLess(embed.description.index("middle"), embed.description.index("zebra"))
 
+    async def test_default_catalog_contains_only_ordinary_selfroles(self):
+        cog, _, _, _ = self.make_cog(basic=[3, 1], restricted=[2])
+        roles = {
+            1: FakeRole(1, "Alpha"),
+            2: FakeRole(2, "Advanced"),
+            3: FakeRole(3, "zebra"),
+        }
+        guild = SimpleNamespace(get_role=roles.get)
+
+        role_ids = await cog.ordinary_catalog_ids(guild)
+
+        self.assertEqual(role_ids, [1, 3])
+        self.assertNotIn(2, role_ids)
+
     async def test_catalog_refresh_does_not_implicitly_sync_published_menu(self):
         picker_value = AsyncMock()
         picker_value.set = AsyncMock()
@@ -190,7 +206,7 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
             {}, {"message_id": 99, "role_ids": []}
         ))
         cog.admin_selfrole_ids = AsyncMock(return_value=[])
-        cog.combined_catalog_ids = AsyncMock(return_value=[1])
+        cog.ordinary_catalog_ids = AsyncMock(return_value=[1])
         cog.sync_picker = AsyncMock()
         cog.config = SimpleNamespace(
             guild=MagicMock(return_value=SimpleNamespace(pickers=picker_value))
@@ -317,7 +333,7 @@ class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
         embed = cog.role_menu_manager_embed(menus)
 
         self.assertEqual(labels, {"Create role menu"})
-        self.assertIn("**All roles (default)**", embed.description)
+        self.assertIn("**All self-roles (default)**", embed.description)
         self.assertIn("**Games**", embed.description)
         self.assertIn("Published · 3 roles · Managed Reaction Channel · <#10>", embed.description)
         self.assertNotIn("Search", embed.description)
