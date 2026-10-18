@@ -524,37 +524,40 @@ class RoleToolsPicker(RoleToolsMixin):
             int(role_id) for role_id in data.get("role_ids", [])
             if guild.get_role(int(role_id)) is not None
         ]
-        old_ids = list(data.get("role_channel_message_ids", []))
+        old_ids = [int(message_id) for message_id in data.get("role_channel_message_ids", [])]
         if not old_ids and data.get("message_id"):
             old_ids = [int(data["message_id"])]
         current = dict(await self.config.guild(guild).reaction_roles())
         emoji = shared_reaction_emoji(data)
         emoji_key = reaction_emoji_key(emoji)
-        old_roles = {}
+        role_messages = {}
         for key, role_id in current.items():
             try:
                 key_channel, key_message, _ = key.split("-", 2)
             except ValueError:
                 continue
-            if int(key_channel) == channel.id and int(key_message) in {int(mid) for mid in old_ids}:
-                old_roles[int(key_message)] = int(role_id)
+            message_id = int(key_message)
+            if int(key_channel) == channel.id and message_id in old_ids:
+                role_messages.setdefault(int(role_id), message_id)
         messages = []
-        changed = 0
+        retained_ids = set()
         try:
-            for position, role_id in enumerate(role_ids):
+            for role_id in role_ids:
                 role = guild.get_role(role_id)
                 message = None
-                if position < len(old_ids):
+                message_id = role_messages.get(role_id)
+                if message_id is not None:
                     try:
-                        message = await channel.fetch_message(int(old_ids[position]))
+                        message = await channel.fetch_message(message_id)
                     except discord.NotFound:
                         pass
                 content = f"{role.mention} — React with {emoji} to join!"
                 if message is None:
-                    message = await channel.send(content, allowed_mentions=discord.AllowedMentions.none())
+                    message = await channel.send(
+                        content, allowed_mentions=discord.AllowedMentions.none()
+                    )
                 else:
-                    if old_roles.get(message.id) not in {None, role_id}:
-                        changed += 1
+                    retained_ids.add(message.id)
                     await message.edit(
                         content=content, embed=None, view=None,
                         allowed_mentions=discord.AllowedMentions.none(),
@@ -564,9 +567,11 @@ class RoleToolsPicker(RoleToolsMixin):
                             await message.clear_reaction(reaction.emoji)
                 await message.add_reaction(reaction_emoji_value(emoji))
                 messages.append((message, role_id, emoji))
-            for message_id in old_ids[len(role_ids):]:
+            for message_id in old_ids:
+                if message_id in retained_ids:
+                    continue
                 try:
-                    await (await channel.fetch_message(int(message_id))).delete()
+                    await (await channel.fetch_message(message_id)).delete()
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     pass
             await self._replace_role_channel_mappings(guild, old_ids, messages)
@@ -578,7 +583,6 @@ class RoleToolsPicker(RoleToolsMixin):
             await self.config.guild(guild).pickers.set(pickers)
             if guild.id in self.settings:
                 self.settings[guild.id]["pickers"] = pickers
-            await self._notify_role_channel_reorder(guild, changed)
         except (discord.Forbidden, discord.HTTPException):
             log.exception("Could not synchronize managed role channel %s in guild %s", name, guild.id)
             return False

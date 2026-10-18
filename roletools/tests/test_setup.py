@@ -182,6 +182,28 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(embed.description.index("Alpha"), embed.description.index("middle"))
         self.assertLess(embed.description.index("middle"), embed.description.index("zebra"))
 
+    async def test_catalog_refresh_does_not_implicitly_sync_published_menu(self):
+        picker_value = AsyncMock()
+        picker_value.set = AsyncMock()
+        cog = object.__new__(RoleTools)
+        cog.ensure_setup_picker = AsyncMock(return_value=(
+            {}, {"message_id": 99, "role_ids": []}
+        ))
+        cog.admin_selfrole_ids = AsyncMock(return_value=[])
+        cog.combined_catalog_ids = AsyncMock(return_value=[1])
+        cog.sync_picker = AsyncMock()
+        cog.config = SimpleNamespace(
+            guild=MagicMock(return_value=SimpleNamespace(pickers=picker_value))
+        )
+        cog.settings = {}
+        guild = SimpleNamespace(id=42)
+
+        synced = await cog.refresh_setup_picker(guild)
+
+        self.assertFalse(synced)
+        self.assertEqual(picker_value.set.await_args.args[0]["_selfroles"]["role_ids"], [1])
+        cog.sync_picker.assert_not_awaited()
+
     async def test_publish_resolves_selected_channel_and_rejects_missing_target(self):
         cog = object.__new__(RoleTools)
         selected = SimpleNamespace(id=123)

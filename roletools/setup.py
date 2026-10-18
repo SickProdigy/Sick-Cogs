@@ -1499,8 +1499,8 @@ class RoleToolsSetup(RoleToolsMixin):
         await self.config.guild(guild).pickers.set(pickers)
         if guild.id in self.settings:
             self.settings[guild.id]["pickers"] = pickers
-        if data.get("message_id"):
-            return await self.sync_picker(guild, SETUP_PICKER_NAME, data)
+        # Catalog changes stay private until an administrator explicitly uses
+        # Publish / Move or Sync from the role-menu manager.
         return False
 
     async def update_role_catalog(
@@ -1616,7 +1616,12 @@ class RoleToolsSetup(RoleToolsMixin):
                        + ", ".join(unsafe[:10])),
                 inline=False,
             )
-        embed.set_footer(text="Select roles in batches of up to 25; reopen a selector for additional roles.")
+        embed.set_footer(
+            text=(
+                "Select roles in batches of up to 25. Published menus change only when you "
+                "choose Sync or Publish / Move."
+            )
+        )
         return embed
 
     @commands.Cog.listener()
