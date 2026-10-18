@@ -24,9 +24,12 @@ ADVANCED_KEYS = ("cost", "duration", "required", "exclusive_to", "inclusive_with
 class CatalogRoleSelect(discord.ui.Select):
     def __init__(self, parent: "CatalogEditorView", roles: List[discord.Role], *, add: bool):
         action = "Add" if add else "Remove"
+        page = parent.add_page if add else parent.remove_page
+        pages = parent.add_pages if add else parent.remove_pages
+        page_label = f" (page {page + 1} of {pages})" if pages > 1 else ""
         options = [discord.SelectOption(label=role.name[:100], value=str(role.id)) for role in roles]
         super().__init__(
-            placeholder=f"{action} {parent.catalog_name.lower()} roles",
+            placeholder=f"{action} {parent.catalog_name.lower()} roles{page_label}",
             min_values=1,
             max_values=len(options),
             options=options,
@@ -138,19 +141,19 @@ class CatalogEditorView(discord.ui.View):
             view=refreshed,
         )
 
-    @discord.ui.button(label="◀ Add", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="◀ Add page", style=discord.ButtonStyle.secondary, row=2)
     async def previous_add(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.refresh_page(interaction, add_delta=-1)
 
-    @discord.ui.button(label="Add ▶", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="Add page ▶", style=discord.ButtonStyle.secondary, row=2)
     async def next_add(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.refresh_page(interaction, add_delta=1)
 
-    @discord.ui.button(label="◀ Remove", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="◀ Remove page", style=discord.ButtonStyle.secondary, row=2)
     async def previous_remove(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.refresh_page(interaction, remove_delta=-1)
 
-    @discord.ui.button(label="Remove ▶", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="Remove page ▶", style=discord.ButtonStyle.secondary, row=2)
     async def next_remove(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.refresh_page(interaction, remove_delta=1)
 
