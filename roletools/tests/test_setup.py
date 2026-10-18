@@ -3,7 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from roletools.roletools import RoleTools
-from roletools.setup import NamedMenuEditorView, NamedMenuManagerView
+from roletools.setup import (CatalogEditorView, NamedMenuEditorView, NamedMenuManagerView,
+                             RoleToolsSetupView)
 
 
 class FakeRole:
@@ -17,6 +18,9 @@ class FakeRole:
 
     def __ge__(self, other):
         return False
+
+    def __lt__(self, other):
+        return True
 
 
 class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
@@ -81,6 +85,142 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         admin_selfroles.set.assert_awaited_once_with([])
         restricted.set.assert_awaited_once_with([])
 
+    async def test_catalog_editor_sorts_choices_and_excludes_configured_roles(self):
+        cog, _, _, _ = self.make_cog(basic=[2])
+        roles = [FakeRole(3, "zebra"), FakeRole(2, "Already added"), FakeRole(1, "Alpha")]
+        by_id = {role.id: role for role in roles}
+        guild = SimpleNamespace(
+            roles=roles,
+            get_role=by_id.get,
+            me=SimpleNamespace(top_role=object()),
+        )
+
+        view = await CatalogEditorView.create(
+            cog, guild, SimpleNamespace(id=10), restricted=False
+        )
+
+        selects = [item for item in view.children if hasattr(item, "options")]
+        add_select = next(item for item in selects if item.placeholder.startswith("Add"))
+        remove_select = next(item for item in selects if item.placeholder.startswith("Remove"))
+        self.assertEqual([option.label for option in add_select.options], ["Alpha", "zebra"])
+        self.assertEqual([option.value for option in add_select.options], ["1", "3"])
+        self.assertEqual([option.label for option in remove_select.options], ["Already added"])
+        labels = {item.label for item in view.children if getattr(item, "label", None)}
+        self.assertEqual(labels, {"Done"})
+
+    async def test_catalog_selection_updates_existing_ephemeral_card(self):
+        role = FakeRole(1, "Minecraft")
+        cog = SimpleNamespace(
+            update_role_catalog=AsyncMock(return_value=(1, [])),
+            refresh_setup_picker=AsyncMock(),
+            admin_selfrole_ids=AsyncMock(return_value=[1]),
+            restricted_role_ids=AsyncMock(return_value=[]),
+            catalog_embed=AsyncMock(return_value=MagicMock()),
+        )
+        guild = SimpleNamespace(
+            roles=[role],
+            get_role=lambda role_id: role if role_id == 1 else None,
+            me=SimpleNamespace(top_role=object()),
+        )
+        author = SimpleNamespace(id=10)
+        view = CatalogEditorView(
+            cog, author, restricted=False, add_roles=[role], remove_roles=[]
+        )
+        selector = next(
+            item for item in view.children
+            if getattr(item, "placeholder", "").startswith("Add")
+        )
+        selector._values = ["1"]
+        interaction = SimpleNamespace(
+            guild=guild,
+            user=author,
+            response=SimpleNamespace(defer=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+        await selector.callback(interaction)
+
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.edit_original_response.assert_awaited_once()
+
+    async def test_catalog_editor_paginates_large_available_role_list(self):
+        cog, _, _, _ = self.make_cog()
+        roles = [FakeRole(index, f"Role {index:02d}") for index in range(1, 28)]
+        guild = SimpleNamespace(
+            roles=list(reversed(roles)),
+            get_role=lambda role_id: None,
+            me=SimpleNamespace(top_role=object()),
+        )
+
+        first = await CatalogEditorView.create(
+            cog, guild, SimpleNamespace(id=10), restricted=False
+        )
+        second = await CatalogEditorView.create(
+            cog, guild, SimpleNamespace(id=10), restricted=False, add_page=1
+        )
+
+        first_add = next(
+            item for item in first.children
+            if getattr(item, "placeholder", "").startswith("Add")
+        )
+        second_add = next(
+            item for item in second.children
+            if getattr(item, "placeholder", "").startswith("Add")
+        )
+        self.assertEqual(len(first_add.options), 25)
+        self.assertEqual([option.label for option in second_add.options], ["Role 26", "Role 27"])
+        self.assertFalse(first.next_add.disabled)
+
+    async def test_catalog_embed_sorts_configured_roles_case_insensitively(self):
+        cog, _, _, _ = self.make_cog(basic=[3, 1, 2])
+        roles = {
+            1: FakeRole(1, "Alpha"),
+            2: FakeRole(2, "middle"),
+            3: FakeRole(3, "zebra"),
+        }
+        guild = SimpleNamespace(get_role=roles.get)
+
+        embed = await cog.catalog_embed(guild, restricted=False)
+
+        self.assertLess(embed.description.index("Alpha"), embed.description.index("middle"))
+        self.assertLess(embed.description.index("middle"), embed.description.index("zebra"))
+
+    async def test_default_catalog_contains_only_ordinary_selfroles(self):
+        cog, _, _, _ = self.make_cog(basic=[3, 1], restricted=[2])
+        roles = {
+            1: FakeRole(1, "Alpha"),
+            2: FakeRole(2, "Advanced"),
+            3: FakeRole(3, "zebra"),
+        }
+        guild = SimpleNamespace(get_role=roles.get)
+
+        role_ids = await cog.ordinary_catalog_ids(guild)
+
+        self.assertEqual(role_ids, [1, 3])
+        self.assertNotIn(2, role_ids)
+
+    async def test_catalog_refresh_does_not_implicitly_sync_published_menu(self):
+        picker_value = AsyncMock()
+        picker_value.set = AsyncMock()
+        cog = object.__new__(RoleTools)
+        cog.ensure_setup_picker = AsyncMock(return_value=(
+            {}, {"message_id": 99, "role_ids": []}
+        ))
+        cog.admin_selfrole_ids = AsyncMock(return_value=[])
+        cog.ordinary_catalog_ids = AsyncMock(return_value=[1])
+        cog.sync_picker = AsyncMock()
+        cog.config = SimpleNamespace(
+            guild=MagicMock(return_value=SimpleNamespace(pickers=picker_value))
+        )
+        cog.settings = {}
+        guild = SimpleNamespace(id=42)
+
+        synced = await cog.refresh_setup_picker(guild)
+
+        self.assertFalse(synced)
+        self.assertEqual(picker_value.set.await_args.args[0]["_selfroles"]["role_ids"], [1])
+        cog.sync_picker.assert_not_awaited()
+
     async def test_publish_resolves_selected_channel_and_rejects_missing_target(self):
         cog = object.__new__(RoleTools)
         selected = SimpleNamespace(id=123)
@@ -102,6 +242,23 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(changed, 1)
         admin_selfroles.set.assert_awaited_once_with([])
         restricted.set.assert_awaited_once_with([2])
+
+
+class SetupViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_done_closes_setup_message(self):
+        author = SimpleNamespace(id=10)
+        view = RoleToolsSetupView(SimpleNamespace(), author)
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(defer=AsyncMock()),
+            message=SimpleNamespace(delete=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+        await view.done.callback(interaction)
+
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.message.delete.assert_awaited_once_with()
+        interaction.edit_original_response.assert_not_awaited()
 
 
 class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
@@ -194,7 +351,7 @@ class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
         embed = cog.role_menu_manager_embed(menus)
 
         self.assertEqual(labels, {"Create role menu"})
-        self.assertIn("**All roles (default)**", embed.description)
+        self.assertIn("**All self-roles (default)**", embed.description)
         self.assertIn("**Games**", embed.description)
         self.assertIn("Published · 3 roles · Managed Reaction Channel · <#10>", embed.description)
         self.assertNotIn("Search", embed.description)

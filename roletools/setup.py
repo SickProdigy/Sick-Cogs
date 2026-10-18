@@ -21,31 +21,37 @@ SETUP_PICKER_NAME = "_selfroles"
 ADVANCED_KEYS = ("cost", "duration", "required", "exclusive_to", "inclusive_with")
 
 
-class CatalogRoleSelect(discord.ui.RoleSelect):
-    def __init__(self, parent: "CatalogEditorView", *, add: bool):
+class CatalogRoleSelect(discord.ui.Select):
+    def __init__(self, parent: "CatalogEditorView", roles: List[discord.Role], *, add: bool):
         action = "Add" if add else "Remove"
+        options = [discord.SelectOption(label=role.name[:100], value=str(role.id)) for role in roles]
         super().__init__(
             placeholder=f"{action} {parent.catalog_name.lower()} roles",
             min_values=1,
-            max_values=25,
+            max_values=len(options),
+            options=options,
             row=0 if add else 1,
         )
         self.parent_view = parent
         self.add = add
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()
+        roles = [interaction.guild.get_role(int(role_id)) for role_id in self.values]
         changed, notes = await self.parent_view.cog.update_role_catalog(
             interaction.guild,
-            list(self.values),
+            [role for role in roles if role is not None],
             restricted=self.parent_view.restricted,
             add=self.add,
         )
         await self.parent_view.cog.refresh_setup_picker(interaction.guild)
-        refreshed = CatalogEditorView(
+        refreshed = await CatalogEditorView.create(
             self.parent_view.cog,
+            interaction.guild,
             interaction.user,
             restricted=self.parent_view.restricted,
+            add_page=self.parent_view.add_page,
+            remove_page=self.parent_view.remove_page,
         )
         embed = await self.parent_view.cog.catalog_embed(
             interaction.guild, restricted=self.parent_view.restricted
@@ -59,16 +65,96 @@ class CatalogRoleSelect(discord.ui.RoleSelect):
 
 
 class CatalogEditorView(discord.ui.View):
-    def __init__(self, cog, author: discord.Member, *, restricted: bool):
+    PAGE_SIZE = 25
+
+    def __init__(self, cog, author: discord.Member, *, restricted: bool, add_roles, remove_roles,
+                 add_page: int = 0, remove_page: int = 0):
         super().__init__(timeout=600)
         self.cog = cog
         self.author = author
         self.restricted = restricted
         self.catalog_name = "Advanced RoleTools role" if restricted else "Ordinary Red self-role"
-        self.add_item(CatalogRoleSelect(self, add=True))
-        self.add_item(CatalogRoleSelect(self, add=False))
+        self.add_roles = add_roles
+        self.remove_roles = remove_roles
+        self.add_pages = max(1, (len(add_roles) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+        self.remove_pages = max(1, (len(remove_roles) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+        self.add_page = min(add_page, self.add_pages - 1)
+        self.remove_page = min(remove_page, self.remove_pages - 1)
+        add_slice = add_roles[self.add_page * self.PAGE_SIZE:(self.add_page + 1) * self.PAGE_SIZE]
+        remove_slice = remove_roles[
+            self.remove_page * self.PAGE_SIZE:(self.remove_page + 1) * self.PAGE_SIZE
+        ]
+        if add_slice:
+            self.add_item(CatalogRoleSelect(self, add_slice, add=True))
+        else:
+            self.add_item(discord.ui.Button(
+                label="No additional eligible roles", disabled=True, row=0
+            ))
+        if remove_slice:
+            self.add_item(CatalogRoleSelect(self, remove_slice, add=False))
+        else:
+            self.add_item(discord.ui.Button(
+                label="No configured roles to remove", disabled=True, row=1
+            ))
+        if self.add_pages == 1:
+            self.remove_item(self.previous_add)
+            self.remove_item(self.next_add)
+        if self.remove_pages == 1:
+            self.remove_item(self.previous_remove)
+            self.remove_item(self.next_remove)
 
-    @discord.ui.button(label="Done", style=discord.ButtonStyle.success, row=2)
+    @classmethod
+    async def create(cls, cog, guild: discord.Guild, author: discord.Member, *, restricted: bool,
+                     add_page: int = 0, remove_page: int = 0):
+        configured_ids = set(
+            await (cog.restricted_role_ids(guild) if restricted else cog.admin_selfrole_ids(guild))
+        )
+        remove_roles = [guild.get_role(role_id) for role_id in configured_ids]
+        remove_roles = sorted(
+            (role for role in remove_roles if role is not None),
+            key=lambda role: role.name.casefold(),
+        )
+        add_roles = sorted(
+            (
+                role for role in guild.roles
+                if role.id not in configured_ids and not role.is_default() and not role.managed
+                and role < guild.me.top_role
+            ),
+            key=lambda role: role.name.casefold(),
+        )
+        return cls(
+            cog, author, restricted=restricted, add_roles=add_roles, remove_roles=remove_roles,
+            add_page=add_page, remove_page=remove_page,
+        )
+
+    async def refresh_page(self, interaction: discord.Interaction, *, add_delta=0, remove_delta=0):
+        refreshed = await self.create(
+            self.cog, interaction.guild, interaction.user, restricted=self.restricted,
+            add_page=(self.add_page + add_delta) % self.add_pages,
+            remove_page=(self.remove_page + remove_delta) % self.remove_pages,
+        )
+        await interaction.response.edit_message(
+            embed=await self.cog.catalog_embed(interaction.guild, restricted=self.restricted),
+            view=refreshed,
+        )
+
+    @discord.ui.button(label="◀ Add", style=discord.ButtonStyle.secondary, row=2)
+    async def previous_add(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.refresh_page(interaction, add_delta=-1)
+
+    @discord.ui.button(label="Add ▶", style=discord.ButtonStyle.secondary, row=2)
+    async def next_add(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.refresh_page(interaction, add_delta=1)
+
+    @discord.ui.button(label="◀ Remove", style=discord.ButtonStyle.secondary, row=2)
+    async def previous_remove(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.refresh_page(interaction, remove_delta=-1)
+
+    @discord.ui.button(label="Remove ▶", style=discord.ButtonStyle.secondary, row=2)
+    async def next_remove(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.refresh_page(interaction, remove_delta=1)
+
+    @discord.ui.button(label="Done", style=discord.ButtonStyle.success, row=3)
     async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(
             content="Role catalog changes saved.", embed=None, view=None
@@ -76,7 +162,9 @@ class CatalogEditorView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
-            await interaction.response.send_message("Open your own RoleTools setup card.", ephemeral=True)
+            await interaction.response.send_message(
+                "Open your own RoleTools setup card.", ephemeral=True
+            )
             return False
         return True
 
@@ -228,14 +316,20 @@ class SelfRoleLibraryView(discord.ui.View):
     async def ordinary(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             embed=await self.cog.catalog_embed(interaction.guild, restricted=False),
-            view=CatalogEditorView(self.cog, interaction.user, restricted=False), ephemeral=True,
+            view=await CatalogEditorView.create(
+                self.cog, interaction.guild, interaction.user, restricted=False
+            ),
+            ephemeral=True,
         )
 
     @discord.ui.button(label="Advanced roles (Bank/rules)", style=discord.ButtonStyle.secondary)
     async def protected(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             embed=await self.cog.catalog_embed(interaction.guild, restricted=True),
-            view=CatalogEditorView(self.cog, interaction.user, restricted=True), ephemeral=True,
+            view=await CatalogEditorView.create(
+                self.cog, interaction.guild, interaction.user, restricted=True
+            ),
+            ephemeral=True,
         )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -504,14 +598,20 @@ class RoleToolsSetupView(discord.ui.View):
     async def basic_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             embed=await self.cog.catalog_embed(interaction.guild, restricted=False),
-            view=CatalogEditorView(self.cog, interaction.user, restricted=False), ephemeral=True,
+            view=await CatalogEditorView.create(
+                self.cog, interaction.guild, interaction.user, restricted=False
+            ),
+            ephemeral=True,
         )
 
     @discord.ui.button(label="Advanced roles (Bank/rules)", style=discord.ButtonStyle.secondary, row=0)
     async def advanced_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             embed=await self.cog.catalog_embed(interaction.guild, restricted=True),
-            view=CatalogEditorView(self.cog, interaction.user, restricted=True), ephemeral=True,
+            view=await CatalogEditorView.create(
+                self.cog, interaction.guild, interaction.user, restricted=True
+            ),
+            ephemeral=True,
         )
 
     @discord.ui.button(label="Manage role menus", style=discord.ButtonStyle.success, row=1)
@@ -544,6 +644,14 @@ class RoleToolsSetupView(discord.ui.View):
             embed=await self.cog.shop_manager_embed(interaction.guild),
             view=RoleShopManagerView(self.cog, interaction.user), ephemeral=True,
         )
+
+    @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary, row=2)
+    async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        try:
+            await interaction.message.delete()
+        except discord.HTTPException:
+            await interaction.edit_original_response(view=None)
 
 
 class NamedMenuCreateModal(discord.ui.Modal):
@@ -1015,6 +1123,12 @@ class RoleToolsSetup(RoleToolsMixin):
         data.setdefault("role_channel_message_ids", [])
         return pickers, data
 
+    async def ordinary_catalog_ids(self, guild: discord.Guild) -> List[int]:
+        role_ids = list(dict.fromkeys(await self.admin_selfrole_ids(guild)))
+        role_ids = [role_id for role_id in role_ids if guild.get_role(role_id) is not None]
+        role_ids.sort(key=lambda role_id: guild.get_role(role_id).name.casefold())
+        return role_ids
+
     async def combined_catalog_ids(self, guild: discord.Guild) -> List[int]:
         combined = list(dict.fromkeys(
             await self.admin_selfrole_ids(guild) + await self.restricted_role_ids(guild)
@@ -1039,7 +1153,7 @@ class RoleToolsSetup(RoleToolsMixin):
     async def named_role_menus(self, guild: discord.Guild):
         pickers = await self.config.guild(guild).pickers()
         if SETUP_PICKER_NAME in pickers:
-            pickers[SETUP_PICKER_NAME].setdefault("display_name", "All roles (default)")
+            pickers[SETUP_PICKER_NAME]["display_name"] = "All self-roles (default)"
         return sorted(
             pickers.items(),
             key=lambda item: (item[0] != SETUP_PICKER_NAME, (item[1].get("display_name") or item[0]).lower()),
@@ -1335,7 +1449,7 @@ class RoleToolsSetup(RoleToolsMixin):
         published = f"<#{data.get('channel_id')}>" if is_published else "Not published"
         state = "Archived" if data.get("archived") else ("Published" if is_published else "Draft")
         embed = discord.Embed(
-            title=data.get("display_name") or ("All roles (default)" if name == SETUP_PICKER_NAME else "Saved role menu"),
+            title=("All self-roles (default)" if name == SETUP_PICKER_NAME else data.get("display_name") or "Saved role menu"),
             description=listing,
             color=discord.Color.blurple(),
         )
@@ -1346,7 +1460,7 @@ class RoleToolsSetup(RoleToolsMixin):
         embed.add_field(name="Destination", value=published)
         embed.add_field(name="Last sync", value=data.get("last_synced_at") or "Never")
         embed.set_footer(text=(
-            "This default menu always follows the complete Self-role and Advanced-role lists."
+            "This default menu always follows the ordinary Red self-role list."
             if name == SETUP_PICKER_NAME else
             "This menu uses a selected subset of the Self-role and Advanced-role lists."
         ))
@@ -1360,7 +1474,7 @@ class RoleToolsSetup(RoleToolsMixin):
         lines = []
         for name, data in page_menus:
             display_name = data.get("display_name") or (
-                "All roles (default)" if name == SETUP_PICKER_NAME else name
+                "All self-roles (default)" if name == SETUP_PICKER_NAME else name
             )
             is_published = bool(self.managed_message_ids(data))
             state = "Archived" if data.get("archived") else (
@@ -1373,8 +1487,8 @@ class RoleToolsSetup(RoleToolsMixin):
                 f"{'s' if role_count != 1 else ''} · {self.layout_name(data.get('layout'))} · {destination}"
             )
         description = (
-            "Select a menu below to edit it. The default All roles menu follows both role lists "
-            "automatically.\n\n" + ("\n".join(lines) if lines else "No saved role menus yet.")
+            "Select a menu below to edit it. The default All self-roles menu follows the ordinary "
+            "Red self-role list automatically.\n\n" + ("\n".join(lines) if lines else "No saved role menus yet.")
         )
         embed = discord.Embed(
             title="Manage role menus", description=description[:4096], color=discord.Color.blurple()
@@ -1398,13 +1512,13 @@ class RoleToolsSetup(RoleToolsMixin):
             if role is not None:
                 await self.config.role(role).selfassignable.set(True)
                 await self.config.role(role).selfremovable.set(True)
-        data["role_ids"] = await self.combined_catalog_ids(guild)
+        data["role_ids"] = await self.ordinary_catalog_ids(guild)
         pickers[SETUP_PICKER_NAME] = data
         await self.config.guild(guild).pickers.set(pickers)
         if guild.id in self.settings:
             self.settings[guild.id]["pickers"] = pickers
-        if data.get("message_id"):
-            return await self.sync_picker(guild, SETUP_PICKER_NAME, data)
+        # Catalog changes stay private until an administrator explicitly uses
+        # Publish / Move or Sync from the role-menu manager.
         return False
 
     async def update_role_catalog(
@@ -1451,7 +1565,10 @@ class RoleToolsSetup(RoleToolsMixin):
     async def catalog_embed(self, guild: discord.Guild, *, restricted: bool) -> discord.Embed:
         role_ids = await (self.restricted_role_ids(guild) if restricted else self.admin_selfrole_ids(guild))
         roles = [guild.get_role(role_id) for role_id in role_ids]
-        roles = [role for role in roles if role is not None]
+        roles = sorted(
+            (role for role in roles if role is not None),
+            key=lambda role: role.name.casefold(),
+        )
         title = "Advanced roles — Bank and access rules" if restricted else "Ordinary self-roles"
         explanation = (
             "These roles are assigned only through RoleTools. Use them for Red bank costs, temporary or expiring access, required roles, and conflicting roles so ordinary `selfrole` cannot bypass the rules."
@@ -1479,7 +1596,7 @@ class RoleToolsSetup(RoleToolsMixin):
             ),
             color=discord.Color.blurple(),
         )
-        embed.add_field(name="Self-role library", value=str(len(set(basic + restricted))))
+        embed.add_field(name="Ordinary self-roles", value=str(len(set(basic))))
         embed.add_field(
             name="Advanced roles",
             value=(
@@ -1508,7 +1625,7 @@ class RoleToolsSetup(RoleToolsMixin):
         shop_state = (f"{len(shop.get('role_ids', []))} offer(s) · <#{shop['channel_id']}>"
                       if shop.get("message_id") else f"{len(shop.get('role_ids', []))} offer(s) · Not published")
         embed.add_field(name="Role shop", value=shop_state, inline=False)
-        embed.add_field(name="Quick all-role menu", value=published, inline=False)
+        embed.add_field(name="Quick self-role menu", value=published, inline=False)
         embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Button Role Menu"))
         if unsafe:
             embed.add_field(
@@ -1517,7 +1634,12 @@ class RoleToolsSetup(RoleToolsMixin):
                        + ", ".join(unsafe[:10])),
                 inline=False,
             )
-        embed.set_footer(text="Select roles in batches of up to 25; reopen a selector for additional roles.")
+        embed.set_footer(
+            text=(
+                "Select roles in batches of up to 25. Published menus change only when you "
+                "choose Sync or Publish / Move."
+            )
+        )
         return embed
 
     @commands.Cog.listener()
@@ -1543,7 +1665,7 @@ class RoleToolsSetup(RoleToolsMixin):
         if data.get("archived"):
             return False, "Restore this archived menu before publishing it."
         if name == SETUP_PICKER_NAME:
-            data["role_ids"] = await self.combined_catalog_ids(guild)
+            data["role_ids"] = await self.ordinary_catalog_ids(guild)
         if name != SETUP_PICKER_NAME and not data.get("role_ids"):
             return False, "Add at least one shared-catalog role before publishing this menu."
         if layout == "dropdown":
