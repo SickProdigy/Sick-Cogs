@@ -645,6 +645,14 @@ class RoleToolsSetupView(discord.ui.View):
             view=RoleShopManagerView(self.cog, interaction.user), ephemeral=True,
         )
 
+    @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary, row=2)
+    async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        try:
+            await interaction.message.delete()
+        except discord.HTTPException:
+            await interaction.edit_original_response(view=None)
+
 
 class NamedMenuCreateModal(discord.ui.Modal):
     def __init__(self, cog, author: discord.Member):
