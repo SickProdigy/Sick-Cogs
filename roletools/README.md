@@ -86,7 +86,7 @@ Run `[p]roletools setup` to open the manager-only GUI. The first card separates 
 
 ### Managed Role Menus
 
-The menu dashboard lists every saved menu with its layout and publication state. **All roles (default)** follows both role lists automatically. Managers can also create named menus containing smaller subsets, such as Games, Ranks, Platforms, Notifications, or VIP Roles.
+The menu dashboard lists every saved menu with its layout and publication state. **All self-roles (default)** follows the ordinary Red self-role list automatically. Advanced roles are included only in menus where a manager deliberately adds them. Managers can also create named menus containing smaller subsets, such as Games, Ranks, Platforms, Notifications, or VIP Roles.
 
 Selecting a menu shows its saved roles, current layout, and destination. From that editor a manager can:
 
