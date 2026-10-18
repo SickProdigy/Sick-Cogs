@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from roletools.roletools import RoleTools
-from roletools.setup import NamedMenuEditorView, NamedMenuManagerView
+from roletools.setup import CatalogEditorView, NamedMenuEditorView, NamedMenuManagerView
 
 
 class FakeRole:
@@ -17,6 +17,9 @@ class FakeRole:
 
     def __ge__(self, other):
         return False
+
+    def __lt__(self, other):
+        return True
 
 
 class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
@@ -80,6 +83,69 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Advanced roles", notes[0])
         admin_selfroles.set.assert_awaited_once_with([])
         restricted.set.assert_awaited_once_with([])
+
+    async def test_catalog_editor_sorts_choices_and_excludes_configured_roles(self):
+        cog, _, _, _ = self.make_cog(basic=[2])
+        roles = [FakeRole(3, "zebra"), FakeRole(2, "Already added"), FakeRole(1, "Alpha")]
+        by_id = {role.id: role for role in roles}
+        guild = SimpleNamespace(
+            roles=roles,
+            get_role=by_id.get,
+            me=SimpleNamespace(top_role=object()),
+        )
+
+        view = await CatalogEditorView.create(
+            cog, guild, SimpleNamespace(id=10), restricted=False
+        )
+
+        selects = [item for item in view.children if hasattr(item, "options")]
+        add_select = next(item for item in selects if item.placeholder.startswith("Add"))
+        remove_select = next(item for item in selects if item.placeholder.startswith("Remove"))
+        self.assertEqual([option.label for option in add_select.options], ["Alpha", "zebra"])
+        self.assertEqual([option.value for option in add_select.options], ["1", "3"])
+        self.assertEqual([option.label for option in remove_select.options], ["Already added"])
+
+    async def test_catalog_editor_paginates_large_available_role_list(self):
+        cog, _, _, _ = self.make_cog()
+        roles = [FakeRole(index, f"Role {index:02d}") for index in range(1, 28)]
+        guild = SimpleNamespace(
+            roles=list(reversed(roles)),
+            get_role=lambda role_id: None,
+            me=SimpleNamespace(top_role=object()),
+        )
+
+        first = await CatalogEditorView.create(
+            cog, guild, SimpleNamespace(id=10), restricted=False
+        )
+        second = await CatalogEditorView.create(
+            cog, guild, SimpleNamespace(id=10), restricted=False, add_page=1
+        )
+
+        first_add = next(
+            item for item in first.children
+            if getattr(item, "placeholder", "").startswith("Add")
+        )
+        second_add = next(
+            item for item in second.children
+            if getattr(item, "placeholder", "").startswith("Add")
+        )
+        self.assertEqual(len(first_add.options), 25)
+        self.assertEqual([option.label for option in second_add.options], ["Role 26", "Role 27"])
+        self.assertFalse(first.next_add.disabled)
+
+    async def test_catalog_embed_sorts_configured_roles_case_insensitively(self):
+        cog, _, _, _ = self.make_cog(basic=[3, 1, 2])
+        roles = {
+            1: FakeRole(1, "Alpha"),
+            2: FakeRole(2, "middle"),
+            3: FakeRole(3, "zebra"),
+        }
+        guild = SimpleNamespace(get_role=roles.get)
+
+        embed = await cog.catalog_embed(guild, restricted=False)
+
+        self.assertLess(embed.description.index("Alpha"), embed.description.index("middle"))
+        self.assertLess(embed.description.index("middle"), embed.description.index("zebra"))
 
     async def test_publish_resolves_selected_channel_and_rejects_missing_target(self):
         cog = object.__new__(RoleTools)
