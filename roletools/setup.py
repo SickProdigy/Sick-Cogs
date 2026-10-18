@@ -36,7 +36,7 @@ class CatalogRoleSelect(discord.ui.Select):
         self.add = add
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()
         roles = [interaction.guild.get_role(int(role_id)) for role_id in self.values]
         changed, notes = await self.parent_view.cog.update_role_catalog(
             interaction.guild,
