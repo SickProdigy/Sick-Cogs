@@ -54,6 +54,7 @@ Current develop experiments include:
 - `rocketleague` — RLCS schedules, community tournaments and clips, and official game updates.
 - `dayz` — official DayZ Steam announcements.
 - `icarus` — official Icarus Steam announcements.
+- `minecraft` — Java/Bedrock server status and official release announcements.
 - `imagine` — private provider-neutral AI image generation with explicit allowlisting.
 - `mybb` — per-server SickProdigy MyBB browsing and publishing.
 - `tickets` — private text-channel support with persistent staff controls.
