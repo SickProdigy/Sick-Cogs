@@ -103,6 +103,7 @@ class ReminderChannelSelect(discord.ui.ChannelSelect):
     async def callback(self, interaction):
         channel = self.values[0]
         await self.parent_view.cog.config.guild(interaction.guild).reminder_channel_id.set(channel.id)
+        await self.parent_view.cog.wake_reminders(interaction.guild)
         await interaction.response.edit_message(embed=await self.parent_view.embed(interaction.guild), view=self.parent_view)
 
 
@@ -137,6 +138,7 @@ class ReminderOffsetsModal(discord.ui.Modal, title="Reminder schedule"):
         config = self.parent_view.cog.config.guild(interaction.guild)
         await config.reminder_offsets.set(offsets)
         await config.reminder_state.clear()
+        await self.parent_view.cog.wake_reminders(interaction.guild)
         await interaction.response.edit_message(embed=await self.parent_view.embed(interaction.guild), view=self.parent_view)
 
 
@@ -169,6 +171,7 @@ class ReminderSettings(OwnedView):
     @discord.ui.button(label="Disable reminders", style=discord.ButtonStyle.danger, row=2)
     async def disable(self, interaction, button):
         await self.cog.config.guild(interaction.guild).reminder_channel_id.clear()
+        await self.cog.disable_reminders(interaction.guild)
         await interaction.response.edit_message(embed=await self.embed(interaction.guild), view=self)
 
     @discord.ui.button(label="Done", style=discord.ButtonStyle.success, row=2)

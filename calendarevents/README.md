@@ -20,6 +20,11 @@ That example posts at roughly 24 hours, 12 hours, 6 hours, and 1 hour before eac
 
 Reminder delivery state is persisted, so cog reloads and bot restarts do not intentionally repeat a delivered reminder. If reminders are enabled after an offset already passed, the cog sends only the closest currently relevant reminder rather than posting every missed reminder at once.
 
+The scheduler keeps the next relevant reminder check per server and reacts to Discord event
+create, update, and delete signals. It reconciles with Discord every six hours and after restarts to
+recover missed signals, rather than fetching every server's event list once per minute. Failed
+reconciliations use bounded exponential backoff and do not block other servers.
+
 ## Optional Google bot-owner setup
 
 1. Create a Google Cloud project and enable the Google Calendar API.

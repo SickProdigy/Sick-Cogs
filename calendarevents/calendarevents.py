@@ -1,7 +1,9 @@
 """Discord scheduled events and optional Google Calendar management."""
 
+import asyncio
 import io
-from datetime import datetime, timezone
+import logging
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import discord
 from redbot.core import Config, commands
@@ -9,11 +11,15 @@ from discord.ext import tasks
 from .google import GoogleCalendarClient
 from .models import CalendarEvent
 
+log = logging.getLogger("red.sickcogs.calendarevents")
+RECONCILE_INTERVAL = timedelta(hours=6)
+MAX_RECONCILE_BACKOFF_MINUTES = 30
+
 
 class CalendarEvents(commands.Cog):
     """Manage native Discord events and optional shared Google calendars."""
     __author__ = ["SickProdigy"]
-    __version__ = "0.3.1"
+    __version__ = "0.3.2"
     CONFIG_IDENTIFIER = 9329894641121951861707075415179419308323035696195774470464762724187261
 
     def __init__(self, bot):
@@ -30,7 +36,13 @@ class CalendarEvents(commands.Cog):
             reminder_role_id=None,
             reminder_offsets=[1440, 720, 360, 60],
             reminder_state={},
+            reminder_next_check_at=None,
+            reminder_last_reconcile_at=None,
         )
+        self._reminder_locks = {}
+        self._event_cache = {}
+        self._reconciled_guilds = set()
+        self._reconcile_failures = {}
         self.reminder_loop.start()
 
     def cog_unload(self):
@@ -117,6 +129,45 @@ class CalendarEvents(commands.Cog):
     def event_url(guild_id, event_id):
         return f"https://discord.com/events/{guild_id}/{event_id}"
 
+    @staticmethod
+    def _parse_time(value):
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+
+    @classmethod
+    def next_reminder_at(cls, events, offsets, state, now=None):
+        now = now or datetime.now(timezone.utc)
+        candidates = []
+        for event in events:
+            if event.status != discord.EventStatus.scheduled:
+                continue
+            if event.start_time.astimezone(timezone.utc) < now - timedelta(minutes=2):
+                continue
+            event_key = f"{event.id}:{int(event.start_time.timestamp())}"
+            sent = set(state.get(event_key, []))
+            for offset in offsets:
+                if str(offset) in sent:
+                    continue
+                threshold = event.start_time.astimezone(timezone.utc) - timedelta(minutes=offset)
+                candidates.append(now if threshold <= now else threshold)
+        return min(candidates) if candidates else None
+
+    async def wake_reminders(self, guild):
+        await self.config.guild(guild).reminder_next_check_at.set(
+            datetime.now(timezone.utc).isoformat()
+        )
+
+    async def disable_reminders(self, guild):
+        self._event_cache.pop(guild.id, None)
+        self._reconciled_guilds.discard(guild.id)
+        self._reconcile_failures.pop(guild.id, None)
+        await self.config.guild(guild).reminder_next_check_at.clear()
+
     async def create_discord_event(self, guild, member, *, title, start, end, location, description=""):
         if not await self.is_manager(member):
             raise PermissionError("You need Manage Server or the configured calendar manager role.")
@@ -151,28 +202,54 @@ class CalendarEvents(commands.Cog):
         content = role.mention if role else None
         await channel.send(content=content, embed=embed, allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False))
 
-    @tasks.loop(minutes=1)
-    async def reminder_loop(self):
-        now = datetime.now(timezone.utc)
-        for guild in list(self.bot.guilds):
-            data = await self.config.guild(guild).all()
+    async def _process_reminders(self, guild, *, force_reconcile=False):
+        lock = self._reminder_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            group = self.config.guild(guild)
+            data = await group.all()
             channel = guild.get_channel(data.get("reminder_channel_id"))
             if channel is None:
-                continue
+                self._event_cache.pop(guild.id, None)
+                self._reconciled_guilds.discard(guild.id)
+                await group.reminder_next_check_at.clear()
+                return
+            now = datetime.now(timezone.utc)
+            last_reconcile = self._parse_time(data.get("reminder_last_reconcile_at"))
+            reconcile_due = (
+                force_reconcile
+                or guild.id not in self._reconciled_guilds
+                or last_reconcile is None
+                or now >= last_reconcile + RECONCILE_INTERVAL
+            )
+            if reconcile_due:
+                try:
+                    events = await guild.fetch_scheduled_events(with_counts=False)
+                except (discord.Forbidden, discord.HTTPException):
+                    failures = self._reconcile_failures.get(guild.id, 0) + 1
+                    self._reconcile_failures[guild.id] = failures
+                    delay = min(MAX_RECONCILE_BACKOFF_MINUTES, 2 ** min(failures, 5))
+                    await group.reminder_next_check_at.set(
+                        (now + timedelta(minutes=delay)).isoformat()
+                    )
+                    return
+                self._reconcile_failures.pop(guild.id, None)
+                self._event_cache[guild.id] = {
+                    event.id: event
+                    for event in events
+                    if event.status == discord.EventStatus.scheduled
+                }
+                self._reconciled_guilds.add(guild.id)
+                last_reconcile = now
+                await group.reminder_last_reconcile_at.set(now.isoformat())
+
+            events = tuple(self._event_cache.get(guild.id, {}).values())
             role = guild.get_role(data.get("reminder_role_id")) if data.get("reminder_role_id") else None
             offsets = data.get("reminder_offsets") or []
             state = data.get("reminder_state") or {}
-            try:
-                events = await guild.fetch_scheduled_events(with_counts=False)
-            except (discord.Forbidden, discord.HTTPException):
-                continue
             active_keys = set()
             changed = False
             for event in events:
-                if event.status != discord.EventStatus.scheduled:
-                    continue
-                start_key = str(int(event.start_time.timestamp()))
-                event_key = f"{event.id}:{start_key}"
+                event_key = f"{event.id}:{int(event.start_time.timestamp())}"
                 active_keys.add(event_key)
                 sent = set(state.get(event_key, []))
                 offset = self.due_offset(event.start_time, offsets, sent, now)
@@ -185,12 +262,73 @@ class CalendarEvents(commands.Cog):
                 sent.update(str(value) for value in offsets if value >= offset)
                 state[event_key] = sorted(sent, key=int, reverse=True)
                 changed = True
-            stale = [key for key in state if key not in active_keys]
-            for key in stale:
+            for key in [key for key in state if key not in active_keys]:
                 state.pop(key, None)
                 changed = True
             if changed:
-                await self.config.guild(guild).reminder_state.set(state)
+                await group.reminder_state.set(state)
+            next_reminder = self.next_reminder_at(events, offsets, state, now)
+            next_reconcile = (last_reconcile or now) + RECONCILE_INTERVAL
+            next_check = min(next_reminder, next_reconcile) if next_reminder else next_reconcile
+            await group.reminder_next_check_at.set(next_check.isoformat())
+
+    async def poll_reminders_once(self):
+        now = datetime.now(timezone.utc)
+        for guild in list(self.bot.guilds):
+            try:
+                data = await self.config.guild(guild).all()
+                if not data.get("reminder_channel_id"):
+                    continue
+                next_check = self._parse_time(data.get("reminder_next_check_at"))
+                if guild.id in self._reconciled_guilds and next_check and now < next_check:
+                    continue
+                await self._process_reminders(guild)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Calendar reminder processing failed for guild %s", guild.id)
+
+    @tasks.loop(minutes=1)
+    async def reminder_loop(self):
+        await self.poll_reminders_once()
+
+    async def _scheduled_event_changed(self, event, *, deleted=False, reset_state=True):
+        guild = getattr(event, "guild", None)
+        if guild is None:
+            return
+        lock = self._reminder_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            cache = self._event_cache.setdefault(guild.id, {})
+            if deleted or event.status != discord.EventStatus.scheduled:
+                cache.pop(event.id, None)
+            else:
+                cache[event.id] = event
+            group = self.config.guild(guild)
+            if reset_state:
+                state = await group.reminder_state()
+                prefix = f"{event.id}:"
+                cleaned = {key: value for key, value in state.items() if not key.startswith(prefix)}
+                if cleaned != state:
+                    await group.reminder_state.set(cleaned)
+            await group.reminder_next_check_at.set(datetime.now(timezone.utc).isoformat())
+
+    @commands.Cog.listener()
+    async def on_scheduled_event_create(self, event):
+        await self._scheduled_event_changed(event)
+
+    @commands.Cog.listener()
+    async def on_scheduled_event_update(self, before, after):
+        await self._scheduled_event_changed(
+            after,
+            reset_state=(
+                before.start_time != after.start_time
+                or before.status != after.status
+            ),
+        )
+
+    @commands.Cog.listener()
+    async def on_scheduled_event_delete(self, event):
+        await self._scheduled_event_changed(event, deleted=True)
 
     @reminder_loop.before_loop
     async def before_reminder_loop(self):
@@ -418,6 +556,10 @@ class CalendarEvents(commands.Cog):
         if not await self._manager(ctx):
             return
         await self.config.guild(ctx.guild).reminder_channel_id.set(channel.id if channel else None)
+        if channel:
+            await self.wake_reminders(ctx.guild)
+        else:
+            await self.disable_reminders(ctx.guild)
         await ctx.send(f"Event reminders will post in {channel.mention}." if channel else "Event reminders disabled.")
 
     @calendarset.command(name="reminderrole")
@@ -440,4 +582,5 @@ class CalendarEvents(commands.Cog):
             return
         await self.config.guild(ctx.guild).reminder_offsets.set(offsets)
         await self.config.guild(ctx.guild).reminder_state.clear()
+        await self.wake_reminders(ctx.guild)
         await ctx.send("Reminder offsets saved: " + ", ".join(f"{value} minutes" for value in offsets))
