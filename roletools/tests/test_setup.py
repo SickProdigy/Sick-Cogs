@@ -105,6 +105,41 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([option.value for option in add_select.options], ["1", "3"])
         self.assertEqual([option.label for option in remove_select.options], ["Already added"])
 
+    async def test_catalog_selection_updates_existing_ephemeral_card(self):
+        role = FakeRole(1, "Minecraft")
+        cog = SimpleNamespace(
+            update_role_catalog=AsyncMock(return_value=(1, [])),
+            refresh_setup_picker=AsyncMock(),
+            admin_selfrole_ids=AsyncMock(return_value=[1]),
+            restricted_role_ids=AsyncMock(return_value=[]),
+            catalog_embed=AsyncMock(return_value=MagicMock()),
+        )
+        guild = SimpleNamespace(
+            roles=[role],
+            get_role=lambda role_id: role if role_id == 1 else None,
+            me=SimpleNamespace(top_role=object()),
+        )
+        author = SimpleNamespace(id=10)
+        view = CatalogEditorView(
+            cog, author, restricted=False, add_roles=[role], remove_roles=[]
+        )
+        selector = next(
+            item for item in view.children
+            if getattr(item, "placeholder", "").startswith("Add")
+        )
+        selector._values = ["1"]
+        interaction = SimpleNamespace(
+            guild=guild,
+            user=author,
+            response=SimpleNamespace(defer=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+        await selector.callback(interaction)
+
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.edit_original_response.assert_awaited_once()
+
     async def test_catalog_editor_paginates_large_available_role_list(self):
         cog, _, _, _ = self.make_cog()
         roles = [FakeRole(index, f"Role {index:02d}") for index in range(1, 28)]
