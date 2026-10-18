@@ -45,6 +45,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `gmod` - Safe Garry's Mod server status monitoring and official Steam announcements.
 - `imagine` - Private, provider-neutral AI image generation with OpenAI and managed Codex support.
 - `icarus` - Official Icarus Steam announcements with category filters and card or article delivery.
+- `minecraft` - Java/Bedrock server status and official release announcements.
 - `movies` - Configurable TMDb new movie release announcements.
 - `navidrome` - Per-server Navidrome connections, linked users, and album announcements.
 - `nsfw` - NSFW-channel-only mature media with configurable external providers.

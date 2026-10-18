@@ -12,6 +12,8 @@ class _Group:
         self.settings = settings
         self.servers = SimpleNamespace(set=AsyncMock())
         self.last_poll_at = SimpleNamespace(set=AsyncMock())
+        self.updates_seen_ids = SimpleNamespace(set=AsyncMock())
+        self.updates_last_poll_at = SimpleNamespace(set=AsyncMock())
 
     async def all(self):
         return self.settings
@@ -319,6 +321,90 @@ class PollCycleTests(unittest.IsolatedAsyncioTestCase):
         await cog.poll_guild(_guild(1), force=True)
 
         cog.query_server.assert_awaited_once_with(record)
+
+
+class UpdatePollingTests(unittest.IsolatedAsyncioTestCase):
+    def settings(self, seen=None):
+        return {1: {
+            "updates_enabled": True,
+            "updates_channel_id": 10,
+            "updates_role_id": None,
+            "updates_interval_minutes": 15,
+            "updates_last_poll_at": None,
+            "updates_seen_ids": [] if seen is None else seen,
+            "updates_java": True,
+            "updates_bedrock": True,
+            "updates_java_prerelease": False,
+            "updates_bedrock_preview": False,
+        }}
+
+    def item(self, item_id, published_at, edition="java", channel="release"):
+        return {"id": item_id, "edition": edition, "channel": channel, "published_at": published_at}
+
+    async def test_update_cycle_fetches_once_for_all_due_guilds_and_records_attempt(self):
+        settings = {
+            1: {"updates_enabled": True, "updates_interval_minutes": 15, "updates_last_poll_at": None},
+            2: {"updates_enabled": True, "updates_interval_minutes": 15, "updates_last_poll_at": None},
+        }
+        cog = object.__new__(Minecraft)
+        cog.bot = SimpleNamespace(guilds=[_guild(1), _guild(2)], cog_disabled_in_guild=AsyncMock(return_value=False))
+        cog.config = _Config(settings)
+        items = [self.item("one", "2026-01-01")]
+        cog.fetch_update_items = AsyncMock(return_value=items)
+        cog.poll_update_guild = AsyncMock()
+
+        await cog.poll_updates_once()
+
+        cog.fetch_update_items.assert_awaited_once()
+        self.assertEqual(cog.poll_update_guild.await_count, 2)
+        self.assertIs(cog.poll_update_guild.await_args_list[0].args[1], items)
+        for guild_id in (1, 2):
+            cog.config.groups[guild_id].updates_last_poll_at.set.assert_awaited_once()
+
+    async def test_source_failure_is_throttled_to_configured_interval(self):
+        settings = self.settings()
+        cog = object.__new__(Minecraft)
+        cog.bot = SimpleNamespace(guilds=[_guild(1)], cog_disabled_in_guild=AsyncMock(return_value=False))
+        cog.config = _Config(settings)
+        cog.fetch_update_items = AsyncMock(side_effect=RuntimeError("outage"))
+        cog.poll_update_guild = AsyncMock()
+
+        await cog.poll_updates_once()
+
+        cog.config.groups[1].updates_last_poll_at.set.assert_awaited_once()
+        cog.poll_update_guild.assert_not_awaited()
+
+    async def test_first_poll_seeds_without_sending(self):
+        settings = self.settings()
+        cog = object.__new__(Minecraft)
+        cog._locks = {}
+        cog.config = _Config(settings)
+        cog.get_channel = AsyncMock()
+        items = [self.item("stable", "2026-01-01"), self.item("snapshot", "2026-01-02", channel="snapshot")]
+
+        self.assertEqual(await cog.poll_update_guild(_guild(1), items), 0)
+
+        cog.get_channel.assert_not_awaited()
+        cog.config.groups[1].updates_seen_ids.set.assert_awaited_once_with(["stable"])
+
+    async def test_delivery_is_oldest_first_and_restart_safe(self):
+        settings = self.settings(["seed"])
+        cog = object.__new__(Minecraft)
+        cog._locks = {}
+        cog.config = _Config(settings)
+        channel = SimpleNamespace(send=AsyncMock())
+        cog.get_channel = AsyncMock(return_value=channel)
+        cog.update_embed = MagicMock(side_effect=lambda item: item["id"])
+        items = [self.item("newer", "2026-01-03", edition="bedrock"), self.item("older", "2026-01-02")]
+        async def save_seen(value):
+            settings[1]["updates_seen_ids"] = value
+        cog.config.groups[1].updates_seen_ids.set.side_effect = save_seen
+
+        self.assertEqual(await cog.poll_update_guild(_guild(1), items), 2)
+        self.assertEqual([call.kwargs["embed"] for call in channel.send.await_args_list], ["older", "newer"])
+        channel.send.reset_mock()
+        self.assertEqual(await cog.poll_update_guild(_guild(1), items), 0)
+        channel.send.assert_not_awaited()
 
 
 if __name__ == "__main__":
