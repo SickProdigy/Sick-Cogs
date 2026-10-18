@@ -18,6 +18,7 @@ CONFIG_IDENTIFIER = 6202609230144001
 TOKEN_NAMESPACE = "twitter"
 MIN_INTERVAL_MINUTES = 5
 MAX_INTERVAL_MINUTES = 1440
+MAX_CONCURRENT_TIMELINE_REQUESTS = 4
 
 
 def utc_now():
@@ -40,7 +41,7 @@ class Twitter(commands.Cog):
     """Publish new X posts from selected accounts into Discord channels."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.1"
+    __version__ = "0.1.2"
 
     default_guild = {
         "enabled": False,
@@ -118,12 +119,16 @@ class Twitter(commands.Cog):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    async def poll_guild(self, guild, *, force=False):
+    async def poll_guild(self, guild, *, force=False, timeline_results=None):
         lock = self._poll_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
-            return await self._poll_guild_unlocked(guild, force=force)
+            return await self._poll_guild_unlocked(
+                guild,
+                force=force,
+                timeline_results=timeline_results,
+            )
 
-    async def _poll_guild_unlocked(self, guild, *, force=False):
+    async def _poll_guild_unlocked(self, guild, *, force=False, timeline_results=None):
         group = self.config.guild(guild)
         settings = await group.all()
         if not settings["enabled"] and not force:
@@ -135,7 +140,23 @@ class Twitter(commands.Cog):
         if not feeds:
             await group.last_poll_at.set(utc_now().isoformat())
             return 0
-        client = await self.get_client()
+        client = None
+        local_results = {}
+        local_cursors = {}
+        if timeline_results is None:
+            for feed in feeds.values():
+                user_id = str(feed.get("user_id") or "")
+                cursors = [
+                    str(value)
+                    for value in feed.get("channels", {}).values()
+                    if str(value).isdigit()
+                ]
+                if not user_id.isdigit() or not cursors:
+                    continue
+                oldest = min(cursors, key=int)
+                current = local_cursors.get(user_id)
+                if current is None or int(oldest) < int(current):
+                    local_cursors[user_id] = oldest
         sent = 0
         changed = False
         for key, feed in list(feeds.items()):
@@ -147,11 +168,22 @@ class Twitter(commands.Cog):
             cursors = [str(value) for value in channels.values() if str(value).isdigit()]
             if not cursors:
                 continue
-            try:
-                posts = await client.user_posts(feed["user_id"], min(cursors, key=int))
-            except XAPIError as error:
-                log.warning("X poll failed for @%s in guild %s: %s", key, guild.id, error)
-                continue
+            user_id = str(feed.get("user_id") or "")
+            if timeline_results is not None:
+                posts = timeline_results.get(user_id)
+                if posts is None:
+                    continue
+            else:
+                try:
+                    if user_id not in local_results:
+                        client = client or await self.get_client()
+                        local_results[user_id] = tuple(
+                            await client.user_posts(user_id, local_cursors[user_id])
+                        )
+                    posts = local_results[user_id]
+                except XAPIError as error:
+                    log.warning("X poll failed for @%s in guild %s: %s", key, guild.id, error)
+                    continue
             for channel_id, cursor in list(channels.items()):
                 channel, permanently_missing = await self.get_channel(guild, int(channel_id))
                 if channel is None:
@@ -188,17 +220,91 @@ class Twitter(commands.Cog):
         await group.last_poll_at.set(utc_now().isoformat())
         return sent
 
-    @tasks.loop(minutes=1)
-    async def poll_loop(self):
+    async def poll_once(self):
+        due_guilds = []
+        account_cursors = {}
         for guild in list(self.bot.guilds):
             if await self.bot.cog_disabled_in_guild(self, guild):
                 continue
             try:
-                await self.poll_guild(guild)
+                settings = await self.config.guild(guild).all()
+                interval = max(
+                    MIN_INTERVAL_MINUTES,
+                    int(settings.get("interval_minutes", MIN_INTERVAL_MINUTES)),
+                )
+                if not settings.get("enabled") or not due(
+                    settings.get("last_poll_at"), interval
+                ):
+                    continue
+                due_guilds.append(guild)
+                for feed in settings.get("feeds", {}).values():
+                    user_id = str(feed.get("user_id") or "")
+                    cursors = [
+                        str(value)
+                        for value in feed.get("channels", {}).values()
+                        if str(value).isdigit()
+                    ]
+                    if not user_id.isdigit() or not cursors:
+                        continue
+                    oldest = min(cursors, key=int)
+                    current = account_cursors.get(user_id)
+                    if current is None or int(oldest) < int(current):
+                        account_cursors[user_id] = oldest
             except asyncio.CancelledError:
                 raise
             except Exception:
-                log.exception("Twitter polling failed for guild %s", guild.id)
+                log.exception("Could not prepare Twitter poll for guild %s", guild.id)
+
+        timeline_results = {}
+        if account_cursors:
+            try:
+                client = await self.get_client()
+            except asyncio.CancelledError:
+                raise
+            except XAPIError as error:
+                log.warning("Could not prepare X timeline polling: %s", error)
+            else:
+                semaphore = asyncio.Semaphore(MAX_CONCURRENT_TIMELINE_REQUESTS)
+
+                async def fetch_timeline(user_id, cursor):
+                    try:
+                        async with semaphore:
+                            posts = tuple(await client.user_posts(user_id, cursor))
+                    except asyncio.CancelledError:
+                        raise
+                    except XAPIError as error:
+                        log.warning("X timeline poll failed for user %s: %s", user_id, error)
+                        posts = None
+                    except Exception:
+                        log.exception("Unexpected X timeline failure for user %s", user_id)
+                        posts = None
+                    return user_id, posts
+
+                timeline_results = dict(
+                    await asyncio.gather(
+                        *(
+                            fetch_timeline(user_id, cursor)
+                            for user_id, cursor in account_cursors.items()
+                        )
+                    )
+                )
+
+        for guild in due_guilds:
+            try:
+                await self.poll_guild(guild, timeline_results=timeline_results)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Twitter delivery failed for guild %s", guild.id)
+
+    @tasks.loop(minutes=1)
+    async def poll_loop(self):
+        try:
+            await self.poll_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Twitter polling cycle failed")
 
     @poll_loop.before_loop
     async def before_poll_loop(self):

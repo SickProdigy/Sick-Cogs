@@ -5,6 +5,11 @@ the official X API v2. It resolves each username once, stores the numeric user I
 persisted `since_id` cursor so setup does not dump old posts and ordinary polling requests only new
 content.
 
+Scheduled checks group subscriptions by the account's stable numeric X user ID. Each due account is
+requested once per polling cycle using the oldest cursor needed by any subscribed channel, then the
+result is distributed through each server's independent cursor. Timeline requests use bounded
+concurrency, and an account or delivery failure does not stop unrelated subscriptions.
+
 ## Native X API setup
 
 Create an X developer app, fund its pay-per-use balance, and give the bot owner its app-only bearer

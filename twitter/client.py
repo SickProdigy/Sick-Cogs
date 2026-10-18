@@ -5,7 +5,7 @@ import aiohttp
 
 
 API_ROOT = "https://api.x.com/2"
-USER_AGENT = "Sick-Cogs-Twitter/0.1.1 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Twitter/0.1.2 (+https://github.com/SickProdigy/Sick-Cogs)"
 MAX_TIMELINE_PAGES = 10
 
 
