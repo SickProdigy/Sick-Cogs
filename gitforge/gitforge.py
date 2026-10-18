@@ -1,6 +1,7 @@
 """Multi-provider Git forge integration for Red."""
 
 import asyncio
+import hashlib
 import logging
 from urllib.parse import urlsplit
 
@@ -14,6 +15,9 @@ from .views import IssueDraftView, SetupView
 log = logging.getLogger("red.sickcogs.gitforge")
 CONFIG_IDENTIFIER = 7422161103
 FAILURE_STATES = {"failure", "failed", "cancelled", "canceled", "timed_out", "error"}
+MAX_CONCURRENT_POLL_REQUESTS = 6
+POLL_BACKOFF_BASE_SECONDS = 120
+POLL_BACKOFF_MAX_SECONDS = 1800
 
 
 class GitForge(commands.Cog):
@@ -26,6 +30,7 @@ class GitForge(commands.Cog):
         self.config.register_guild(connections={}, repositories={})
         self.allowed_hosts = set(PUBLIC_HOSTS)
         self.poll_lock = asyncio.Lock()
+        self._poll_backoff = {}
 
     async def cog_load(self):
         self.allowed_hosts.update(host.casefold() for host in await self.config.allowed_hosts())
@@ -279,31 +284,184 @@ class GitForge(commands.Cog):
         if self.poll_lock.locked():
             return
         async with self.poll_lock:
-            for guild_id, data in (await self.config.all_guilds()).items():
-                guild = self.bot.get_guild(int(guild_id))
-                if guild:
-                    await self._poll_guild(guild, data.get("repositories", {}))
+            await self.poll_once()
 
     @repository_poller.before_loop
     async def before_repository_poller(self):
         await self.bot.wait_until_red_ready()
 
-    async def _poll_guild(self, guild, repositories):
-        changed = False
-        for alias, repository in repositories.items():
-            try:
-                client = await self.client_for(guild, repository["connection"])
-                if repository.get("issue_channel_id"):
-                    changed |= await self._poll_issues(guild, alias, repository, client)
-                if repository.get("ci_channel_id"):
-                    changed |= await self._poll_ci(guild, alias, repository, client)
-            except (ForgeError, ValueError, discord.HTTPException):
-                log.debug("GitForge poll failed for guild %s repository %s", guild.id, alias, exc_info=True)
-        if changed:
-            await self.config.guild(guild).repositories.set(repositories)
+    @staticmethod
+    def _poll_job_key(client, repository, resource):
+        credential = hashlib.sha256(client.token.encode("utf-8")).digest()
+        return (
+            client.provider,
+            client.base_url,
+            credential,
+            str(repository["owner"]),
+            str(repository["repo"]),
+            resource,
+        )
 
-    async def _poll_issues(self, guild, alias, repository, client):
-        issues = await client.list_issues(repository["owner"], repository["repo"])
+    def _poll_job_ready(self, key):
+        state = self._poll_backoff.get(key)
+        return state is None or asyncio.get_running_loop().time() >= state[1]
+
+    def _poll_job_failed(self, key):
+        failures = self._poll_backoff.get(key, (0, 0))[0] + 1
+        delay = min(
+            POLL_BACKOFF_MAX_SECONDS,
+            POLL_BACKOFF_BASE_SECONDS * (2 ** min(failures - 1, 4)),
+        )
+        self._poll_backoff[key] = (
+            failures,
+            asyncio.get_running_loop().time() + delay,
+        )
+
+    def _poll_job_succeeded(self, key):
+        self._poll_backoff.pop(key, None)
+
+    async def poll_once(self):
+        guild_data = {}
+        jobs = {}
+        for guild_id, data in (await self.config.all_guilds()).items():
+            guild = self.bot.get_guild(int(guild_id))
+            if guild is None:
+                continue
+            repositories = data.get("repositories", {})
+            guild_data[guild.id] = (guild, repositories)
+            clients = {}
+            for alias, repository in repositories.items():
+                resources = []
+                if repository.get("issue_channel_id"):
+                    resources.append("issues")
+                if repository.get("ci_channel_id"):
+                    resources.append("ci")
+                if not resources:
+                    continue
+                connection = str(repository.get("connection") or "")
+                try:
+                    if connection not in clients:
+                        clients[connection] = await self.client_for(guild, connection)
+                    client = clients[connection]
+                except (ForgeError, ValueError):
+                    log.debug(
+                        "GitForge connection failed for guild %s repository %s",
+                        guild.id,
+                        alias,
+                        exc_info=True,
+                    )
+                    continue
+                for resource in resources:
+                    key = self._poll_job_key(client, repository, resource)
+                    job = jobs.setdefault(
+                        key,
+                        {
+                            "client": client,
+                            "owner": repository["owner"],
+                            "repo": repository["repo"],
+                            "resource": resource,
+                            "consumers": [],
+                        },
+                    )
+                    job["consumers"].append((guild, alias, repository))
+
+        self._poll_backoff = {
+            key: state for key, state in self._poll_backoff.items() if key in jobs
+        }
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_POLL_REQUESTS)
+
+        async def fetch_job(key, job):
+            if not self._poll_job_ready(key):
+                return key, None
+            try:
+                async with semaphore:
+                    if job["resource"] == "issues":
+                        items = await job["client"].list_issues(job["owner"], job["repo"])
+                    else:
+                        items = await job["client"].list_ci_runs(job["owner"], job["repo"])
+            except asyncio.CancelledError:
+                raise
+            except ForgeError:
+                self._poll_job_failed(key)
+                log.debug(
+                    "GitForge %s poll failed for %s/%s at %s",
+                    job["resource"],
+                    job["owner"],
+                    job["repo"],
+                    job["client"].base_url,
+                    exc_info=True,
+                )
+                return key, None
+            except Exception:
+                self._poll_job_failed(key)
+                log.exception(
+                    "Unexpected GitForge %s poll failure for %s/%s at %s",
+                    job["resource"],
+                    job["owner"],
+                    job["repo"],
+                    job["client"].base_url,
+                )
+                return key, None
+            self._poll_job_succeeded(key)
+            return key, tuple(items)
+
+        results = dict(
+            await asyncio.gather(
+                *(fetch_job(key, job) for key, job in jobs.items())
+            )
+        )
+        changed_guilds = set()
+        for key, job in jobs.items():
+            items = results.get(key)
+            if items is None:
+                continue
+            for guild, alias, repository in job["consumers"]:
+                try:
+                    if job["resource"] == "issues":
+                        changed = await self._poll_issues(
+                            guild,
+                            alias,
+                            repository,
+                            job["client"],
+                            issues=items,
+                        )
+                    else:
+                        changed = await self._poll_ci(
+                            guild,
+                            alias,
+                            repository,
+                            job["client"],
+                            runs=items,
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except (ForgeError, ValueError, discord.HTTPException):
+                    log.debug(
+                        "GitForge delivery failed for guild %s repository %s",
+                        guild.id,
+                        alias,
+                        exc_info=True,
+                    )
+                except Exception:
+                    log.exception(
+                        "Unexpected GitForge delivery failure for guild %s repository %s",
+                        guild.id,
+                        alias,
+                    )
+                else:
+                    if changed:
+                        changed_guilds.add(guild.id)
+
+        for guild_id in changed_guilds:
+            guild, repositories = guild_data[guild_id]
+            try:
+                await self.config.guild(guild).repositories.set(repositories)
+            except Exception:
+                log.exception("Could not save GitForge poll state for guild %s", guild.id)
+
+    async def _poll_issues(self, guild, alias, repository, client, *, issues=None):
+        if issues is None:
+            issues = await client.list_issues(repository["owner"], repository["repo"])
         current = [item["id"] for item in issues if item["id"]]
         seen = set(int(value) for value in repository.get("seen_issue_ids", []))
         if not repository.get("issues_initialized", False):
@@ -322,13 +480,14 @@ class GitForge(commands.Cog):
         repository["seen_issue_ids"] = list(dict.fromkeys(current + list(seen)))[:50]
         return True
 
-    async def _poll_ci(self, guild, alias, repository, client):
-        try:
-            runs = await client.list_ci_runs(repository["owner"], repository["repo"])
-        except ForgeError as error:
-            if error.status in {404, 405}:
-                return False
-            raise
+    async def _poll_ci(self, guild, alias, repository, client, *, runs=None):
+        if runs is None:
+            try:
+                runs = await client.list_ci_runs(repository["owner"], repository["repo"])
+            except ForgeError as error:
+                if error.status in {404, 405}:
+                    return False
+                raise
         previous = {str(key): value for key, value in repository.get("ci_states", {}).items()}
         current = {run["id"]: run["status"].casefold() for run in runs if run["id"]}
         if not repository.get("ci_initialized", False):

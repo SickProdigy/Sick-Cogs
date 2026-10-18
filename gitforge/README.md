@@ -39,4 +39,12 @@ List recent open issues:
 
 ## Monitoring
 
-The initial release polls every two minutes, which works without exposing an HTTP listener. The first successful poll seeds its cursor without reposting existing events. Later polls announce newly observed issues and CI transitions into or out of failure. Optional webhook delivery can use the same routing model in a later release.
+GitForge checks for due work every two minutes without exposing an HTTP listener. Equivalent issue
+and CI requests are grouped by provider connection and repository, fetched once with bounded
+concurrency, and distributed through each server's independent cursor. Repositories without an
+active announcement destination are skipped. Provider failures back off per grouped request and do
+not block unrelated repositories or Discord destinations.
+
+The first successful poll seeds its cursor without reposting existing events. Later polls announce
+newly observed issues and CI transitions into or out of failure. Optional webhook delivery can use
+the same routing model in a later release.

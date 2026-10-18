@@ -93,7 +93,7 @@ class ForgeClient:
         return self.base_url + "/api/v1"
 
     def headers(self):
-        headers = {"Accept": "application/json", "User-Agent": "SickCogs-GitForge/0.1"}
+        headers = {"Accept": "application/json", "User-Agent": "SickCogs-GitForge/0.1.1"}
         if self.provider == "github":
             headers.update({"Authorization": f"Bearer {self.token}", "X-GitHub-Api-Version": "2022-11-28"})
         elif self.provider == "gitlab":
