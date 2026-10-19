@@ -166,5 +166,17 @@ class BotUpdatesCommandTests(unittest.IsolatedAsyncioTestCase):
             await BotUpdates.draft_approve.callback(cog, ctx)
 
 
+    async def test_new_manual_draft_cannot_replace_unfinished_active_draft(self):
+        draft = approved_draft()
+        draft["status"] = "draft"
+        cog = self.cog(draft)
+        ctx = Context()
+
+        with self.assertRaises(commands.UserFeedbackCheckFailure):
+            await BotUpdates.draft_create.callback(
+                cog, ctx, "digest", content="New title | New body"
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

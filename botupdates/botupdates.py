@@ -1,9 +1,23 @@
 """Collaborative, human-approved bot update announcements."""
 
+import asyncio
+import datetime
+import logging
 import time
 
+import aiohttp
 import discord
+from discord.ext import tasks
 from redbot.core import Config, commands
+
+from .collector import (
+    REPOSITORY_BRANCH,
+    REPOSITORY_WEB_URL,
+    CommitCollectionError,
+    GiteaCommitClient,
+    digest_slot,
+    digest_text,
+)
 
 from .models import (
     add_proposal,
@@ -15,6 +29,7 @@ from .models import (
 )
 
 CONFIG_IDENTIFIER = 710284193657004821
+log = logging.getLogger("red.sick-cogs.BotUpdates")
 GLOBAL_DEFAULTS = {
     "review_channel_id": 0,
     "editor_user_ids": [],
@@ -24,6 +39,11 @@ GLOBAL_DEFAULTS = {
     "active_draft_id": 0,
     "next_draft_id": 1,
     "announced_source_keys": [],
+    "collector_enabled": False,
+    "collector_last_sha": "",
+    "collector_last_slot": "",
+    "collector_last_check_at": 0,
+    "collector_last_error": "",
 }
 GUILD_DEFAULTS = {
     "enabled": False,
@@ -37,7 +57,7 @@ class BotUpdates(commands.Cog):
     """Prepare, review, approve, and distribute bot update posts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
     def __init__(self, bot):
         self.bot = bot
@@ -46,6 +66,115 @@ class BotUpdates(commands.Cog):
         )
         self.config.register_global(**GLOBAL_DEFAULTS)
         self.config.register_guild(**GUILD_DEFAULTS)
+        self.session = None
+        self._collector_lock = asyncio.Lock()
+
+    async def cog_load(self):
+        self.collector_loop.start()
+
+    def cog_unload(self):
+        self.collector_loop.cancel()
+        if self.session and not self.session.closed:
+            self.bot.loop.create_task(self.session.close())
+
+    async def _session(self):
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=20),
+                headers={"User-Agent": "Sick-Cogs-BotUpdates/0.2.0"},
+            )
+        return self.session
+
+    async def _commit_client(self):
+        return GiteaCommitClient(await self._session())
+
+    async def _unfinished_active_draft(self):
+        active_id = int(await self.config.active_draft_id())
+        if not active_id:
+            return None
+        draft = (await self.config.drafts()).get(str(active_id))
+        if draft and draft.get("status") in {"draft", "approved"}:
+            return draft
+        return None
+
+    async def collect_project_digest(self, *, force=False, now=None):
+        """Create a review-only digest from commits after the persistent cursor."""
+        async with self._collector_lock:
+            now = now or datetime.datetime.now(datetime.timezone.utc)
+            slot = digest_slot(now)
+            if not force and await self.config.collector_last_slot() == slot:
+                return "not-due", None
+            if await self._unfinished_active_draft():
+                return "draft-active", None
+            last_sha = await self.config.collector_last_sha()
+            if not last_sha:
+                return "not-seeded", None
+            commits = await (await self._commit_client()).since(last_sha)
+            checked_at = int(now.timestamp())
+            await self.config.collector_last_check_at.set(checked_at)
+            await self.config.collector_last_error.set("")
+            if not commits:
+                await self.config.collector_last_slot.set(slot)
+                return "no-changes", None
+
+            draft_id = int(await self.config.next_draft_id())
+            record = new_draft(
+                draft_id,
+                0,
+                "digest",
+                f"Sick-Cogs updates — {slot}",
+                digest_text(commits),
+                checked_at,
+            )
+            announced = set(await self.config.announced_source_keys())
+            for commit in reversed(commits):
+                source = normalize_source(
+                    "project",
+                    commit["message"][:100],
+                    commit["url"],
+                    commit["sha"][:12],
+                )
+                if source["key"] not in announced:
+                    record["sources"].append(source)
+            if not record["sources"]:
+                await self.config.collector_last_sha.set(commits[0]["sha"])
+                await self.config.collector_last_slot.set(slot)
+                return "already-announced", None
+
+            drafts = await self.config.drafts()
+            drafts[str(draft_id)] = record
+            await self.config.drafts.set(drafts)
+            await self.config.active_draft_id.set(draft_id)
+            await self.config.next_draft_id.set(draft_id + 1)
+            await self.config.collector_last_sha.set(commits[0]["sha"])
+            await self.config.collector_last_slot.set(slot)
+            await self._post_review(
+                record,
+                f"Scheduled Sick-Cogs digest #{draft_id} is ready for human review.",
+            )
+            return "created", record
+
+    async def collector_once(self, *, force=False, now=None):
+        if not force and not await self.config.collector_enabled():
+            return "disabled", None
+        try:
+            return await self.collect_project_digest(force=force, now=now)
+        except asyncio.CancelledError:
+            raise
+        except CommitCollectionError as error:
+            await self.config.collector_last_check_at.set(int(time.time()))
+            await self.config.collector_last_error.set(str(error))
+            return "error", str(error)
+
+    @tasks.loop(hours=1)
+    async def collector_loop(self):
+        status, detail = await self.collector_once()
+        if status == "error":
+            log.warning("BotUpdates collector failed: %s", detail)
+
+    @collector_loop.before_loop
+    async def before_collector_loop(self):
+        await self.bot.wait_until_red_ready()
 
     async def red_delete_data_for_user(self, *, requester, user_id):
         user_id = int(user_id)
@@ -238,6 +367,11 @@ class BotUpdates(commands.Cog):
     async def draft_create(self, ctx, kind: str, *, content: str):
         """Create a draft: create <major|digest|routine> Title | Body"""
         await self._require_publisher(ctx)
+        active = await self._unfinished_active_draft()
+        if active:
+            raise commands.UserFeedbackCheckFailure(
+                f"Finish or publish active draft #{active.get('id', '?')} before creating another."
+            )
         if " | " not in content:
             raise commands.UserFeedbackCheckFailure(
                 "Separate the title and body with ` | `."
@@ -534,3 +668,80 @@ class BotUpdates(commands.Cog):
             self.config.publisher_user_ids, user.id, action.casefold()
         )
         await ctx.send(f"Publisher list updated for {user}.")
+
+
+    @botupdatesowner.group(name="collector", invoke_without_command=True)
+    async def collector(self, ctx):
+        """Manage scheduled Sick-Cogs commit digest drafts."""
+        enabled = await self.config.collector_enabled()
+        last_sha = await self.config.collector_last_sha()
+        slot = await self.config.collector_last_slot()
+        checked = int(await self.config.collector_last_check_at())
+        error = await self.config.collector_last_error()
+        lines = [
+            f"Collector: **{'running' if enabled else 'stopped'}**",
+            f"Repository: <{REPOSITORY_WEB_URL}> (`{REPOSITORY_BRANCH}`)",
+            "Schedule: **1st and 15th of each month (UTC)**",
+            f"Cursor: `{last_sha[:12] if last_sha else 'not seeded'}`",
+            f"Last completed slot: `{slot or 'none'}`",
+            f"Last check: <t:{checked}:F>" if checked else "Last check: never",
+        ]
+        if error:
+            lines.append(f"Last error: {error}")
+        await ctx.send(
+            "\n".join(lines), allowed_mentions=discord.AllowedMentions.none()
+        )
+
+    @collector.command(name="start")
+    async def collector_start(self, ctx):
+        """Seed the current main commit and start twice-monthly draft collection."""
+        if await self.config.collector_enabled():
+            await ctx.send("The Sick-Cogs collector is already running.")
+            return
+        if not await self.config.review_channel_id():
+            raise commands.UserFeedbackCheckFailure(
+                "Set a private review channel before starting the collector."
+            )
+        existing_cursor = await self.config.collector_last_sha()
+        if not existing_cursor:
+            try:
+                latest = await (await self._commit_client()).latest()
+            except CommitCollectionError as error:
+                await self.config.collector_last_error.set(str(error))
+                await ctx.send(str(error))
+                return
+            now = datetime.datetime.now(datetime.timezone.utc)
+            await self.config.collector_last_sha.set(latest["sha"])
+            await self.config.collector_last_slot.set(digest_slot(now))
+            await self.config.collector_last_check_at.set(int(now.timestamp()))
+            message = (
+                "Sick-Cogs collection is running. The current main commit was seeded "
+                "without creating an old-history draft; new review drafts are due on "
+                "the 1st and 15th UTC."
+            )
+        else:
+            message = (
+                "Sick-Cogs collection is running again with its existing commit cursor."
+            )
+        await self.config.collector_last_error.set("")
+        await self.config.collector_enabled.set(True)
+        await ctx.send(message)
+
+    @collector.command(name="stop")
+    async def collector_stop(self, ctx):
+        """Stop scheduled collection without clearing its commit cursor."""
+        await self.config.collector_enabled.set(False)
+        await ctx.send("Scheduled Sick-Cogs collection is stopped.")
+
+    @collector.command(name="check", aliases=["now"])
+    async def collector_check(self, ctx):
+        """Collect new commits into a review draft now."""
+        status, detail = await self.collector_once(force=True)
+        messages = {
+            "created": f"Created review draft #{detail['id']} from new Sick-Cogs commits." if detail else "Created a review draft.",
+            "no-changes": "No new Sick-Cogs commits were found.",
+            "already-announced": "All collected commits were already announced.",
+            "draft-active": "Finish or publish the current active draft before collecting another digest.",
+            "not-seeded": "Start the collector once to seed its commit cursor.",
+        }
+        await ctx.send(messages.get(status, str(detail or status)))
