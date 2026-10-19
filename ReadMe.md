@@ -55,6 +55,7 @@ Current develop experiments include:
 - `dayz` — official DayZ Steam announcements.
 - `icarus` — official Icarus Steam announcements.
 - `windrose` — official Windrose Steam announcements.
+- `rust` — official Facepunch Rust Steam announcements.
 - `minecraft` — Java/Bedrock server status and official release announcements.
 - `palworld` — official Pocketpair Palworld Steam announcements.
 - `imagine` — private provider-neutral AI image generation with explicit allowlisting.

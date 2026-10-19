@@ -1,0 +1,16 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Publish official Rust Steam announcements as cards or article-style posts with configurable categories and role notifications.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores guild announcement settings and bounded Steam announcement IDs. It does not persistently store user data or metadata.",
+    "hidden": false,
+    "install_msg": "Set an announcement channel with `[p]rustset channel #channel`, choose `[p]rustset mode card` or `[p]rustset mode article`, optionally set a notification role, then start automatic posting with `[p]rustset autopost start`. Existing Steam posts are seeded during setup and will not flood the channel.",
+    "min_bot_version": "3.5.0",
+    "permissions": ["embed_links", "attach_files"],
+    "name": "Rust",
+    "requirements": ["Pillow>=12.0,<13"],
+    "short": "Official Rust Steam announcements",
+    "tags": ["rust", "steam", "updates", "notifications", "games"],
+    "type": "COG",
+    "version": "0.1.0"
+}
