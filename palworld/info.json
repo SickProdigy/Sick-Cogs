@@ -1,0 +1,16 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Publish official Palworld Steam announcements as cards or article-style posts with configurable categories and role notifications.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores guild announcement settings and bounded Steam announcement IDs. It does not persistently store user data or metadata.",
+    "hidden": false,
+    "install_msg": "Set an announcement channel with `[p]palworldset channel #channel`, choose `[p]palworldset mode card` or `[p]palworldset mode article`, optionally set a notification role, then start automatic posting with `[p]palworldset autopost start`. Existing Steam posts are seeded during setup and will not flood the channel.",
+    "min_bot_version": "3.5.0",
+    "permissions": ["embed_links", "attach_files"],
+    "name": "Palworld",
+    "requirements": ["Pillow>=12.0,<13"],
+    "short": "Official Palworld Steam announcements",
+    "tags": ["palworld", "steam", "updates", "notifications", "games"],
+    "type": "COG",
+    "version": "0.1.0"
+}
