@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
 
@@ -110,6 +111,7 @@ def approved_draft(kind="digest", sources=True):
 class BotUpdatesCommandTests(unittest.IsolatedAsyncioTestCase):
     def cog(self, draft, guilds=None, owner=True, guild_config=None):
         cog = BotUpdates.__new__(BotUpdates)
+        cog._collector_lock = asyncio.Lock()
         cog.bot = Bot(guilds, owner)
         cog.config = Config(draft, guild_config)
         return cog

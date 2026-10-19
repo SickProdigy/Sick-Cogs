@@ -15,6 +15,9 @@ from .collector import (
     REPOSITORY_WEB_URL,
     CommitCollectionError,
     GiteaCommitClient,
+    GitHubCommitClient,
+    MAX_UPSTREAM_SOURCES,
+    upstream_source,
     digest_slot,
     digest_text,
 )
@@ -39,6 +42,7 @@ GLOBAL_DEFAULTS = {
     "active_draft_id": 0,
     "next_draft_id": 1,
     "announced_source_keys": [],
+    "upstream_sources": {},
     "collector_enabled": False,
     "collector_last_sha": "",
     "collector_last_slot": "",
@@ -57,7 +61,7 @@ class BotUpdates(commands.Cog):
     """Prepare, review, approve, and distribute bot update posts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -81,7 +85,7 @@ class BotUpdates(commands.Cog):
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=20),
-                headers={"User-Agent": "Sick-Cogs-BotUpdates/0.2.0"},
+                headers={"User-Agent": "Sick-Cogs-BotUpdates/0.2.1"},
             )
         return self.session
 
@@ -97,11 +101,16 @@ class BotUpdates(commands.Cog):
             return draft
         return None
 
+    async def _upstream_client(self, source):
+        return GitHubCommitClient(await self._session(), source)
+
     async def collect_project_digest(self, *, force=False, now=None):
-        """Create a review-only digest from commits after the persistent cursor."""
+        """Collect every enabled source, then save the draft and cursors together."""
         async with self._collector_lock:
             now = now or datetime.datetime.now(datetime.timezone.utc)
             slot = digest_slot(now)
+            if not force and not await self.config.collector_enabled():
+                return "disabled", None
             if not force and await self.config.collector_last_slot() == slot:
                 return "not-due", None
             if await self._unfinished_active_draft():
@@ -109,49 +118,57 @@ class BotUpdates(commands.Cog):
             last_sha = await self.config.collector_last_sha()
             if not last_sha:
                 return "not-seeded", None
-            commits = await (await self._commit_client()).since(last_sha)
+            project = await (await self._commit_client()).since(last_sha)
+            commits = [dict(item, source_kind="project", source_label="Sick-Cogs") for item in project]
+            upstream = await self.config.upstream_sources()
+            for name, source in sorted(upstream.items()):
+                if not source["enabled"]:
+                    continue
+                try:
+                    changes = await (await self._upstream_client(source)).since(source["last_sha"])
+                except CommitCollectionError as exc:
+                    raise CommitCollectionError(f"Upstream {name}: {exc}") from exc
+                commits.extend(dict(item, source_kind="upstream", source_label=f"Upstream: {name}") for item in changes)
+                if changes:
+                    source["last_sha"] = changes[0]["sha"]
+
             checked_at = int(now.timestamp())
-            await self.config.collector_last_check_at.set(checked_at)
-            await self.config.collector_last_error.set("")
-            if not commits:
-                await self.config.collector_last_slot.set(slot)
-                return "no-changes", None
-
-            draft_id = int(await self.config.next_draft_id())
-            record = new_draft(
-                draft_id,
-                0,
-                "digest",
-                f"Sick-Cogs updates — {slot}",
-                digest_text(commits),
-                checked_at,
-            )
-            announced = set(await self.config.announced_source_keys())
-            for commit in reversed(commits):
-                source = normalize_source(
-                    "project",
-                    commit["message"][:100],
-                    commit["url"],
-                    commit["sha"][:12],
+            # One Config transaction prevents a saved draft with stale cursors after restart.
+            async with self.config.all() as state:
+                announced = set(state["announced_source_keys"])
+                sources = []
+                seen = set(announced)
+                pending = []
+                for commit in reversed(commits):
+                    try:
+                        source = normalize_source(
+                            commit["source_kind"],
+                            f"{commit['source_label']}: {commit['message']}"[:100],
+                            commit["url"], commit["sha"][:12],
+                        )
+                    except ValueError as exc:
+                        raise CommitCollectionError("A collected commit contains an invalid source reference.") from exc
+                    if source["key"] not in seen:
+                        seen.add(source["key"])
+                        sources.append(source)
+                        pending.append(commit)
+                state["collector_last_check_at"] = checked_at
+                state["collector_last_error"] = ""
+                state["collector_last_sha"] = project[0]["sha"] if project else last_sha
+                state["collector_last_slot"] = slot
+                state["upstream_sources"] = upstream
+                if not sources:
+                    return ("already-announced" if commits else "no-changes"), None
+                draft_id = int(state["next_draft_id"])
+                record = new_draft(
+                    draft_id, 0, "digest", f"Bot updates — {slot}",
+                    digest_text(list(reversed(pending))), checked_at,
                 )
-                if source["key"] not in announced:
-                    record["sources"].append(source)
-            if not record["sources"]:
-                await self.config.collector_last_sha.set(commits[0]["sha"])
-                await self.config.collector_last_slot.set(slot)
-                return "already-announced", None
-
-            drafts = await self.config.drafts()
-            drafts[str(draft_id)] = record
-            await self.config.drafts.set(drafts)
-            await self.config.active_draft_id.set(draft_id)
-            await self.config.next_draft_id.set(draft_id + 1)
-            await self.config.collector_last_sha.set(commits[0]["sha"])
-            await self.config.collector_last_slot.set(slot)
-            await self._post_review(
-                record,
-                f"Scheduled Sick-Cogs digest #{draft_id} is ready for human review.",
-            )
+                record["sources"] = sources
+                state["drafts"][str(draft_id)] = record
+                state["active_draft_id"] = draft_id
+                state["next_draft_id"] = draft_id + 1
+            await self._post_review(record, f"Scheduled digest #{draft_id} is ready for human review.")
             return "created", record
 
     async def collector_once(self, *, force=False, now=None):
@@ -367,30 +384,50 @@ class BotUpdates(commands.Cog):
     async def draft_create(self, ctx, kind: str, *, content: str):
         """Create a draft: create <major|digest|routine> Title | Body"""
         await self._require_publisher(ctx)
-        active = await self._unfinished_active_draft()
-        if active:
-            raise commands.UserFeedbackCheckFailure(
-                f"Finish or publish active draft #{active.get('id', '?')} before creating another."
+        async with self._collector_lock:
+            active = await self._unfinished_active_draft()
+            if active:
+                raise commands.UserFeedbackCheckFailure(
+                    f"Finish or publish active draft #{active.get('id', '?')} before creating another."
+                )
+            if " | " not in content:
+                raise commands.UserFeedbackCheckFailure(
+                    "Separate the title and body with ` | `."
+                )
+            title, text = content.split(" | ", 1)
+            draft_id = int(await self.config.next_draft_id())
+            record = new_draft(
+                draft_id, ctx.author.id, kind, title, text, int(time.time())
             )
-        if " | " not in content:
-            raise commands.UserFeedbackCheckFailure(
-                "Separate the title and body with ` | `."
+            async with self.config.all() as state:
+                state["drafts"][str(draft_id)] = record
+                state["active_draft_id"] = draft_id
+                state["next_draft_id"] = draft_id + 1
+            posted = await self._post_review(record, f"Draft #{draft_id} created.")
+            await ctx.send(
+                f"Created draft #{draft_id}."
+                + ("" if posted else " Review-channel preview was not sent.")
             )
-        title, text = content.split(" | ", 1)
-        draft_id = int(await self.config.next_draft_id())
-        record = new_draft(
-            draft_id, ctx.author.id, kind, title, text, int(time.time())
-        )
-        drafts = await self.config.drafts()
-        drafts[str(draft_id)] = record
-        await self.config.drafts.set(drafts)
-        await self.config.active_draft_id.set(draft_id)
-        await self.config.next_draft_id.set(draft_id + 1)
-        posted = await self._post_review(record, f"Draft #{draft_id} created.")
-        await ctx.send(
-            f"Created draft #{draft_id}."
-            + ("" if posted else " Review-channel preview was not sent.")
-        )
+
+    @draft.command(name="sources")
+    async def draft_sources(self, ctx, page: int = 1):
+        """Review all active-draft source references, five per page."""
+        await self._require_editor(ctx)
+        _, _, record = await self._active()
+        sources = record.get("sources", [])
+        pages = max(1, (len(sources) + 4) // 5)
+        if page < 1 or page > pages:
+            raise commands.UserFeedbackCheckFailure(f"Choose a source page from 1 to {pages}.")
+        embed = discord.Embed(title=f"Draft #{record['id']} sources — {page}/{pages}")
+        for source in sources[(page - 1) * 5:page * 5]:
+            embed.add_field(
+                name=discord.utils.escape_markdown(source["label"]),
+                value=f"{source['kind']} · `{discord.utils.escape_markdown(source['reference'])}`\n<{source['url']}>",
+                inline=False,
+            )
+        if not sources:
+            embed.description = "No sources attached."
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     @draft.command(name="source")
     async def draft_source(
@@ -672,7 +709,7 @@ class BotUpdates(commands.Cog):
 
     @botupdatesowner.group(name="collector", invoke_without_command=True)
     async def collector(self, ctx):
-        """Manage scheduled Sick-Cogs commit digest drafts."""
+        """Manage scheduled project and upstream commit digest drafts."""
         enabled = await self.config.collector_enabled()
         last_sha = await self.config.collector_last_sha()
         slot = await self.config.collector_last_slot()
@@ -684,6 +721,7 @@ class BotUpdates(commands.Cog):
             "Schedule: **1st and 15th of each month (UTC)**",
             f"Cursor: `{last_sha[:12] if last_sha else 'not seeded'}`",
             f"Last completed slot: `{slot or 'none'}`",
+            f"Upstream sources: {len(await self.config.upstream_sources())} (see `upstream` for details)",
             f"Last check: <t:{checked}:F>" if checked else "Last check: never",
         ]
         if error:
@@ -695,53 +733,120 @@ class BotUpdates(commands.Cog):
     @collector.command(name="start")
     async def collector_start(self, ctx):
         """Seed the current main commit and start twice-monthly draft collection."""
-        if await self.config.collector_enabled():
-            await ctx.send("The Sick-Cogs collector is already running.")
-            return
-        if not await self.config.review_channel_id():
-            raise commands.UserFeedbackCheckFailure(
-                "Set a private review channel before starting the collector."
-            )
-        existing_cursor = await self.config.collector_last_sha()
-        if not existing_cursor:
-            try:
-                latest = await (await self._commit_client()).latest()
-            except CommitCollectionError as error:
-                await self.config.collector_last_error.set(str(error))
-                await ctx.send(str(error))
+        async with self._collector_lock:
+            if await self.config.collector_enabled():
+                await ctx.send("The Sick-Cogs collector is already running.")
                 return
-            now = datetime.datetime.now(datetime.timezone.utc)
-            await self.config.collector_last_sha.set(latest["sha"])
-            await self.config.collector_last_slot.set(digest_slot(now))
-            await self.config.collector_last_check_at.set(int(now.timestamp()))
-            message = (
-                "Sick-Cogs collection is running. The current main commit was seeded "
-                "without creating an old-history draft; new review drafts are due on "
-                "the 1st and 15th UTC."
-            )
-        else:
-            message = (
-                "Sick-Cogs collection is running again with its existing commit cursor."
-            )
-        await self.config.collector_last_error.set("")
-        await self.config.collector_enabled.set(True)
-        await ctx.send(message)
+            if not await self.config.review_channel_id():
+                raise commands.UserFeedbackCheckFailure(
+                    "Set a private review channel before starting the collector."
+                )
+            existing_cursor = await self.config.collector_last_sha()
+            if not existing_cursor:
+                try:
+                    latest = await (await self._commit_client()).latest()
+                except CommitCollectionError as error:
+                    await self.config.collector_last_error.set(str(error))
+                    await ctx.send(str(error))
+                    return
+                now = datetime.datetime.now(datetime.timezone.utc)
+                await self.config.collector_last_sha.set(latest["sha"])
+                await self.config.collector_last_slot.set(digest_slot(now))
+                await self.config.collector_last_check_at.set(int(now.timestamp()))
+                message = (
+                    "Sick-Cogs collection is running. The current main commit was seeded "
+                    "without creating an old-history draft; new review drafts are due on "
+                    "the 1st and 15th UTC."
+                )
+            else:
+                message = (
+                    "Sick-Cogs collection is running again with its existing commit cursor."
+                )
+            await self.config.collector_last_error.set("")
+            await self.config.collector_enabled.set(True)
+            await ctx.send(message)
 
     @collector.command(name="stop")
     async def collector_stop(self, ctx):
         """Stop scheduled collection without clearing its commit cursor."""
-        await self.config.collector_enabled.set(False)
-        await ctx.send("Scheduled Sick-Cogs collection is stopped.")
+        async with self._collector_lock:
+            await self.config.collector_enabled.set(False)
+            await ctx.send("Scheduled Sick-Cogs collection is stopped.")
 
     @collector.command(name="check", aliases=["now"])
     async def collector_check(self, ctx):
         """Collect new commits into a review draft now."""
         status, detail = await self.collector_once(force=True)
         messages = {
-            "created": f"Created review draft #{detail['id']} from new Sick-Cogs commits." if detail else "Created a review draft.",
-            "no-changes": "No new Sick-Cogs commits were found.",
+            "created": f"Created review draft #{detail['id']} from collected project/upstream commits." if detail else "Created a review draft.",
+            "no-changes": "No new project or enabled upstream commits were found.",
             "already-announced": "All collected commits were already announced.",
             "draft-active": "Finish or publish the current active draft before collecting another digest.",
             "not-seeded": "Start the collector once to seed its commit cursor.",
         }
         await ctx.send(messages.get(status, str(detail or status)))
+
+
+    @botupdatesowner.group(name="upstream", invoke_without_command=True)
+    async def upstream(self, ctx):
+        """List configured public GitHub sources and their independent cursors."""
+        sources = await self.config.upstream_sources()
+        if not sources:
+            await ctx.send("No upstream sources. Use `upstream add <name> <owner/repo> <branch> [path]`.")
+            return
+        for name, source in sorted(sources.items()):
+            await ctx.send(
+                f"**{name}** — {'enabled' if source['enabled'] else 'paused'}\n"
+                f"{source['repository']} · branch `{source['branch']}` · path `{source['path'] or '(all)'}`\n"
+                f"Cursor: `{source['last_sha'][:12]}`",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+    @upstream.command(name="add")
+    async def upstream_add(self, ctx, name: str, repository: str, branch: str, *, path: str = ""):
+        """Seed a public GitHub source: add <name> <owner/repo> <branch> [cog/path]."""
+        try:
+            name, source = upstream_source(name, repository, branch, path)
+        except ValueError as exc:
+            raise commands.UserFeedbackCheckFailure(str(exc)) from exc
+        async with self._collector_lock:
+            sources = await self.config.upstream_sources()
+            if name in sources:
+                raise commands.UserFeedbackCheckFailure("That source name already exists; remove it explicitly to reseed.")
+            if len(sources) >= MAX_UPSTREAM_SOURCES:
+                raise commands.UserFeedbackCheckFailure("At most 10 upstream sources may be configured.")
+            if any((item["repository"], item["branch"], item["path"]) ==
+                   (source["repository"], source["branch"], source["path"]) for item in sources.values()):
+                raise commands.UserFeedbackCheckFailure("That repository, branch and path are already configured.")
+            try:
+                latest = await (await self._upstream_client(source)).latest()
+            except CommitCollectionError as exc:
+                raise commands.UserFeedbackCheckFailure(str(exc)) from exc
+            source["last_sha"] = latest["sha"]
+            sources[name] = source
+            await self.config.upstream_sources.set(sources)
+        await ctx.send(f"Seeded upstream **{name}** without drafting old history. New changes join the collector's next due draft; use `collector start` if stopped.")
+
+    @upstream.command(name="enabled")
+    async def upstream_enabled(self, ctx, name: str, enabled: bool):
+        """Pause/resume a source without changing its saved cursor."""
+        async with self._collector_lock:
+            sources = await self.config.upstream_sources()
+            name = name.lower()
+            if name not in sources:
+                raise commands.UserFeedbackCheckFailure("Unknown upstream source.")
+            sources[name]["enabled"] = enabled
+            await self.config.upstream_sources.set(sources)
+        await ctx.send(f"Upstream {name} {'enabled' if enabled else 'paused'}; its cursor is unchanged.")
+
+    @upstream.command(name="remove")
+    async def upstream_remove(self, ctx, name: str):
+        """Remove a source and its cursor; existing draft references are retained."""
+        async with self._collector_lock:
+            sources = await self.config.upstream_sources()
+            name = name.lower()
+            if name not in sources:
+                raise commands.UserFeedbackCheckFailure("Unknown upstream source.")
+            del sources[name]
+            await self.config.upstream_sources.set(sources)
+        await ctx.send(f"Removed upstream {name}. Re-adding it will seed current history, not backfill missed commits.")
