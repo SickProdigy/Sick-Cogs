@@ -93,7 +93,7 @@ class ForgeClient:
         return self.base_url + "/api/v1"
 
     def headers(self):
-        headers = {"Accept": "application/json", "User-Agent": "SickCogs-GitForge/0.1.2"}
+        headers = {"Accept": "application/json", "User-Agent": "SickCogs-GitForge/0.1.3"}
         if self.provider == "github":
             headers.update({"Authorization": f"Bearer {self.token}", "X-GitHub-Api-Version": "2022-11-28"})
         elif self.provider == "gitlab":
@@ -152,6 +152,93 @@ class ForgeClient:
 
     async def repository(self, owner, repo):
         return await self.request("GET", self.repo_path(owner, repo))
+
+    @staticmethod
+    def _object(value):
+        if not isinstance(value, dict):
+            raise ForgeError("The forge returned an invalid response.", code="invalid_response")
+        return value
+
+    @staticmethod
+    def _rows(value):
+        if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+            raise ForgeError("The forge returned an invalid list.", code="invalid_response")
+        return value
+
+    def browser_url(self, value):
+        """Only expose credential-free links on the configured forge."""
+        value = str(value or "")
+        try:
+            parsed = urlsplit(value)
+            valid = (parsed.scheme == "https" and parsed.hostname == forge_hostname(self.base_url)
+                     and not parsed.username and not parsed.password and parsed.port in (None, 443))
+        except ValueError:
+            valid = False
+        return quote(value, safe=":/?=&%#-._~") if valid else None
+
+    async def repository_summary(self, owner, repo):
+        data = self._object(await self.repository(owner, repo))
+        return {
+            "name": str(data.get("path_with_namespace") or data.get("full_name") or f"{owner}/{repo}"),
+            "description": str(data.get("description") or "No description provided."),
+            "branch": str(data.get("default_branch") or "Not set"),
+            "visibility": str(data.get("visibility") or ("Private" if data.get("private") else "Public")),
+            "archived": bool(data.get("archived")),
+            "url": self.browser_url(data.get("web_url") or data.get("html_url")),
+        }
+
+    async def recent_commits(self, owner, repo, branch=None):
+        params = {"per_page" if self.provider != "gitea" else "limit": 10}
+        if branch is not None:
+            branch = branch.strip()
+            if not branch or len(branch) > 200:
+                raise ValueError("Branch names must be 1–200 characters.")
+            params["ref_name" if self.provider == "gitlab" else "sha"] = branch
+        suffix = "/repository/commits" if self.provider == "gitlab" else "/commits"
+        rows = self._rows(await self.request("GET", self.repo_path(owner, repo) + suffix, params=params))
+        results = []
+        for row in rows[:10]:
+            commit = row if self.provider == "gitlab" else self._object(row.get("commit"))
+            message = str(commit.get("title") or commit.get("message") or "Untitled commit").splitlines()
+            results.append({
+                "label": str(row.get("sha") or row.get("id") or "unknown")[:8],
+                "title": message[0] if message else "Untitled commit",
+                "url": self.browser_url(row.get("web_url") or row.get("html_url")),
+            })
+        return results
+
+    async def open_pulls(self, owner, repo):
+        gitlab = self.provider == "gitlab"
+        params = {"state": "opened" if gitlab else "open",
+                  "per_page" if self.provider != "gitea" else "limit": 10}
+        if gitlab:
+            params["scope"] = "all"
+        rows = self._rows(await self.request(
+            "GET", self.repo_path(owner, repo) + ("/merge_requests" if gitlab else "/pulls"), params=params
+        ))
+        return [{"label": str(row.get("iid") if gitlab else row.get("number")),
+                 "title": str(row.get("title") or "Untitled request"),
+                 "url": self.browser_url(row.get("web_url") or row.get("html_url"))}
+                for row in rows[:10]]
+
+    async def latest_release(self, owner, repo):
+        suffix = "/releases/permalink/latest" if self.provider == "gitlab" else "/releases/latest"
+        try:
+            data = self._object(await self.request("GET", self.repo_path(owner, repo) + suffix))
+        except ForgeError as error:
+            if error.status != 404:
+                raise
+            # Verify repository access: a missing/private repository must not look release-less.
+            await self.repository_summary(owner, repo)
+            return None
+        if not data.get("tag_name"):
+            raise ForgeError("The forge returned an incomplete release.", code="invalid_response")
+        links = data.get("_links") if isinstance(data.get("_links"), dict) else {}
+        return {"name": str(data.get("name") or data["tag_name"]),
+                "tag": str(data["tag_name"]),
+                "body": str(data.get("description") or data.get("body") or "No release notes provided."),
+                "published": str(data.get("released_at") or data.get("published_at") or "Unknown"),
+                "url": self.browser_url(links.get("self") or data.get("html_url"))}
 
     async def resolve_labels(self, owner, repo, labels):
         labels = [label.strip() for label in labels if label.strip()]

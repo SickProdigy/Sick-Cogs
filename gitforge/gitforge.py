@@ -330,6 +330,70 @@ class GitForge(commands.Cog):
         embed.set_footer(text=f"Query: {query[:100]} · Use git issue {alias} <number> for details")
         await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
+    @staticmethod
+    def browse_text(value, limit):
+        return discord.utils.escape_markdown(str(value).replace("@", "@\u200b"))[:limit]
+
+    async def send_browse_list(self, ctx, title, rows, empty):
+        lines = []
+        for row in rows[:10]:
+            label = self.browse_text(row["label"], 20)
+            text = self.browse_text(row["title"], 140)
+            lines.append(f"[{label}]({row['url']}) — {text}" if row.get("url") else f"{label} — {text}")
+        embed = discord.Embed(title=title[:256], description="\n".join(lines)[:4000] or empty,
+                              color=discord.Color.blurple())
+        embed.set_footer(text="Up to 10 results; follow a link for the full details.")
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
+    @git.command(name="repo")
+    @commands.cooldown(3, 60, commands.BucketType.user)
+    async def browse_repo(self, ctx, repo_alias: str):
+        """Show a repository summary and its default branch."""
+        await ctx.defer()
+        alias, repository, client = await self.repository_for(ctx.guild, repo_alias)
+        data = await client.repository_summary(repository["owner"], repository["repo"])
+        embed = discord.Embed(title=self.browse_text(data["name"], 256), url=data["url"],
+                              description=self.browse_text(data["description"], 3000), color=discord.Color.blurple())
+        embed.add_field(name="Default branch", value=self.browse_text(data["branch"], 200))
+        embed.add_field(name="Visibility", value=self.browse_text(data["visibility"], 100))
+        embed.add_field(name="Archived", value="Yes" if data["archived"] else "No")
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
+    @git.command(name="commits")
+    @commands.cooldown(3, 60, commands.BucketType.user)
+    async def browse_commits(self, ctx, repo_alias: str, branch: str = None):
+        """Show up to ten commits, optionally from a selected branch."""
+        await ctx.defer()
+        alias, repository, client = await self.repository_for(ctx.guild, repo_alias)
+        rows = await client.recent_commits(repository["owner"], repository["repo"], branch)
+        await self.send_browse_list(ctx, f"Recent commits — {alias}", rows, "No commits returned for this repository/ref.")
+
+    @git.command(name="prs")
+    @commands.cooldown(3, 60, commands.BucketType.user)
+    async def browse_pulls(self, ctx, repo_alias: str):
+        """Show up to ten open pull or merge requests."""
+        await ctx.defer()
+        alias, repository, client = await self.repository_for(ctx.guild, repo_alias)
+        rows = await client.open_pulls(repository["owner"], repository["repo"])
+        await self.send_browse_list(ctx, f"Open pull/merge requests — {alias}", rows, "No open pull/merge requests.")
+
+    @git.command(name="release")
+    @commands.cooldown(3, 60, commands.BucketType.user)
+    async def browse_release(self, ctx, repo_alias: str):
+        """Show the provider's latest release and release notes."""
+        await ctx.defer()
+        alias, repository, client = await self.repository_for(ctx.guild, repo_alias)
+        data = await client.latest_release(repository["owner"], repository["repo"])
+        if data is None:
+            await ctx.send("No latest release is available for this repository.", allowed_mentions=discord.AllowedMentions.none())
+            return
+        embed = discord.Embed(title=self.browse_text(data["name"], 256), url=data["url"],
+                              description=self.browse_text(data["body"], 3000), color=discord.Color.blurple())
+        embed.add_field(name="Tag", value=self.browse_text(data["tag"], 200))
+        embed.add_field(name="Published", value=self.browse_text(data["published"], 100))
+        embed.set_footer(text=f"{alias} • Follow the title link for full release notes.")
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
     @tasks.loop(minutes=2)
     async def repository_poller(self):
         if self.poll_lock.locked():

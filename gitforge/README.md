@@ -41,6 +41,17 @@ Browse, search, and inspect issues:
 
 Search returns at most ten repository-scoped issues across Gitea, GitHub, or GitLab. Supplying an issue number displays its state, author, labels, comment count, description, update time, and authoritative forge link. Read-only browsing does not require the repository issue-creation policy.
 
+## Repository browsing
+
+    [p]git repo <alias>
+    [p]git commits <alias> [branch]
+    [p]git prs <alias>
+    [p]git release <alias>
+
+These read-only commands use the existing guild connection and repository alias. Commit and pull/merge request lists return at most ten entries. Omitting a branch uses the provider default. Release cards use the provider's latest-release endpoint: GitHub/Gitea exclude drafts and prereleases; GitLab selects by release date. Tags alone are not releases. Missing releases are reported only after confirming repository access. Errors such as invalid branches, denied access, and rate limits remain errors.
+
+Text is bounded and mentions disabled. Links are restricted to the configured HTTPS forge. As with existing issue browsing, registering a repository makes its readable content available through this guild's commands; administrators should only register repositories appropriate for their members. Prefix and hybrid command forms are supported.
+
 ## Monitoring
 
 GitForge checks for due work every two minutes without exposing an HTTP listener. Equivalent issue
