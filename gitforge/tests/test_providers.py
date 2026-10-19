@@ -58,6 +58,49 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             await client.create_issue("owner", "repo", "Bug", "Details", ["feature"])
         self.assertEqual(len(client.calls), 1)
 
+    async def test_github_search_is_repository_scoped_and_excludes_pull_requests(self):
+        client = FakeClient(
+            "github",
+            [{"items": [
+                {"id": 1, "number": 4, "title": "Match", "html_url": "https://example/4", "user": {"login": "alice"}, "state": "open"},
+                {"id": 2, "number": 5, "title": "PR", "html_url": "https://example/5", "user": {"login": "bob"}, "pull_request": {}},
+            ]}],
+        )
+        issues = await client.search_issues("owner", "repo", "cache bug")
+        self.assertEqual([item["number"] for item in issues], [4])
+        self.assertEqual(client.calls[0][1], "/search/issues")
+        self.assertEqual(client.calls[0][2]["q"], "cache bug repo:owner/repo is:issue")
+
+    async def test_gitea_search_uses_bounded_repository_issue_query(self):
+        client = FakeClient(
+            "gitea",
+            [[{"id": 3, "number": 9, "title": "Cache", "html_url": "https://example/9", "user": {"login": "alice"}, "labels": [{"name": "bug"}]}]],
+        )
+        issues = await client.search_issues("owner", "repo", "cache", limit=99)
+        self.assertEqual(issues[0]["labels"], ["bug"])
+        self.assertEqual(client.calls[0][1], "/repos/owner/repo/issues")
+        self.assertEqual(client.calls[0][2], {"q": "cache", "state": "all", "limit": 20, "type": "issues"})
+
+    async def test_gitlab_issue_detail_uses_project_iid_and_normalizes_fields(self):
+        client = FakeClient(
+            "gitlab",
+            [{"id": 80, "iid": 7, "title": "Details", "web_url": "https://example/7", "author": {"username": "alice"}, "description": "Body", "labels": ["bug"], "user_notes_count": 3, "state": "closed"}],
+        )
+        issue = await client.get_issue("group/subgroup", "repo", 7)
+        self.assertEqual(client.calls[0][1], "/projects/group%2Fsubgroup%2Frepo/issues/7")
+        self.assertEqual(issue["number"], 7)
+        self.assertEqual(issue["body"], "Body")
+        self.assertEqual(issue["comments"], 3)
+        self.assertEqual(issue["state"], "closed")
+
+    async def test_search_rejects_unbounded_or_empty_queries(self):
+        client = FakeClient("gitea", [])
+        with self.assertRaises(ValueError):
+            await client.search_issues("owner", "repo", "x")
+        with self.assertRaises(ValueError):
+            await client.search_issues("owner", "repo", "x" * 101)
+        self.assertEqual(client.calls, [])
+
     async def test_github_pull_requests_are_not_returned_as_issues(self):
         client = FakeClient(
             "github",

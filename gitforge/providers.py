@@ -93,7 +93,7 @@ class ForgeClient:
         return self.base_url + "/api/v1"
 
     def headers(self):
-        headers = {"Accept": "application/json", "User-Agent": "SickCogs-GitForge/0.1.1"}
+        headers = {"Accept": "application/json", "User-Agent": "SickCogs-GitForge/0.1.2"}
         if self.provider == "github":
             headers.update({"Authorization": f"Bearer {self.token}", "X-GitHub-Api-Version": "2022-11-28"})
         elif self.provider == "gitlab":
@@ -181,25 +181,80 @@ class ForgeClient:
             raise ForgeError("The forge returned an incomplete issue response.", code="invalid_response")
         return CreatedIssue(int(number), str(body.get("title") or title), str(url))
 
+    def normalize_issue(self, item):
+        if not isinstance(item, dict):
+            return None
+        if self.provider == "github" and "pull_request" in item:
+            return None
+        user = item.get("author") if self.provider == "gitlab" else item.get("user")
+        number = item.get("iid") if self.provider == "gitlab" else item.get("number")
+        url = str(item.get("web_url") if self.provider == "gitlab" else item.get("html_url") or "")
+        if not url.startswith("https://"):
+            url = ""
+        labels = []
+        for label in item.get("labels") or []:
+            name = label.get("name") if isinstance(label, dict) else label
+            if name:
+                labels.append(str(name)[:50])
+        return {
+            "id": int(item.get("id") or 0),
+            "number": int(number or 0),
+            "title": str(item.get("title") or "Untitled issue"),
+            "url": url,
+            "author": str((user or {}).get("username") or (user or {}).get("login") or "Unknown"),
+            "state": str(item.get("state") or "unknown"),
+            "body": str((item.get("description") if self.provider == "gitlab" else item.get("body")) or ""),
+            "labels": labels[:20],
+            "comments": int((item.get("user_notes_count") if self.provider == "gitlab" else item.get("comments")) or 0),
+            "created_at": str(item.get("created_at") or ""),
+            "updated_at": str(item.get("updated_at") or ""),
+            "closed_at": str(item.get("closed_at") or ""),
+        }
+
+    async def get_issue(self, owner, repo, number):
+        number = int(number)
+        if number < 1:
+            raise ValueError("Issue numbers must be positive.")
+        body = await self.request(
+            "GET", self.repo_path(owner, repo) + f"/issues/{number}"
+        )
+        issue = self.normalize_issue(body)
+        if not issue or not issue["number"] or not issue["url"]:
+            raise ForgeError("The forge returned an incomplete issue response.", code="invalid_response")
+        return issue
+
+    async def search_issues(self, owner, repo, query, *, limit=10):
+        query = str(query or "").strip()
+        if not 2 <= len(query) <= 100:
+            raise ValueError("Search text must be 2-100 characters.")
+        limit = max(1, min(int(limit), 20))
+        if self.provider == "github":
+            path = "/search/issues"
+            params = {
+                "q": f"{query} repo:{owner}/{repo} is:issue",
+                "per_page": limit,
+            }
+            body = await self.request("GET", path, params=params)
+            source = body.get("items", []) if isinstance(body, dict) else []
+        else:
+            path = self.repo_path(owner, repo) + "/issues"
+            key = "search" if self.provider == "gitlab" else "q"
+            params = {key: query, "state": "all"}
+            params["per_page" if self.provider == "gitlab" else "limit"] = limit
+            if self.provider == "gitea":
+                params["type"] = "issues"
+            source = await self.request("GET", path, params=params)
+        issues = [self.normalize_issue(item) for item in source if isinstance(item, dict)]
+        return [issue for issue in issues if issue and issue["number"] and issue["url"]][:limit]
+
     async def list_issues(self, owner, repo, *, limit=20):
         params = {"state": "open"}
         params["per_page" if self.provider in {"github", "gitlab"} else "limit"] = min(limit, 50)
         if self.provider == "gitea":
             params["type"] = "issues"
         body = await self.request("GET", self.repo_path(owner, repo) + "/issues", params=params)
-        issues = []
-        for item in body if isinstance(body, list) else []:
-            if self.provider == "github" and "pull_request" in item:
-                continue
-            user = item.get("author") if self.provider == "gitlab" else item.get("user")
-            issues.append({
-                "id": int(item.get("id") or 0),
-                "number": int((item.get("iid") if self.provider == "gitlab" else item.get("number")) or 0),
-                "title": str(item.get("title") or "Untitled issue"),
-                "url": str((item.get("web_url") if self.provider == "gitlab" else item.get("html_url")) or ""),
-                "author": str((user or {}).get("username") or (user or {}).get("login") or "Unknown"),
-            })
-        return issues[:limit]
+        issues = [self.normalize_issue(item) for item in body if isinstance(item, dict)] if isinstance(body, list) else []
+        return [issue for issue in issues if issue and issue["number"] and issue["url"]][:limit]
 
     async def list_ci_runs(self, owner, repo, *, limit=10):
         path = self.repo_path(owner, repo)

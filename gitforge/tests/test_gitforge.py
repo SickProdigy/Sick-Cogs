@@ -76,6 +76,27 @@ class GitForgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(GitForge.can_create(member, {}))
         self.assertTrue(GitForge.can_create(member, {"policy": "members"}))
 
+    def test_issue_detail_embed_is_bounded_and_suppresses_missing_data(self):
+        embed = GitForge.issue_embed("project", {
+            "number": 42,
+            "title": "External *title*",
+            "url": "https://git.example.com/owner/repo/issues/42",
+            "body": "x" * 4000,
+            "author": "alice",
+            "state": "open",
+            "labels": ["bug"],
+            "comments": 2,
+            "updated_at": "2026-10-19T12:00:00Z",
+        })
+        self.assertEqual(embed.title, "Issue #42 — External \*title\*")
+        self.assertEqual(len(embed.description), 3000)
+        self.assertEqual(embed.url, "https://git.example.com/owner/repo/issues/42")
+        self.assertEqual(embed.fields[3].value, "2")
+
+    def test_issue_command_accepts_optional_detail_number(self):
+        self.assertIn("number", GitForge.issue.clean_params)
+        self.assertIn("query", GitForge.search.clean_params)
+
     async def test_issue_poll_seeds_without_sending(self):
         cog = object.__new__(GitForge)
         client = SimpleNamespace(

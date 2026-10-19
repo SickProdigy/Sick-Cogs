@@ -103,6 +103,26 @@ class GitForge(commands.Cog):
         body = (safe_description + "\n\n---\n" + attribution).strip()
         return await client.create_issue(repository["owner"], repository["repo"], safe_title, body, requested)
 
+    @staticmethod
+    def issue_embed(alias, item):
+        title = discord.utils.escape_markdown(str(item.get("title") or "Untitled issue"))
+        url = str(item.get("url") or "")
+        embed = discord.Embed(
+            title=f"Issue #{int(item.get('number') or 0)} — {title}"[:256],
+            url=url if url.startswith("https://") else None,
+            description=str(item.get("body") or "No description provided.")[:3000],
+            color=discord.Color.green() if item.get("state") == "open" else discord.Color.dark_grey(),
+        )
+        embed.add_field(name="Repository", value=alias, inline=True)
+        embed.add_field(name="State", value=str(item.get("state") or "unknown").title()[:100], inline=True)
+        embed.add_field(name="Author", value=str(item.get("author") or "Unknown")[:100], inline=True)
+        embed.add_field(name="Comments", value=str(int(item.get("comments") or 0)), inline=True)
+        labels = [discord.utils.escape_markdown(str(label)) for label in item.get("labels") or []]
+        embed.add_field(name="Labels", value=", ".join(labels)[:1024] or "None", inline=False)
+        if item.get("updated_at"):
+            embed.set_footer(text=f"Updated {str(item['updated_at'])[:40]}")
+        return embed
+
     async def settings_embed(self, guild):
         connections = await self.config.guild(guild).connections()
         repositories = await self.config.guild(guild).repositories()
@@ -251,9 +271,16 @@ class GitForge(commands.Cog):
 
     @git.command(name="issue")
     @commands.cooldown(2, 60, commands.BucketType.user)
-    async def issue(self, ctx, repo_alias: str):
-        """Open an editable issue preview for a registered repository."""
-        alias, repository, unused_client = await self.repository_for(ctx.guild, repo_alias)
+    async def issue(self, ctx, repo_alias: str, number: int = None):
+        """Create an issue draft, or show one by number."""
+        alias, repository, client = await self.repository_for(ctx.guild, repo_alias)
+        if number is not None:
+            item = await client.get_issue(repository["owner"], repository["repo"], number)
+            await ctx.send(
+                embed=self.issue_embed(alias, item),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
         if not self.can_create(ctx.author, repository):
             await ctx.send("This repository only accepts issues from server administrators.")
             return
@@ -271,13 +298,37 @@ class GitForge(commands.Cog):
         alias, repository, client = await self.repository_for(ctx.guild, repo_alias)
         issues = await client.list_issues(repository["owner"], repository["repo"])
         lines = [
-            f"[#{item['number']} {item['title'][:100]}]({item['url']}) - {item['author']}"
+            f"[#{item['number']} {discord.utils.escape_markdown(item['title'][:100])}]({item['url']}) - {discord.utils.escape_markdown(item['author'][:100])}"
             for item in issues
         ]
         await ctx.send(
             embed=discord.Embed(title=f"Open issues - {alias}", description="\n".join(lines)[:4000] or "No open issues.", color=discord.Color.blurple()),
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    @git.command(name="search")
+    @commands.cooldown(3, 60, commands.BucketType.user)
+    async def search(self, ctx, repo_alias: str, *, query: str):
+        """Search issues in a registered repository."""
+        alias, repository, client = await self.repository_for(ctx.guild, repo_alias)
+        issues = await client.search_issues(
+            repository["owner"], repository["repo"], query, limit=10
+        )
+        lines = []
+        for item in issues:
+            title = discord.utils.escape_markdown(item["title"][:120])
+            author = discord.utils.escape_markdown(item["author"][:80])
+            state = str(item.get("state") or "unknown").casefold()
+            lines.append(
+                f"[#{item['number']} {title}]({item['url']}) — {state} — {author}"
+            )
+        embed = discord.Embed(
+            title=f"Issue search — {alias}",
+            description="\n".join(lines)[:4000] or "No matching issues were found.",
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Query: {query[:100]} · Use git issue {alias} <number> for details")
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     @tasks.loop(minutes=2)
     async def repository_poller(self):

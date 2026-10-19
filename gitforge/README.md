@@ -33,9 +33,13 @@ Open an issue draft:
 
 The requester can edit the title, description, and allowlisted labels in a modal, review the card, and explicitly submit or cancel. Replying to a Discord message before invoking the command adds its jump link to the forge issue attribution.
 
-List recent open issues:
+Browse, search, and inspect issues:
 
     [p]git issues <repository-alias>
+    [p]git search <repository-alias> <search text>
+    [p]git issue <repository-alias> <issue number>
+
+Search returns at most ten repository-scoped issues across Gitea, GitHub, or GitLab. Supplying an issue number displays its state, author, labels, comment count, description, update time, and authoritative forge link. Read-only browsing does not require the repository issue-creation policy.
 
 ## Monitoring
 
