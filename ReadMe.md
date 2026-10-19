@@ -54,6 +54,7 @@ Current develop experiments include:
 - `rocketleague` — RLCS schedules, community tournaments and clips, and official game updates.
 - `dayz` — official DayZ Steam announcements.
 - `icarus` — official Icarus Steam announcements.
+- `windrose` — official Windrose Steam announcements.
 - `minecraft` — Java/Bedrock server status and official release announcements.
 - `palworld` — official Pocketpair Palworld Steam announcements.
 - `imagine` — private provider-neutral AI image generation with explicit allowlisting.
