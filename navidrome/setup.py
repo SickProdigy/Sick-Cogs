@@ -1323,6 +1323,7 @@ class NavidromeSetupView(discord.ui.View):
         except NavidromeError as exc:
             await interaction.followup.send(f"Connection test failed: {exc}", ephemeral=True)
             return
+        await self.cog.connection_recovered(name, interaction.guild)
         await interaction.followup.send(f"Connection `{name}` is responding.", ephemeral=True)
 
     @discord.ui.button(label="Preview album", style=discord.ButtonStyle.secondary, row=2)
