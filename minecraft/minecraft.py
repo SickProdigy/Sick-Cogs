@@ -31,7 +31,7 @@ CONFIG_IDENTIFIER = 6202609250214001
 MIN_INTERVAL_MINUTES = 5
 MAX_INTERVAL_MINUTES = 1440
 MAX_CONCURRENT_QUERIES = 8
-DEFAULT_UPDATE_INTERVAL_MINUTES = 15
+DEFAULT_UPDATE_INTERVAL_MINUTES = 60
 _NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 
@@ -62,7 +62,7 @@ class Minecraft(commands.Cog):
     """Show safe status cards for Java and Bedrock Minecraft servers."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.2"
+    __version__ = "0.1.3"
 
     guild_defaults = {
         "servers": {},
@@ -791,26 +791,73 @@ class Minecraft(commands.Cog):
             await ctx.send(embed=self.update_embed(item), allowed_mentions=discord.AllowedMentions.none())
 
     @minecraftset_updates.command(name="start")
-    async def minecraftset_updates_start(self, ctx):
-        group = self.config.guild(ctx.guild)
-        if not await group.updates_channel_id():
-            await ctx.send("Set an update channel first.")
+    async def minecraftset_updates_start(self, ctx, recent_posts: int = 0):
+        """Start announcements, optionally posting 1–10 recent matching updates."""
+        if recent_posts and not 1 <= recent_posts <= 10:
+            await ctx.send("Choose 1 to 10 recent posts, or omit the count for no backfill.")
             return
-        try:
-            items = await self.fetch_update_items()
-        except Exception:
-            log.exception("Could not seed Minecraft update history")
-            await ctx.send("The official Minecraft update sources are unavailable; announcements were not started.")
-            return
-        if not await group.updates_seen_ids():
-            await self.poll_update_guild(ctx.guild, items, force=True, seed_only=True)
-        await group.updates_enabled.set(True)
-        await group.updates_last_poll_at.set(utc_now().isoformat())
-        await ctx.send("Minecraft update announcements are running. Existing official posts were seeded without flooding the channel.")
+        lock = self._locks.setdefault(ctx.guild.id, asyncio.Lock())
+        async with lock:
+            group = self.config.guild(ctx.guild)
+            settings = await group.all()
+            if settings["updates_enabled"]:
+                await ctx.send(
+                    "Minecraft update announcements are already running. "
+                    "Use `minecraftset updates stop` before starting with a backfill."
+                    if recent_posts else "Minecraft update announcements are already running."
+                )
+                return
+            channel_id = settings.get("updates_channel_id")
+            channel = await self.get_channel(ctx.guild, channel_id) if channel_id else None
+            if channel is None:
+                await ctx.send("Set an available update channel first; announcements were not started.")
+                return
+            try:
+                items = filter_updates(await self.fetch_update_items(), settings)
+            except Exception:
+                log.exception("Could not fetch Minecraft startup updates")
+                await ctx.send("The official Minecraft update sources are unavailable; announcements were not started.")
+                return
+            seen = list(dict.fromkeys(settings.get("updates_seen_ids", [])))
+            if not seen:
+                seen = [item["id"] for item in sort_updates(items)][-MAX_SEEN_UPDATE_IDS:]
+                await group.updates_seen_ids.set(seen)
+            selected = sort_updates(sort_updates(items, reverse=True)[:recent_posts])
+            published = 0
+            for item in selected:
+                try:
+                    await channel.send(
+                        embed=self.update_embed(item),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                    await ctx.send(
+                        f"Published {published} of {len(selected)} selected recent updates, "
+                        "but delivery failed. Announcements remain stopped. Check channel permissions; "
+                        "retrying a backfill will repeat its selected posts."
+                    )
+                    return
+                published += 1
+                seen = list(dict.fromkeys(seen + [item["id"]]))[-MAX_SEEN_UPDATE_IDS:]
+                await group.updates_seen_ids.set(seen)
+            await group.updates_enabled.set(True)
+            await group.updates_last_poll_at.set(utc_now().isoformat())
+            message = "Minecraft update announcements are running."
+            if recent_posts:
+                message += f" Published {published} recent update(s), oldest to newest, without mentions."
+                if published < recent_posts:
+                    message += f" Only {len(selected)} matching posts were available (requested {recent_posts})."
+            elif not settings.get("updates_seen_ids"):
+                message += " Existing official posts were seeded without backfill."
+            else:
+                message += " Existing update history was preserved."
+            await ctx.send(message)
 
     @minecraftset_updates.command(name="stop")
     async def minecraftset_updates_stop(self, ctx):
-        await self.config.guild(ctx.guild).updates_enabled.set(False)
+        lock = self._locks.setdefault(ctx.guild.id, asyncio.Lock())
+        async with lock:
+            await self.config.guild(ctx.guild).updates_enabled.set(False)
         await ctx.send("Minecraft update announcements are stopped.")
 
     @minecraftset_updates.command(name="check")
