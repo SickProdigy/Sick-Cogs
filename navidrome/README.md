@@ -61,7 +61,16 @@ reserved destinations are rejected. Trusted LAN/HTTP deployments must continue u
 profile; private guild-managed destinations are intentionally not allowlistable. DNS is checked
 before every request and the connected peer address is checked before response data is accepted.
 JSON and artwork responses have fixed size limits and all HTTP operations use bounded timeouts.
-Announcements are disabled after three consecutive backend failures instead of retrying indefinitely.
+Backend failures never automatically disable announcements. Retries use exponential backoff:
+about 15, 30, 60, 120, then at most 240 minutes (with small jitter below the cap). The retry
+stage and next-check time survive reloads. A successful automatic fetch clears the failure stage.
+A successful manual `navidrome`/`info`/`stats`, `recent`, album preview, or connection test clears
+backoff for enabled guilds using that same connection; the next five-minute scheduler tick can
+check again without reseeding album history. Failed manual requests do not shorten the delay.
+Explicitly disabled announcements stay disabled, including configurations disabled by older
+versions: their stored state does not identify why they were disabled. Those require explicit
+administrator enablement. Lidarr requests and commands that only display local settings do not
+prove Navidrome connectivity and do not clear its backoff.
 Switching to a different server clears stale Discord-to-Navidrome mappings and disables
 announcements. Disconnect with `[p]navidromeset disconnect confirm`; this also deletes the guild-owned
 credentials.

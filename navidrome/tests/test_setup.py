@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import time
 import unittest
@@ -63,6 +64,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             "quiet_end": None,
             "interval_minutes": 60,
             "next_check_at": None,
+            "announcement_failures": 0,
             "announced_album_ids": [],
             "last_success_at": None,
             "accounts": {},
@@ -81,6 +83,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         settings = defaults | (settings or {})
         group = GuildConfig(settings)
         cog = object.__new__(Navidrome)
+        cog._connection_locks = {}
         cog.bot = SimpleNamespace(
             is_owner=AsyncMock(return_value=True),
             get_shared_api_tokens=AsyncMock(return_value={}),
@@ -896,47 +899,139 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_shared_connection_fetches_once_for_multiple_guilds(self):
-        cog, _ = self.make_cog()
+        cog, _ = self.make_cog(settings={"connection": "home", "announcement_enabled": True})
         client = SimpleNamespace(newest_albums=AsyncMock(return_value=[{"id": "a"}]))
         cog._client = AsyncMock(return_value=client)
         cog._check_guild = AsyncMock()
-        cog._poll_semaphore = __import__("asyncio").Semaphore(2)
-        cog._connection_failures = {}
+        cog._poll_semaphore = asyncio.Semaphore(2)
         guilds = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
-
-        await cog._poll_connection("home", guilds)
-
+        await cog._poll_connection("owner:home", guilds)
         client.newest_albums.assert_awaited_once_with(25)
         self.assertEqual(cog._check_guild.await_count, 2)
 
     async def test_failed_connection_gets_bounded_retry_without_blocking_others(self):
-        cog, _ = self.make_cog()
+        cog, group = self.make_cog(settings={"connection": "home", "announcement_enabled": True})
         cog._client = AsyncMock(side_effect=RuntimeError("secret provider failure"))
         cog._set_next_check = AsyncMock()
-        cog._poll_semaphore = __import__("asyncio").Semaphore(2)
-        cog._connection_failures = {}
+        cog._poll_semaphore = asyncio.Semaphore(2)
         guilds = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
-
-        await cog._poll_connection("home", guilds)
-
+        await cog._poll_connection("owner:home", guilds)
         self.assertEqual(cog._set_next_check.await_count, 2)
         retry_minutes = cog._set_next_check.await_args_list[0].args[1]
         self.assertGreaterEqual(retry_minutes, 15)
         self.assertLessEqual(retry_minutes, 20)
-        self.assertEqual(cog._connection_failures["home"], 1)
+        self.assertEqual(group.announcement_failures.value, 1)
+        group.announcement_enabled.set.assert_not_awaited()
 
-    async def test_repeated_connection_failure_disables_announcements(self):
-        cog, group = self.make_cog()
+    async def test_repeated_failures_back_off_to_cap_and_survive_reload(self):
+        cog, group = self.make_cog(settings={"connection": "home", "announcement_enabled": True})
         cog._client = AsyncMock(side_effect=RuntimeError("provider failure"))
-        cog._set_next_check = AsyncMock()
-        cog._poll_semaphore = __import__("asyncio").Semaphore(2)
-        cog._connection_failures = {"home": 2}
+        cog._poll_semaphore = asyncio.Semaphore(2)
+        guild = SimpleNamespace(id=1)
+        for expected in (15, 30, 60, 120, 240, 240):
+            group.next_check_at.value = None  # Advance to the next due attempt.
+            cog._connection_locks = {}  # No in-memory failure counter survives a reload.
+            before = utc_now()
+            with patch("navidrome.navidrome.random.randint", return_value=0):
+                await cog._poll_connection("owner:home", [guild])
+            deadline = datetime.datetime.fromisoformat(group.next_check_at.value)
+            self.assertAlmostEqual((deadline - before).total_seconds(), expected * 60, delta=2)
+            self.assertTrue(group.announcement_enabled.value)
+            calls = cog._client.await_count
+            await cog._poll_connection("owner:home", [guild])
+            self.assertEqual(cog._client.await_count, calls)
+        group.announcement_enabled.set.assert_not_awaited()
 
-        await cog._poll_connection("home", [SimpleNamespace(id=1)])
+    async def test_manual_recovery_is_connection_scoped_and_preserves_disabled_and_history(self):
+        cog, first = self.make_cog(settings={
+            "connection": "home", "announcement_enabled": True,
+            "announcement_failures": 4, "next_check_at": "2099-01-01T00:00:00+00:00",
+            "announced_album_ids": ["old"],
+        })
+        def group(**overrides):
+            return GuildConfig(Navidrome.default_guild | {
+                "connection": "home", "announcement_enabled": True,
+                "announcement_failures": 4, "next_check_at": "2099-01-01T00:00:00+00:00",
+                "announced_album_ids": ["old"],
+            } | overrides)
+        groups = {1: first, 2: group(), 3: group(connection="other"),
+                  4: group(announcement_enabled=False),
+                  5: group(connection_mode="guild_managed")}
+        guilds = [SimpleNamespace(id=i) for i in groups]
+        cog.bot.guilds = guilds
+        cog.config.guild.side_effect = lambda guild: groups[guild.id]
+        await cog.connection_recovered("home", guilds[0])
+        for i in (1, 2):
+            self.assertEqual(groups[i].announcement_failures.value, 0)
+            self.assertIsNone(groups[i].next_check_at.value)
+        for i in (3, 4, 5):
+            self.assertEqual(groups[i].announcement_failures.value, 4)
+        self.assertFalse(groups[4].announcement_enabled.value)
+        for item in groups.values():
+            self.assertEqual(item.announced_album_ids.value, ["old"])
+        await cog.connection_recovered("Guild managed", guilds[4])
+        self.assertEqual(groups[5].announcement_failures.value, 0)
+        self.assertEqual(groups[3].announcement_failures.value, 4)
 
-        group.announcement_enabled.set.assert_awaited_once_with(False)
-        group.next_check_at.set.assert_awaited_once_with(None)
-        cog._set_next_check.assert_not_awaited()
+    async def test_recent_success_clears_retry_but_failure_does_not(self):
+        cog, group = self.make_cog(settings={"connection": "home", "announcement_enabled": True,
+            "announcement_failures": 3, "next_check_at": "2099-01-01T00:00:00+00:00"})
+        client = SimpleNamespace(newest_albums=AsyncMock(side_effect=NavidromeError("offline")))
+        cog._guild_client = AsyncMock(return_value=("home", client))
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=1), send=AsyncMock())
+        await Navidrome.navidrome_recent.callback(cog, ctx, 10)
+        self.assertEqual(group.announcement_failures.value, 3)
+        client.newest_albums.side_effect = None
+        client.newest_albums.return_value = []
+        await Navidrome.navidrome_recent.callback(cog, ctx, 10)
+        self.assertEqual(group.announcement_failures.value, 0)
+        self.assertIsNone(group.next_check_at.value)
+
+    async def test_successful_poll_resets_stage_and_preserves_album_delivery(self):
+        cog, group = self.make_cog(settings={"connection": "home", "announcement_enabled": True,
+            "announcement_channel_id": 10, "announcement_failures": 4,
+            "announced_album_ids": ["old"]})
+        cog._poll_semaphore = asyncio.Semaphore(2)
+        client = SimpleNamespace(newest_albums=AsyncMock(return_value=[{"id": "new"}, {"id": "old"}]))
+        cog._client = AsyncMock(return_value=client)
+        cog._channel = AsyncMock(return_value=SimpleNamespace())
+        cog.send_album = AsyncMock()
+        await cog._poll_connection("owner:home", [SimpleNamespace(id=1)])
+        self.assertEqual(group.announcement_failures.value, 0)
+        self.assertEqual(group.announced_album_ids.value, ["old", "new"])
+        self.assertEqual(cog.send_album.await_count, 1)
+        self.assertTrue(group.announcement_enabled.value)
+
+    async def test_disabled_or_changed_connection_is_not_polled(self):
+        for settings in ({"connection": "home", "announcement_enabled": False},
+                         {"connection": "other", "announcement_enabled": True}):
+            cog, group = self.make_cog(settings=settings)
+            cog._poll_semaphore = asyncio.Semaphore(2)
+            cog._client = AsyncMock()
+            await cog._poll_connection("owner:home", [SimpleNamespace(id=1)])
+            cog._client.assert_not_awaited()
+            group.announcement_enabled.set.assert_not_awaited()
+
+    async def test_manual_recovery_waits_for_inflight_failure(self):
+        cog, group = self.make_cog(settings={"connection": "home", "announcement_enabled": True})
+        cog._poll_semaphore = asyncio.Semaphore(2)
+        started, finish = asyncio.Event(), asyncio.Event()
+        async def failing_client(name):
+            started.set()
+            await finish.wait()
+            raise NavidromeError("offline")
+        cog._client = failing_client
+        guild = SimpleNamespace(id=1)
+        polling = asyncio.create_task(cog._poll_connection("owner:home", [guild]))
+        await started.wait()
+        recovery = asyncio.create_task(cog.connection_recovered("home", guild))
+        await asyncio.sleep(0)
+        self.assertFalse(recovery.done())
+        finish.set()
+        await asyncio.gather(polling, recovery)
+        self.assertEqual(group.announcement_failures.value, 0)
+        self.assertIsNone(group.next_check_at.value)
+        self.assertTrue(group.announcement_enabled.value)
 
     async def test_connection_setup_is_owner_only_and_users_wait_for_connection(self):
         cog, _ = self.make_cog()

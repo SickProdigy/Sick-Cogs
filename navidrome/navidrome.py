@@ -26,7 +26,7 @@ from .setup import NavidromeSetupView, account_credentials_message
 log = logging.getLogger("red.sick-cogs.Navidrome")
 CONFIG_IDENTIFIER = 9172048261
 TOKEN_PREFIX = "navidrome_"
-USER_AGENT = "Sick-Cogs-Navidrome/1.2.1"
+USER_AGENT = "Sick-Cogs-Navidrome/1.2.3"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -354,7 +354,7 @@ class Navidrome(commands.Cog):
     """Connect each Discord server to its own approved Navidrome library."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.2"
+    __version__ = "1.2.3"
 
     default_global = {"connections": {}, "guild_connections_enabled": False}
     default_guild = {
@@ -370,6 +370,7 @@ class Navidrome(commands.Cog):
         "quiet_end": None,
         "interval_minutes": 60,
         "next_check_at": None,
+        "announcement_failures": 0,
         "announced_album_ids": [],
         "last_success_at": None,
         "accounts": {},
@@ -393,7 +394,7 @@ class Navidrome(commands.Cog):
         self.config.register_guild(**self.default_guild)
         self.session: Optional[aiohttp.ClientSession] = None
         self._poll_semaphore = asyncio.Semaphore(4)
-        self._connection_failures: Dict[str, int] = {}
+        self._connection_locks: Dict[str, asyncio.Lock] = {}
         self._connection_test_times: Dict[int, float] = {}
         self._lidarr_cooldowns: Dict[Tuple[int, int], float] = {}
         self.poll_loop.start()
@@ -713,6 +714,7 @@ class Navidrome(commands.Cog):
         await group.announced_album_ids.set([])
         await group.last_success_at.set(None)
         await group.next_check_at.set(None)
+        await group.announcement_failures.set(0)
         if clear_accounts:
             await group.accounts.set({})
 
@@ -819,6 +821,30 @@ class Navidrome(commands.Cog):
         value = (utc_now() + datetime.timedelta(minutes=max(15, minutes))).isoformat()
         await self.config.guild(guild).next_check_at.set(value)
 
+    @staticmethod
+    def connection_key(guild, settings):
+        if settings.get("connection_mode") == "guild_managed":
+            return f"guild:{guild.id}"
+        return f"owner:{settings.get('connection')}"
+
+    async def connection_recovered(self, name, guild=None):
+        """A successful manual request releases only this backend's active retries."""
+        key = f"guild:{guild.id}" if name == "Guild managed" else f"owner:{name}"
+        async with self._connection_locks.setdefault(key, asyncio.Lock()):
+            guilds = {item.id: item for item in getattr(self.bot, "guilds", [])}
+            if guild is not None:
+                guilds[guild.id] = guild
+            for target in guilds.values():
+                group = self.config.guild(target)
+                settings = await group.all()
+                if (self.connection_key(target, settings) != key
+                        or not settings.get("announcement_enabled")
+                        or not settings.get("announcement_failures", 0)):
+                    continue
+                await group.announcement_failures.set(0)
+                # Eligible at the next scheduler tick; no immediate public post or reseeding.
+                await group.next_check_at.set(None)
+
     async def setup_embed(self, guild: discord.Guild) -> discord.Embed:
         settings = await self.config.guild(guild).all()
         profiles = await self.config.connections()
@@ -904,6 +930,13 @@ class Navidrome(commands.Cog):
             value=settings.get("last_success_at") or "Never",
             inline=False,
         )
+        if settings.get("announcement_enabled") and settings.get("announcement_failures", 0):
+            embed.add_field(
+                name="Connection retry",
+                value=f"Retry stage {settings['announcement_failures']}/5. "
+                      f"Next attempt: {settings.get('next_check_at') or 'next scheduler tick'}",
+                inline=False,
+            )
         if not profiles and mode != "guild_managed":
             embed.add_field(
                 name="Owner setup needed",
@@ -937,6 +970,7 @@ class Navidrome(commands.Cog):
         group = self.config.guild(guild)
         await group.announced_album_ids.set(baseline[-500:])
         await group.announcement_enabled.set(True)
+        await group.announcement_failures.set(0)
         await group.last_success_at.set(utc_now().isoformat())
         await self._set_next_check(guild, int(settings.get("interval_minutes", 60)))
         return True, (
@@ -953,10 +987,11 @@ class Navidrome(commands.Cog):
         if not channel:
             return False, "I cannot send messages in the configured channel."
         try:
-            _, client = await self._guild_client(guild)
+            name, client = await self._guild_client(guild)
             albums = await client.newest_albums(1)
         except NavidromeError as exc:
             return False, str(exc)
+        await self.connection_recovered(name, guild)
         if not albums:
             return False, "Navidrome returned no albums to preview."
         await self.send_album(channel, albums[0], client, content="Navidrome announcement preview")
@@ -1018,39 +1053,51 @@ class Navidrome(commands.Cog):
             )
 
     async def _poll_connection(self, key: str, guilds: List[discord.Guild]):
+        key = key if key.startswith(("owner:", "guild:")) else f"owner:{key}"
+        async with self._connection_locks.setdefault(key, asyncio.Lock()):
+            await self._poll_connection_locked(key, guilds)
+
+    async def _poll_connection_locked(self, key, guilds):
         async with self._poll_semaphore:
+            targets = []
+            previous_failures = 0
+            for guild in guilds:
+                settings = await self.config.guild(guild).all()
+                if (settings.get("announcement_enabled")
+                        and self.connection_key(guild, settings) == key and self._due(settings)):
+                    targets.append(guild)
+                    previous_failures = max(previous_failures, int(settings.get("announcement_failures", 0)))
+            if not targets:
+                return
             try:
                 if key.startswith("guild:"):
-                    _, client = await self._guild_client(guilds[0])
+                    _, client = await self._guild_client(targets[0])
                 else:
-                    name = key.split(":", 1)[1] if key.startswith("owner:") else key
-                    client = await self._client(name)
+                    client = await self._client(key.split(":", 1)[1])
                 albums = await client.newest_albums(25)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                failures = self._connection_failures.get(key, 0) + 1
-                self._connection_failures[key] = failures
-                delay = min(240, 15 * (2 ** min(failures - 1, 4))) + random.randint(0, 5)
-                for guild in guilds:
-                    if failures >= 3:
-                        await self.config.guild(guild).announcement_enabled.set(False)
-                        await self.config.guild(guild).next_check_at.set(None)
-                    else:
-                        await self._set_next_check(guild, delay)
-                if failures >= 3:
-                    log.error(
-                        "Navidrome announcements disabled after repeated connection failures for %s (%s)",
-                        key, type(exc).__name__,
-                    )
-                else:
-                    log.warning(
-                        "Navidrome poll failed for connection %s (%s); retry in about %s minutes",
-                        key, type(exc).__name__, delay,
-                    )
+                failures = min(previous_failures + 1, 5)
+                delay = min(240, 15 * (2 ** (failures - 1)) + random.randint(0, 5))
+                for guild in targets:
+                    group = self.config.guild(guild)
+                    current = await group.all()
+                    if not current.get("announcement_enabled") or self.connection_key(guild, current) != key:
+                        continue
+                    await group.announcement_failures.set(failures)
+                    await self._set_next_check(guild, delay)
+                log.warning(
+                    "Navidrome poll failed for connection %s (%s); retry in about %s minutes",
+                    key, type(exc).__name__, delay,
+                )
                 return
-            self._connection_failures.pop(key, None)
-            for guild in guilds:
+            for guild in targets:
+                group = self.config.guild(guild)
+                current = await group.all()
+                if not current.get("announcement_enabled") or self.connection_key(guild, current) != key:
+                    continue
+                await group.announcement_failures.set(0)
                 try:
                     await self._check_guild(guild, albums, client)
                 except asyncio.CancelledError:
@@ -1075,6 +1122,7 @@ class Navidrome(commands.Cog):
             summary = await client.library_summary()
         except NavidromeError as exc:
             return await ctx.send(str(exc))
+        await self.connection_recovered(name, ctx.guild)
         embed = discord.Embed(title=f"{summary['type']} library", colour=discord.Colour.blurple())
         embed.add_field(name="Connection", value=name, inline=True)
         embed.add_field(name="Server version", value=summary["server_version"], inline=True)
@@ -1107,10 +1155,11 @@ class Navidrome(commands.Cog):
         """Show recently added albums (1-10)."""
         count = max(1, min(count, 10))
         try:
-            _, client = await self._guild_client(ctx.guild)
+            name, client = await self._guild_client(ctx.guild)
             albums = await client.newest_albums(count)
         except NavidromeError as exc:
             return await ctx.send(str(exc))
+        await self.connection_recovered(name, ctx.guild)
         if not albums:
             return await ctx.send("No albums were returned by this Navidrome server.")
         for album in albums:
@@ -1285,6 +1334,7 @@ class Navidrome(commands.Cog):
             users = await client.users()
         except (ValueError, NavidromeError) as exc:
             return await ctx.send(f"Connection test failed: {exc}")
+        await self.connection_recovered(name)
         server = str(result.get("type") or "Navidrome")
         version = str(result.get("serverVersion") or "unknown version")
         await ctx.send(
