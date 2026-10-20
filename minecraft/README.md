@@ -37,7 +37,7 @@ enable them explicitly with `[p]minecraftset playersample true`.
 ```text
 [p]minecraftset updates channel #minecraft-updates
 [p]minecraftset updates role @Minecraft
-[p]minecraftset updates interval 15
+[p]minecraftset updates interval 60
 [p]minecraftset updates snapshots true
 [p]minecraftset updates previews true
 [p]minecraftset updates start
@@ -47,6 +47,19 @@ Stable Java and Bedrock releases are enabled by default. Java snapshots, prerele
 candidates and Bedrock previews/betas are opt-in. Starting seeds the current official history without
 posting it; later updates are delivered once, oldest first, and remain deduplicated across restarts.
 Enabling an additional filter also seeds its existing posts before announcements begin.
+
+To start with recent posts, use `[p]minecraftset updates start 2` (1–10 supported).
+It posts the newest matching updates to the configured update channel, oldest first and without
+mentions. Omit the count for silent startup. If already running, use `updates stop` first.
+An explicit backfill intentionally replays recent posts even when they are in saved history;
+normal automatic checks do not repost successfully delivered backfill items. If delivery fails,
+the command reports how many posts succeeded and leaves announcements stopped. Retrying the
+backfill repeats its selected posts; use plain `start` to resume without replaying them.
+
+Official-update polling defaults to **60 minutes**. Existing saved intervals are preserved; use
+`[p]minecraftset updates interval 60` to change an existing server. This does not change the separate
+server-status monitoring interval. The scheduler checks locally each minute but fetches official
+feeds only when an enabled server is due; it shares that fetch across due servers.
 
 The cog uses Minecraft's official Feedback changelog sections because they provide human-readable
 release notes, summaries, timestamps, and stable article links. Mojang's Java version manifest was
