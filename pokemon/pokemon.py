@@ -59,7 +59,7 @@ DEFAULT_SERVER_TIMER_MINUTES=30
 OWNER_TIMER_MINUTES=(1,10080)
 SPAWN_PROFILES={
     "active":{"timer_minutes":10,"encounter_minutes":5,"battle_minutes":15,"concurrency":3},
-    "balanced":{"timer_minutes":30,"encounter_minutes":15,"battle_minutes":15,"concurrency":2},
+    "normal":{"timer_minutes":30,"encounter_minutes":15,"battle_minutes":15,"concurrency":2},
     "relaxed":{"timer_minutes":60,"encounter_minutes":20,"battle_minutes":20,"concurrency":1},
 }
 COLLECTION_PAGE_SIZE=9
@@ -85,6 +85,11 @@ def pace_for_settings(minimum,maximum,cooldown):
     for name,values in PACE.items():
         if values==(minimum,maximum,cooldown):return name
     return "custom"
+
+def selected_pace(conf):
+    """Keep each mode's saved tuning without rewriting existing configuration."""
+    name=conf.get("pace","normal") if conf.get("spawn_mode","timed")=="activity" else conf.get("spawn_profile","normal")
+    return "normal" if name=="balanced" else name
 
 def scaled_wild_level(player_level,offset):
     return max(1,min(100,player_level+offset))
@@ -299,7 +304,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="1.1.3";__author__="SickProdigy"
+    __version__="1.1.4";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1991,7 +1996,7 @@ class Pokemon(commands.Cog):
             quiet_state="active now" if quiet_hours_active(conf) else "inactive now";quiet_text=f"{format_quiet_clock(conf['quiet_start'])}–{format_quiet_clock(conf['quiet_end'])} {conf['quiet_timezone']} ({quiet_state})"
         else:quiet_text="disabled"
         await ctx.send(
-            f"**Pokémon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}** · Profile: **{conf.get('spawn_profile','custom')}**\nSpawn channels: {channels}\nPokémon Center: {center} · Free-heal cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m**\n"
+            f"**Pokémon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}** · Pace: **{selected_pace(conf)}**\nSpawn channels: {channels}\nPokémon Center: {center} · Free-heal cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m**\n"
             f"{progress}\nConcurrency limit: **{slot_limit}** ({concurrency_source}) · Active encounters: **{len(active)}/{slot_limit}** · Next spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** ({encounter_source}) · Battle lifetime: **{battle_minutes}m**\n"
             f"Notifications: **{notification_mode}** · Alert role: {notification_role} · Quiet hours: **{quiet_text}**\n"
             f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nExpired unattended cards: **{expired_cards}**\nCatalog species: **{len(SPECIES)}**"
@@ -2076,41 +2081,39 @@ class Pokemon(commands.Cog):
         else:
             await section.next_spawn_at.set(None);await ctx.send(f"This server: spawn mode changed from **{previous}** to **activity**. Timed spawning is paused.")
 
-    async def apply_spawn_profile(self,ctx,name,owner_override=False):
+    async def apply_pace(self,ctx,name,owner_override=False):
         name=name.casefold();profile=SPAWN_PROFILES.get(name)
         if profile is None:
-            await ctx.send("Choose active, balanced, or relaxed.");return
+            await ctx.send("Choose active, normal, or relaxed.");return
+        section=self.config.guild(ctx.guild);conf=await section.all();previous=selected_pace(conf)
+        if conf.get("spawn_mode","timed")=="activity":
+            policy=await self.config.all();minimum,maximum,cooldown=bounded_pace(*PACE[name],policy)
+            conf.update(pace=name,threshold_min=minimum,threshold_max=maximum,
+                        threshold=random.SystemRandom().randrange(minimum,maximum+1),spawn_cooldown=cooldown)
+            await section.set(conf)
+            await ctx.send(f"This server: activity pace **{previous}** → **{name}**. Effective threshold **{minimum}–{maximum} points** · cooldown **{cooldown}s**. Bot-wide floors apply. Timed settings and spawn mode are unchanged.")
+            return
         policy=await self.config.all();timer=profile["timer_minutes"];encounter=profile["encounter_minutes"];concurrency=profile["concurrency"]
         minimum_timer=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(policy.get("minimum_timer",GLOBAL["minimum_timer"]))))
         maximum_concurrency=max(1,min(5,int(policy.get("maximum_concurrency",GLOBAL["maximum_concurrency"]))))
         minimum_encounter=max(1,int(policy.get("minimum_encounter_timeout",60))//60);maximum_encounter=max(minimum_encounter,int(policy.get("maximum_encounter_timeout",900))//60)
-        problems=[]
-        if not owner_override and timer<minimum_timer:problems.append(f"timer {timer}m is below the bot-wide administrator floor of {minimum_timer}m")
-        if not owner_override and concurrency>maximum_concurrency:problems.append(f"concurrency {concurrency} exceeds the bot-wide administrator ceiling of {maximum_concurrency}")
-        if not owner_override and not minimum_encounter<=encounter<=maximum_encounter:problems.append(f"encounter lifetime {encounter}m is outside the bot-wide range of {minimum_encounter}–{maximum_encounter}m")
-        if problems:
-            await ctx.send(f"The **{name}** profile cannot be applied: {'; '.join(problems)}. The bot owner can adjust the policy or use `pokemonownerset profile {name}`.");return
-        section=self.config.guild(ctx.guild);conf=await section.all();previous=conf.get("spawn_profile","custom")
+        if not owner_override:
+            timer=max(timer,minimum_timer);concurrency=min(concurrency,maximum_concurrency)
+            encounter=max(minimum_encounter,min(encounter,maximum_encounter))
         conf.update({"spawn_profile":name,"timer_minutes":timer,"encounter_timeout":encounter*60,"encounter_owner_override":owner_override,"battle_timeout":profile["battle_minutes"]*60,"max_active_encounters":concurrency,"timer_owner_override":owner_override,"concurrency_owner_override":owner_override})
         if conf.get("spawn_mode","timed")=="timed":conf["next_spawn_at"]=jittered_spawn_due(datetime.now(timezone.utc),timer).isoformat()
-        await section.set(conf);scope="Bot-owner override" if owner_override else "Server profile"
-        await ctx.send(f"{scope}: **{previous}** → **{name}**. Timer **{timer}m** · encounter **{encounter}m** · battle **{profile['battle_minutes']}m** · concurrency **{concurrency}**. Changing any of these settings individually will mark the profile as **custom**.")
+        await section.set(conf);scope="Bot-owner override for this server" if owner_override else "This server (bot-wide limits applied)"
+        await ctx.send(f"{scope}: timed pace **{previous}** → **{name}**. Effective timer **{timer}m** · encounter **{encounter}m** · battle **{profile['battle_minutes']}m** · concurrency **{concurrency}**. Individual edits mark timed pace as **custom**. Activity settings and spawn mode are unchanged.")
 
-    @pokemon_set.command(name="profile")
-    async def spawn_profile(self,ctx,name:str):
-        """Apply a server profile: active, balanced, or relaxed.
+    @pokemon_owner_set.command(name="pace")
+    async def owner_pace(self,ctx,name:str):
+        """Apply active, normal, or relaxed pace for this server's current mode.
 
-        Values are timer / encounter lifetime / battle lifetime / simultaneous encounters:
-        active: 10m / 5m / 15m / 3; balanced: 30m / 15m / 15m / 2;
-        relaxed: 60m / 20m / 20m / 1. Bot-wide limits still apply.
-        This does not change spawn mode. Activity pace is a separate setting.
+        Timed mode applies exact preset values with per-server owner overrides.
+        Activity mode still respects bot-wide activity floors. See `[p]pokeset pace`
+        for preset values. Neither command switches modes or changes other servers.
         """
-        await self.apply_spawn_profile(ctx,name,owner_override=False)
-
-    @pokemon_owner_set.command(name="profile")
-    async def owner_spawn_profile(self,ctx,name:str):
-        """Apply a server profile with per-server owner overrides."""
-        await self.apply_spawn_profile(ctx,name,owner_override=True)
+        await self.apply_pace(ctx,name,owner_override=True)
 
     async def set_spawn_timer(self,ctx,minutes,owner_override=False):
         section=self.config.guild(ctx.guild);before=await section.all();policy=await self.config.all();previous=effective_timer_minutes(before,policy);await section.timer_minutes.set(minutes);await section.timer_owner_override.set(owner_override);await section.spawn_profile.set("custom")
@@ -2170,26 +2173,23 @@ class Pokemon(commands.Cog):
 
     @pokemon_set.command(name="pace")
     async def pace(self,ctx,setting:str):
-        """Choose an activity pace: active, normal, or relaxed.
+        """Choose active, normal, or relaxed pace for the current mode.
 
+        Timed mode (timer / encounter lifetime / battle lifetime / slots):
+        active: 10m / 5m / 15m / 3; normal: 30m / 15m / 15m / 2;
+        relaxed: 60m / 20m / 20m / 1.
+
+        Activity mode:
         active: 5–9 activity points, 60-second cooldown.
         normal: 8–15 activity points, 120-second cooldown.
         relaxed: 18–30 activity points, 300-second cooldown.
 
-        Bot-wide minimums can raise these values. Only affects activity mode;
-        use timer or profile for timed encounters. This does not switch modes.
+        Bot-wide limits adjust presets; the confirmation shows effective values.
+        This does not switch modes. Individual settings remain available for tuning;
+        timer/lifetimes/slots mark timed pace custom, threshold/cooldown mark activity pace custom.
         Example: `[p]pokeset pace normal`.
         """
-        setting=setting.casefold()
-        if setting not in PACE:
-            await ctx.send("Choose active, normal, or relaxed.");return
-        policy=await self.config.all();section=self.config.guild(ctx.guild);previous=await section.pace();minimum,maximum,cooldown=bounded_pace(*PACE[setting],policy)
-        await section.threshold_min.set(minimum)
-        await section.threshold_max.set(maximum)
-        await section.threshold.set(random.SystemRandom().randrange(minimum,maximum+1))
-        await section.spawn_cooldown.set(cooldown)
-        await section.pace.set(setting)
-        await ctx.send(f"This server: activity pace changed from **{previous}** to **{setting}** ({minimum}–{maximum} points, {cooldown}s cooldown). Bot-wide floors still apply.")
+        await self.apply_pace(ctx,setting)
 
     @pokemon_set.command(name="threshold")
     async def threshold(self,ctx,minimum:int,maximum:int):
