@@ -2,6 +2,9 @@
 
 Post new movie release announcements to a configured Discord channel using TMDb data.
 
+Release announcement cards use the footer “New & recently released movies • TMDb”
+to explain the feed and retain source attribution. Manual movie lookups keep their existing footer.
+
 Run `[p]movies` for search examples and a few random suggestions. Look up a movie by title with `[p]movies <title>` (or its `[p]movie` alias), for example
 `[p]movies interstellar` or `[p]movie dune 1984`. The result includes its poster,
 synopsis, release date,
