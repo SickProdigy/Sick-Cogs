@@ -9,7 +9,7 @@ import discord
 from discord.ext import tasks
 from redbot.core import Config, commands
 
-from .providers import ForgeClient, ForgeError, PUBLIC_HOSTS, forge_hostname, normalize_alias
+from .providers import ForgeClient, ForgeError, PUBLIC_HOSTS, forge_hostname, normalize_alias, normalize_branch
 from .views import IssueDraftView, SetupView
 
 log = logging.getLogger("red.sickcogs.gitforge")
@@ -18,6 +18,7 @@ FAILURE_STATES = {"failure", "failed", "cancelled", "canceled", "timed_out", "er
 MAX_CONCURRENT_POLL_REQUESTS = 6
 POLL_BACKOFF_BASE_SECONDS = 120
 POLL_BACKOFF_MAX_SECONDS = 1800
+MAX_PUSH_BRANCHES = 5
 
 
 class GitForge(commands.Cog):
@@ -141,9 +142,12 @@ class GitForge(commands.Cog):
             ci = f"<#{data['ci_channel_id']}>" if data.get("ci_channel_id") else "off"
             releases = f"<#{data['release_channel_id']}>" if data.get("release_channel_id") else "off"
             pulls = f"<#{data['pr_channel_id']}>" if data.get("pr_channel_id") else "off"
+            pushes = f"<#{data['push_channel_id']}>" if data.get("push_channel_id") else "off"
+            branches = self.browse_text(", ".join(data.get("push_branches", [])) or "none selected", 200)
             repository_lines.append(
                 f"**{alias}** - {data.get('owner')}/{data.get('repo')} via {data.get('connection')} "
                 f"- create: {data.get('policy', 'admins')} - issues: {issues} - CI: {ci} - releases: {releases} - PR/MR: {pulls}"
+                f" - pushes: {pushes} ({branches})"
             )
         embed.add_field(name="Connections", value="\n".join(connection_lines)[:1024] or "None", inline=False)
         embed.add_field(name="Repositories", value="\n".join(repository_lines)[:1024] or "None", inline=False)
@@ -230,7 +234,8 @@ class GitForge(commands.Cog):
             repositories[alias][key] = channel.id if channel else 0
             await self.config.guild(ctx.guild).repositories.set(repositories)
             label = {"issue_channel_id": "issue events", "ci_channel_id": "CI failures",
-                     "release_channel_id": "release announcements", "pr_channel_id": "PR/MR announcements"}[key]
+                     "release_channel_id": "release announcements", "pr_channel_id": "PR/MR announcements",
+                     "push_channel_id": "selected-branch updates"}[key]
             await ctx.send(f"{label.title()} for {alias}: {channel.mention if channel else 'disabled'}.")
 
     @gitset.command(name="issuechannel")
@@ -258,6 +263,40 @@ class GitForge(commands.Cog):
             if not (permissions.view_channel and permissions.send_messages and permissions.embed_links):
                 raise ValueError("I need View Channel, Send Messages and Embed Links in that channel.")
         await self._set_channel(ctx, repo_alias, "pr_channel_id", channel)
+
+    @gitset.command(name="pushchannel")
+    async def push_channel(self, ctx, repo_alias: str, channel: discord.TextChannel = None):
+        """Set a selected-branch update channel; omit it to pause and keep history."""
+        if channel is not None:
+            permissions = channel.permissions_for(ctx.guild.me)
+            if not (permissions.view_channel and permissions.send_messages and permissions.embed_links):
+                raise ValueError("I need View Channel, Send Messages and Embed Links in that channel.")
+        await self._set_channel(ctx, repo_alias, "push_channel_id", channel)
+
+    @gitset.command(name="pushbranches")
+    async def push_branches(self, ctx, repo_alias: str, *branches: str):
+        """Select up to five exact branches (space-separated); omit to clear."""
+        selected = list(dict.fromkeys(normalize_branch(branch) for branch in branches))
+        if len(selected) > MAX_PUSH_BRANCHES:
+            raise ValueError("Choose at most five exact branches per repository alias.")
+        alias = normalize_alias(repo_alias)
+        async with self.poll_lock:
+            repositories = await self.config.guild(ctx.guild).repositories()
+            if alias not in repositories:
+                raise ValueError(f"Repository alias {alias} is not configured.")
+            repository = repositories[alias]
+            if selected:
+                client = await self.client_for(ctx.guild, repository["connection"])
+                # Validate the complete selection before changing any persistent state.
+                for branch in selected:
+                    await client.branch_snapshot(repository["owner"], repository["repo"], branch)
+            repository["push_branches"] = selected
+            repository["push_heads"] = {branch: sha for branch, sha in repository.get("push_heads", {}).items()
+                                        if branch in selected}
+            await self.config.guild(ctx.guild).repositories.set(repositories)
+        selection = self.browse_text(", ".join(selected), 1200) if selected else "none (route inactive)"
+        await ctx.send(f"Selected branches for {alias}: {selection}. New selections seed silently on their first successful poll.",
+                       allowed_mentions=discord.AllowedMentions.none())
 
     @gitset.command(name="removerepo")
     async def remove_repo(self, ctx, repo_alias: str):
@@ -480,6 +519,8 @@ class GitForge(commands.Cog):
                     resources.append("releases")
                 if repository.get("pr_channel_id"):
                     resources.append("pulls")
+                if repository.get("push_channel_id"):
+                    resources.extend(("pushes", branch) for branch in repository.get("push_branches", [])[:MAX_PUSH_BRANCHES])
                 if not resources:
                     continue
                 connection = str(repository.get("connection") or "")
@@ -495,8 +536,11 @@ class GitForge(commands.Cog):
                         exc_info=True,
                     )
                     continue
-                for resource in resources:
+                for spec in resources:
+                    resource, branch = spec if isinstance(spec, tuple) else (spec, None)
                     key = self._poll_job_key(client, repository, resource)
+                    if branch is not None:
+                        key += (branch,)
                     job = jobs.setdefault(
                         key,
                         {
@@ -504,6 +548,7 @@ class GitForge(commands.Cog):
                             "owner": repository["owner"],
                             "repo": repository["repo"],
                             "resource": resource,
+                            "branch": branch,
                             "consumers": [],
                         },
                     )
@@ -525,6 +570,8 @@ class GitForge(commands.Cog):
                         items = await job["client"].list_releases(job["owner"], job["repo"])
                     elif job["resource"] == "pulls":
                         items = await job["client"].list_pulls(job["owner"], job["repo"])
+                    elif job["resource"] == "pushes":
+                        items = [await job["client"].branch_snapshot(job["owner"], job["repo"], job["branch"])]
                     else:
                         items = await job["client"].list_ci_runs(job["owner"], job["repo"])
             except asyncio.CancelledError:
@@ -577,6 +624,8 @@ class GitForge(commands.Cog):
                         changed = await self._poll_releases(guild, alias, repository, items)
                     elif job["resource"] == "pulls":
                         changed = await self._poll_pulls(guild, alias, repository, items)
+                    elif job["resource"] == "pushes":
+                        changed = await self._poll_push(guild, alias, repository, job["branch"], items[0])
                     else:
                         changed = await self._poll_ci(
                             guild,
@@ -663,6 +712,32 @@ class GitForge(commands.Cog):
         repository["ci_states"] = dict(list(current.items())[:50])
         return True
 
+
+    async def _poll_push(self, guild, alias, repository, branch, snapshot):
+        heads = dict(repository.get("push_heads", {}))
+        previous = heads.get(branch)
+        if previous == snapshot["sha"]:
+            return False
+        if previous is not None:
+            channel = guild.get_channel(int(repository["push_channel_id"]))
+            if channel is None:
+                return False
+            embed = discord.Embed(
+                title=self.browse_text(f"Branch updated — {branch}", 256),
+                description=self.browse_text(snapshot["message"], 3000), url=snapshot["url"],
+                color=discord.Color.blurple(),
+            )
+            embed.add_field(name="Previous observed commit", value=self.browse_text(previous[:12], 20))
+            embed.add_field(name="Latest commit", value=snapshot["sha"][:12])
+            embed.set_footer(text=f"{alias} • Observed branch update; not an individual push event")
+            try:
+                await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException:
+                log.warning("GitForge branch delivery failed for guild %s repository %s", guild.id, alias)
+                return False
+        heads[branch] = snapshot["sha"]
+        repository["push_heads"] = heads
+        return True
 
     async def _poll_pulls(self, guild, alias, repository, pulls):
         states = dict(repository.get("pr_states", {}))

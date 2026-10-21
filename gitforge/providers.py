@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import ipaddress
+import re
 import socket
 from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
@@ -40,6 +41,16 @@ def normalize_provider(value):
     if provider not in SUPPORTED_PROVIDERS:
         raise ValueError("Provider must be gitea, github, or gitlab.")
     return provider
+
+
+def normalize_branch(value):
+    branch = str(value).strip()
+    if (not branch or len(branch) > 200 or branch == "@" or branch.startswith("-")
+            or branch.endswith(".") or ".." in branch or "@{" in branch
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 or char in "~^:?*[\\" for char in branch)
+            or any(not part or part.startswith(".") or part.endswith(".lock") for part in branch.split("/"))):
+        raise ValueError("Use an exact branch name (1–200 characters), without wildcards or revision expressions.")
+    return branch
 
 
 def normalize_base_url(value, provider):
@@ -94,7 +105,7 @@ class ForgeClient:
         return self.base_url + "/api/v1"
 
     def headers(self):
-        headers = {"Accept": "application/json", "User-Agent": "SickCogs-GitForge/0.1.3"}
+        headers = {"Accept": "application/json", "User-Agent": "SickCogs-GitForge/0.1.6"}
         if self.provider == "github":
             headers.update({"Authorization": f"Bearer {self.token}", "X-GitHub-Api-Version": "2022-11-28"})
         elif self.provider == "gitlab":
@@ -187,6 +198,29 @@ class ForgeClient:
             "archived": bool(data.get("archived")),
             "url": self.browser_url(data.get("web_url") or data.get("html_url")),
         }
+
+    async def branch_snapshot(self, owner, repo, branch):
+        """Read one exact branch head, not a tag/revision or a push event log."""
+        branch = normalize_branch(branch)
+        suffix = "/repository/branches/" if self.provider == "gitlab" else "/branches/"
+        data = self._object(await self.request(
+            "GET", self.repo_path(owner, repo) + suffix + quote(branch, safe="")
+        ))
+        commit = self._object(data.get("commit"))
+        sha = commit.get("sha" if self.provider == "github" else "id")
+        if data.get("name") != branch or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", sha):
+            raise ForgeError("The forge returned an invalid branch head.", code="invalid_response")
+        if self.provider == "github":
+            details = self._object(commit.get("commit"))
+            url = commit.get("html_url")
+        else:
+            details = commit
+            url = commit.get("web_url" if self.provider == "gitlab" else "url")
+        url = self.browser_url(url)
+        if not url:
+            raise ForgeError("The forge returned an invalid commit link.", code="invalid_response")
+        return {"sha": sha.lower(), "message": str(details.get("message") or "No commit message provided."),
+                "url": url}
 
     async def recent_commits(self, owner, repo, branch=None):
         params = {"per_page" if self.provider != "gitea" else "limit": 10}

@@ -11,5 +11,5 @@
   "short": "Gitea, GitHub, and GitLab issues and repository notifications",
   "tags": ["git", "gitea", "github", "gitlab", "issues", "ci", "notifications"],
   "type": "COG",
-  "version": "0.1.5"
+  "version": "0.1.6"
 }
