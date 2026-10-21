@@ -21,6 +21,7 @@ Repository controls:
     [p]gitset issuechannel <alias> [channel]
     [p]gitset cichannel <alias> [channel]
     [p]gitset releasechannel <alias> [channel]
+    [p]gitset prchannel <alias> [channel]
     [p]gitset removerepo <alias>
     [p]gitset removeconnection <alias>
 
@@ -89,4 +90,22 @@ preserves release state; changing its repository or connection reseeds it. Exist
 and settings are not migrated. No provider credentials or runtime dependencies are added.
 
 Full live provider/Discord acceptance remains deferred until the planned command surface is ready.
-Pull/merge-request and selected-push announcement routes remain separate follow-ups in #221.
+Selected-push announcements remain a separate follow-up in #221.
+
+## Pull/merge-request announcements (0.1.5)
+
+Use `[p]gitset prchannel <alias> #development` (`mrchannel` is an alias). Omit the channel
+to pause. The first successful poll silently seeds existing requests; later polls announce newly
+observed requests and changes between open, closed, and merged, including known reopenings.
+Title/body edits alone do not repost. These are read-only notifications, not merge controls.
+
+One page of the 50 most recently updated requests is fetched per unique repository/credential
+combination, using the existing two-minute loop, bounded concurrency, and failure backoff.
+Disabled routes make no requests. Each alias keeps at most 200 states across reloads and channel
+changes; changing its repository or connection reseeds. Missing destinations and failed sends do
+not consume pending states; successful sends before a failure are retained. Mentions are disabled.
+
+This observes snapshots, not a complete event log: multiple transitions between polls can collapse,
+and long outages or bursts can exceed the 50-request window. Evicted states may be announced again
+if subsequently observed. An ambiguous send or crash before saving can still duplicate a message.
+Full live provider/Discord acceptance remains deferred in #221.

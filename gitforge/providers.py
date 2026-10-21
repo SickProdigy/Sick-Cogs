@@ -241,6 +241,45 @@ class ForgeClient:
                 "published": str(data.get("released_at") or data.get("published_at") or "Unknown"),
                 "url": self.browser_url(links.get("self") or data.get("html_url"))}
 
+    async def list_pulls(self, owner, repo):
+        """Read the latest 50 updated PR/MR snapshots, oldest update first."""
+        params = {"state": "all", "page": 1,
+                  "limit" if self.provider == "gitea" else "per_page": 50}
+        if self.provider == "gitlab":
+            params.update(scope="all", order_by="updated_at", sort="desc")
+        elif self.provider == "gitea":
+            params["sort"] = "recentupdate"
+        else:
+            params.update(sort="updated", direction="desc")
+        endpoint = "/merge_requests" if self.provider == "gitlab" else "/pulls"
+        rows = self._rows(await self.request("GET", self.repo_path(owner, repo) + endpoint, params=params))
+        if len(rows) > 50:
+            raise ForgeError("The forge exceeded the request page limit.", code="invalid_response")
+        items = {}
+        for row in rows:
+            number = row.get("iid" if self.provider == "gitlab" else "number")
+            state = row.get("state")
+            if self.provider == "gitlab":
+                if state == "locked":  # Transient merge processing is not a lifecycle event.
+                    continue
+                state = {"opened": "open", "closed": "closed", "merged": "merged"}.get(state)
+            elif row.get("merged") is True or row.get("merged_at"):
+                state = "merged"
+            url = self.browser_url(row.get("web_url") if self.provider == "gitlab" else row.get("html_url"))
+            try:
+                stamp = datetime.datetime.fromisoformat(str(row.get("updated_at", "")).replace("Z", "+00:00"))
+                if stamp.tzinfo is None:
+                    raise ValueError
+            except ValueError as exc:
+                raise ForgeError("The forge returned an invalid request date.", code="invalid_response") from exc
+            if type(number) is not int or number <= 0 or state not in {"open", "closed", "merged"} or not url:
+                raise ForgeError("The forge returned an incomplete request.", code="invalid_response")
+            items[str(number)] = {"id": str(number), "state": state, "url": url,
+                                  "title": str(row.get("title") or "Untitled request"),
+                                  "kind": "Merge request" if self.provider == "gitlab" else "Pull request",
+                                  "updated": stamp.astimezone(datetime.timezone.utc).isoformat()}
+        return sorted(items.values(), key=lambda item: (item["updated"], int(item["id"])))
+
     async def list_releases(self, owner, repo):
         """Read one bounded page of published releases, oldest first."""
         params = {"limit" if self.provider == "gitea" else "per_page": 50, "page": 1}

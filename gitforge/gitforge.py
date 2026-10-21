@@ -140,9 +140,10 @@ class GitForge(commands.Cog):
             issues = f"<#{data['issue_channel_id']}>" if data.get("issue_channel_id") else "off"
             ci = f"<#{data['ci_channel_id']}>" if data.get("ci_channel_id") else "off"
             releases = f"<#{data['release_channel_id']}>" if data.get("release_channel_id") else "off"
+            pulls = f"<#{data['pr_channel_id']}>" if data.get("pr_channel_id") else "off"
             repository_lines.append(
                 f"**{alias}** - {data.get('owner')}/{data.get('repo')} via {data.get('connection')} "
-                f"- create: {data.get('policy', 'admins')} - issues: {issues} - CI: {ci} - releases: {releases}"
+                f"- create: {data.get('policy', 'admins')} - issues: {issues} - CI: {ci} - releases: {releases} - PR/MR: {pulls}"
             )
         embed.add_field(name="Connections", value="\n".join(connection_lines)[:1024] or "None", inline=False)
         embed.add_field(name="Repositories", value="\n".join(repository_lines)[:1024] or "None", inline=False)
@@ -229,7 +230,7 @@ class GitForge(commands.Cog):
             repositories[alias][key] = channel.id if channel else 0
             await self.config.guild(ctx.guild).repositories.set(repositories)
             label = {"issue_channel_id": "issue events", "ci_channel_id": "CI failures",
-                     "release_channel_id": "release announcements"}[key]
+                     "release_channel_id": "release announcements", "pr_channel_id": "PR/MR announcements"}[key]
             await ctx.send(f"{label.title()} for {alias}: {channel.mention if channel else 'disabled'}.")
 
     @gitset.command(name="issuechannel")
@@ -248,6 +249,15 @@ class GitForge(commands.Cog):
             if not (permissions.view_channel and permissions.send_messages and permissions.embed_links):
                 raise ValueError("I need View Channel, Send Messages and Embed Links in that channel.")
         await self._set_channel(ctx, repo_alias, "release_channel_id", channel)
+
+    @gitset.command(name="prchannel", aliases=["mrchannel"])
+    async def pr_channel(self, ctx, repo_alias: str, channel: discord.TextChannel = None):
+        """Set a PR/MR channel, or omit it to pause without resetting history."""
+        if channel is not None:
+            permissions = channel.permissions_for(ctx.guild.me)
+            if not (permissions.view_channel and permissions.send_messages and permissions.embed_links):
+                raise ValueError("I need View Channel, Send Messages and Embed Links in that channel.")
+        await self._set_channel(ctx, repo_alias, "pr_channel_id", channel)
 
     @gitset.command(name="removerepo")
     async def remove_repo(self, ctx, repo_alias: str):
@@ -468,6 +478,8 @@ class GitForge(commands.Cog):
                     resources.append("ci")
                 if repository.get("release_channel_id"):
                     resources.append("releases")
+                if repository.get("pr_channel_id"):
+                    resources.append("pulls")
                 if not resources:
                     continue
                 connection = str(repository.get("connection") or "")
@@ -511,6 +523,8 @@ class GitForge(commands.Cog):
                         items = await job["client"].list_issues(job["owner"], job["repo"])
                     elif job["resource"] == "releases":
                         items = await job["client"].list_releases(job["owner"], job["repo"])
+                    elif job["resource"] == "pulls":
+                        items = await job["client"].list_pulls(job["owner"], job["repo"])
                     else:
                         items = await job["client"].list_ci_runs(job["owner"], job["repo"])
             except asyncio.CancelledError:
@@ -561,6 +575,8 @@ class GitForge(commands.Cog):
                         )
                     elif job["resource"] == "releases":
                         changed = await self._poll_releases(guild, alias, repository, items)
+                    elif job["resource"] == "pulls":
+                        changed = await self._poll_pulls(guild, alias, repository, items)
                     else:
                         changed = await self._poll_ci(
                             guild,
@@ -647,6 +663,39 @@ class GitForge(commands.Cog):
         repository["ci_states"] = dict(list(current.items())[:50])
         return True
 
+
+    async def _poll_pulls(self, guild, alias, repository, pulls):
+        states = dict(repository.get("pr_states", {}))
+        if not repository.get("prs_initialized", False):
+            repository["pr_states"] = {item["id"]: item["state"] for item in pulls}
+            repository["prs_initialized"] = True
+            return True
+        channel = guild.get_channel(int(repository["pr_channel_id"]))
+        if channel is None:
+            return False
+        changed = False
+        for item in pulls:
+            previous = states.get(item["id"])
+            if previous == item["state"]:
+                continue
+            status = "reopened" if previous == "closed" and item["state"] == "open" else item["state"]
+            embed = discord.Embed(
+                title=self.browse_text(f"{item['kind']} {status} — #{item['id']}", 256),
+                description=self.browse_text(item["title"], 3000), url=item["url"],
+                color=discord.Color.blurple(),
+            )
+            embed.set_footer(text=f"{alias} • Observed request state")
+            try:
+                await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException:
+                log.warning("GitForge PR/MR delivery failed for guild %s repository %s", guild.id, alias)
+                break
+            states.pop(item["id"], None)
+            states[item["id"]] = item["state"]
+            states = dict(list(states.items())[-200:])
+            repository["pr_states"] = states.copy()
+            changed = True
+        return changed
 
     async def _poll_releases(self, guild, alias, repository, releases):
         """Seed once, then retain successful deliveries even if a later send fails."""
