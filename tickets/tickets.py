@@ -7,7 +7,7 @@ from collections import defaultdict
 import discord
 from redbot.core import Config, commands
 
-from .models import OPEN_STATUSES, is_open, new_ticket_record, normalized_record, safe_display, ticket_channel_name
+from .models import MAX_PARTICIPANTS, OPEN_STATUSES, is_open, new_ticket_record, normalized_record, safe_display, ticket_channel_name
 from .views import LauncherView, SetupView, TicketControls, TicketError, TopicLauncherView
 
 CONFIG_ID = 7422161104
@@ -31,7 +31,7 @@ class Tickets(commands.Cog):
     """Private, server-owned support ticket channels."""
 
     __author__ = "SickProdigy"
-    __version__ = "0.5.0"
+    __version__ = "0.5.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -479,6 +479,165 @@ class Tickets(commands.Cog):
         await self.log_event(guild, f"status: {self.status_label(status)}", record, actor)
         return record
 
+    async def _protected_participant(self, guild, record, user):
+        member = guild.get_member(user.id)
+        return (user.id in {record["owner_id"], guild.me.id, record.get("claimed_by_id", 0)}
+                or bool(getattr(user, "bot", False))
+                or (member is not None and await self.is_staff(member)))
+
+    async def _participant_destination(self, guild, record):
+        try:
+            channel = await guild.fetch_channel(record["channel_id"])
+        except discord.HTTPException as exc:
+            raise TicketError("I could not fetch this ticket destination; check its existence and my permissions.") from exc
+        expected = {"text": discord.TextChannel, "voice": discord.VoiceChannel, "thread": discord.Thread}[record["mode"]]
+        if not isinstance(channel, expected) or channel.guild.id != guild.id:
+            raise TicketError("The registered ticket destination type or server does not match.")
+        if isinstance(channel, discord.Thread):
+            if channel.type != discord.ChannelType.private_thread or channel.invitable:
+                raise TicketError("Guest management requires a private, non-invitable thread.")
+            parent = await guild.fetch_channel(channel.parent_id)
+            if not parent.permissions_for(guild.me).manage_threads:
+                raise TicketError("I need Manage Threads in this ticket's parent channel.")
+        else:
+            if channel.permissions_for(guild.default_role).view_channel:
+                raise TicketError("This ticket is no longer private; repair its permissions before adding guests.")
+            if not channel.permissions_for(guild.me).manage_roles:
+                raise TicketError("I need Manage Permissions (Manage Roles) in this ticket channel.")
+        return channel
+
+    async def _set_participant_access(self, guild, record, user, *, allow, actor_id):
+        channel = await self._participant_destination(guild, record)
+        reason = f"Ticket #{record['number']} guest {user.id}: {'add' if allow else 'remove'} by {actor_id}"
+        if isinstance(channel, discord.Thread):
+            parent = await guild.fetch_channel(channel.parent_id)
+            member = guild.get_member(user.id)
+            if member and parent.permissions_for(member).manage_threads:
+                raise TicketError("That member has independent Manage Threads access and cannot be managed as a guest.")
+            if allow:
+                if channel.archived or channel.locked:
+                    raise TicketError("Reopen the ticket thread before adding a guest.")
+                permissions = parent.permissions_for(user)
+                if not (permissions.view_channel and permissions.send_messages_in_threads and permissions.read_message_history):
+                    raise TicketError("That member needs View Channel, Read Message History and Send Messages in Threads on the parent.")
+                await channel.add_user(user)
+                await channel.fetch_member(user.id)
+            else:
+                # Archived threads must be active for membership changes. Keep them locked.
+                archived, locked = channel.archived, channel.locked
+                if archived:
+                    await channel.edit(archived=False, locked=True, reason=reason)
+                try:
+                    try:
+                        await channel.remove_user(user)
+                    except discord.NotFound:
+                        pass
+                    try:
+                        await channel.fetch_member(user.id)
+                    except discord.NotFound:
+                        pass
+                    else:
+                        raise TicketError("Discord still reports this guest in the thread; retry removal.")
+                finally:
+                    if archived:
+                        await channel.edit(archived=True, locked=locked, reason=reason)
+            return
+        member = guild.get_member(user.id)
+        connected = (isinstance(channel, discord.VoiceChannel) and member is not None
+                     and member.voice and member.voice.channel and member.voice.channel.id == channel.id)
+        if not allow and connected and not channel.permissions_for(guild.me).move_members:
+            raise TicketError("I need Move Members to disconnect this voice guest before removal can complete.")
+        overwrite = channel.overwrites_for(user)
+        overwrite.view_channel = allow
+        overwrite.send_messages = allow
+        overwrite.read_message_history = allow
+        if isinstance(channel, discord.VoiceChannel):
+            overwrite.connect = allow
+            overwrite.speak = allow
+        await channel.set_permissions(user, overwrite=overwrite, reason=reason)
+        fresh = await guild.fetch_channel(channel.id)
+        if allow and fresh.permissions_for(guild.default_role).view_channel:
+            raise TicketError("The ticket's privacy permissions changed during the request; staff must review them.")
+        if member:
+            permissions = fresh.permissions_for(member)
+            if allow and not (permissions.view_channel and permissions.send_messages and permissions.read_message_history
+                              and (not isinstance(fresh, discord.VoiceChannel) or (permissions.connect and permissions.speak))):
+                raise TicketError("Discord did not grant the expected guest access.")
+            if not allow and permissions.view_channel:
+                raise TicketError("That member still has independent access; staff must review their permissions.")
+        elif fresh.overwrites_for(user).view_channel is not False:
+            raise TicketError("I could not verify removal of the departed member's access.")
+        if not allow and connected:
+            await member.move_to(None, reason=reason)
+
+    async def change_participant(self, guild, channel_id, actor, user, *, add):
+        async with self._locks[guild.id]:
+            if getattr(getattr(actor, "guild", None), "id", None) != guild.id or not await self.is_staff(actor):
+                raise TicketError("Only this server's support staff can manage ticket guests.")
+            record = await self.get_ticket(guild, channel_id)
+            if not record or not is_open(record):
+                raise TicketError("Run this command inside a registered open ticket.")
+            if await self._protected_participant(guild, record, user):
+                raise TicketError("The requester, bots, claimant and support staff cannot be managed as guests.")
+            ids = record["participant_ids"]
+            if add:
+                if not isinstance(user, discord.Member) or user.guild.id != guild.id:
+                    raise TicketError("Choose a current member of this server.")
+                if user.id not in ids:
+                    destination = await self._participant_destination(guild, record)
+                    if isinstance(destination, discord.Thread):
+                        parent = await guild.fetch_channel(destination.parent_id)
+                        if parent.permissions_for(user).manage_threads:
+                            raise TicketError("That member already has independent Manage Threads access.")
+                        try:
+                            await destination.fetch_member(user.id)
+                        except discord.NotFound:
+                            pass
+                        else:
+                            raise TicketError("That member already belongs to this thread independently; their access will not be managed.")
+                    elif destination.permissions_for(user).view_channel:
+                        raise TicketError("That member already has independent channel access; their permissions will not be changed.")
+                    if len(ids) >= MAX_PARTICIPANTS:
+                        raise TicketError("This ticket already tracks ten guests. Remove a guest before adding another.")
+                    # Persist intent before granting access so interruption never leaves an untracked grant.
+                    ids.append(user.id)
+                    record["updated_at"] = int(time.time())
+                    await self._save_ticket(guild, record)
+            elif user.id not in ids:
+                raise TicketError("That user is not a tracked guest; existing independent access will not be changed.")
+            try:
+                await self._set_participant_access(guild, record, user, allow=add, actor_id=actor.id)
+            except (discord.HTTPException, TicketError) as exc:
+                if add:
+                    try:
+                        await self._set_participant_access(guild, record, user, allow=False, actor_id=actor.id)
+                    except (discord.HTTPException, TicketError):
+                        raise TicketError("Guest access could not be confirmed or rolled back. The user remains tracked; staff must retry removal or repair permissions.") from exc
+                raise TicketError(f"Guest change incomplete: {exc if isinstance(exc, TicketError) else 'Discord rejected the request'}. The user remains tracked for retry/removal.") from exc
+            if not add:
+                record["participant_ids"] = [value for value in ids if value != user.id]
+            record["updated_at"] = int(time.time())
+            await self._save_ticket(guild, record)
+        await self.log_event(guild, f"guest {'added' if add else 'removed'}: user {user.id}", record, actor)
+        return record
+
+    async def _revoke_guests(self, guild, record, actor_id):
+        for user_id in record.get("participant_ids", []):
+            user = guild.get_member(user_id) or self.bot.get_user(user_id)
+            if user is None:
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                except discord.NotFound:
+                    continue  # Deleted Discord account cannot regain access.
+            if await self._protected_participant(guild, record, user):
+                continue  # Promoted staff retain their independent access.
+            if record["mode"] == "thread" and guild.get_member(user_id):
+                destination = await self._participant_destination(guild, record)
+                parent = await guild.fetch_channel(destination.parent_id)
+                if parent.permissions_for(guild.get_member(user_id)).manage_threads:
+                    continue
+            await self._set_participant_access(guild, record, user, allow=False, actor_id=actor_id)
+
     async def set_closed(self, guild, channel_id, actor, *, closed, reason=""):
         reason = safe_display(reason.strip(), 500)
         async with self._locks[guild.id]:
@@ -504,6 +663,7 @@ class Tickets(commands.Cog):
                     raise TicketError("I could not delete this ticket.") from error
                 record.update(
                     status="deleted",
+                    participant_ids=[],
                     updated_at=int(time.time()),
                     closed_at=int(time.time()),
                     closed_by_id=actor.id,
@@ -519,6 +679,8 @@ class Tickets(commands.Cog):
             if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.Thread)):
                 raise TicketError("The ticket destination no longer exists.")
             try:
+                if closed:
+                    await self._revoke_guests(guild, record, actor.id)
                 if isinstance(channel, discord.Thread):
                     await channel.edit(
                         archived=closed,
@@ -541,6 +703,7 @@ class Tickets(commands.Cog):
             now = int(time.time())
             record.update(
                 status="closed" if closed else "open", updated_at=now,
+                participant_ids=[] if closed else record.get("participant_ids", []),
                 closed_at=now if closed else 0,
                 closed_by_id=actor.id if closed else 0,
                 close_reason=reason if closed else "",
@@ -609,6 +772,7 @@ class Tickets(commands.Cog):
             if destination is None:
                 record.update(
                     status="deleted",
+                    participant_ids=[],
                     updated_at=int(time.time()),
                     control_message_id=0,
                 )
@@ -622,6 +786,7 @@ class Tickets(commands.Cog):
                 raise TicketError("I could not permanently delete this ticket.") from error
             record.update(
                 status="deleted",
+                participant_ids=[],
                 updated_at=int(time.time()),
                 control_message_id=0,
             )
@@ -653,23 +818,19 @@ class Tickets(commands.Cog):
     async def on_guild_channel_delete(self, channel):
         if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
             return
-        record = await self.get_ticket(channel.guild, channel.id)
-        if record and record["status"] != "deleted":
-            record.update(status="deleted", updated_at=int(time.time()), control_message_id=0)
-            await self._save_ticket(channel.guild, record)
-            await self.log_event(channel.guild, "channel deleted", record)
+        await self._mark_destination_deleted(channel)
 
     @commands.Cog.listener()
     async def on_thread_delete(self, thread):
-        record = await self.get_ticket(thread.guild, thread.id)
-        if record and record["status"] != "deleted":
-            record.update(
-                status="deleted",
-                updated_at=int(time.time()),
-                control_message_id=0,
-            )
-            await self._save_ticket(thread.guild, record)
-            await self.log_event(thread.guild, "thread deleted", record)
+        await self._mark_destination_deleted(thread)
+
+    async def _mark_destination_deleted(self, destination):
+        async with self._locks[destination.guild.id]:
+            record = await self.get_ticket(destination.guild, destination.id)
+            if record and record["status"] != "deleted":
+                record.update(status="deleted", updated_at=int(time.time()), control_message_id=0, participant_ids=[])
+                await self._save_ticket(destination.guild, record)
+                await self.log_event(destination.guild, "destination deleted", record)
 
     @commands.hybrid_group(name="tickets", invoke_without_command=True)
     @commands.guild_only()
@@ -719,6 +880,41 @@ class Tickets(commands.Cog):
             "\n".join(lines),
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    @tickets.command(name="add")
+    async def tickets_add(self, ctx, member: discord.Member):
+        """Staff: invite a guest to this open ticket (they can read its earlier messages)."""
+        await ctx.defer(ephemeral=True)
+        try:
+            await self.change_participant(ctx.guild, ctx.channel.id, ctx.author, member, add=True)
+        except TicketError as exc:
+            raise commands.UserFeedbackCheckFailure(str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise commands.UserFeedbackCheckFailure("Discord rejected the guest preflight check; check permissions and retry.") from exc
+        await ctx.send(f"Added guest <@{member.id}>. They can read this ticket's history; no staff controls were granted.",
+                       allowed_mentions=discord.AllowedMentions.none(), ephemeral=True)
+
+    @tickets.command(name="remove")
+    async def tickets_remove(self, ctx, user: discord.User):
+        """Staff: revoke a tracked guest's access to this open ticket."""
+        await ctx.defer(ephemeral=True)
+        try:
+            await self.change_participant(ctx.guild, ctx.channel.id, ctx.author, user, add=False)
+        except TicketError as exc:
+            raise commands.UserFeedbackCheckFailure(str(exc)) from exc
+        await ctx.send(f"Removed guest <@{user.id}> from this ticket.", allowed_mentions=discord.AllowedMentions.none(), ephemeral=True)
+
+    @tickets.command(name="participants")
+    async def tickets_participants(self, ctx):
+        """Staff: list tracked guests, including any incomplete permission changes."""
+        if not await self.is_staff(ctx.author):
+            raise commands.UserFeedbackCheckFailure("Only support staff can list ticket guests.")
+        record = await self.get_ticket(ctx.guild, ctx.channel.id)
+        if not record or not is_open(record):
+            raise commands.UserFeedbackCheckFailure("Run this command inside a registered open ticket.")
+        ids = record.get("participant_ids", [])
+        await ctx.send("Tracked guests (failed changes may need retry): " + (", ".join(f"<@{value}>" for value in ids) or "None"),
+                       allowed_mentions=discord.AllowedMentions.none(), ephemeral=True)
 
     @tickets.command(name="queue")
     async def tickets_queue(self, ctx):
@@ -908,17 +1104,27 @@ class Tickets(commands.Cog):
         await ctx.send(f"Ticket launcher is ready: {message.jump_url}")
 
     async def red_delete_data_for_user(self, *, requester, user_id):
-        for guild_id, data in (await self.config.all_guilds()).items():
-            await self.config.member_from_ids(guild_id, user_id).clear()
-            changed = False
-            tickets = data.get("tickets", {})
-            for key, value in tickets.items():
-                record = normalized_record(value)
-                if not record:
-                    continue
-                for field in ("owner_id", "claimed_by_id", "closed_by_id"):
-                    if record[field] == user_id:
-                        record[field], changed = 0, True
-                tickets[key] = record
-            if changed:
-                await self.config.guild_from_id(guild_id).tickets.set(tickets)
+        for guild_id in await self.config.all_guilds():
+            guild_id = int(guild_id)
+            async with self._locks[guild_id]:
+                await self.config.member_from_ids(guild_id, user_id).clear()
+                changed = False
+                tickets = await self.config.guild_from_id(guild_id).tickets()
+                for key, value in tickets.items():
+                    record = normalized_record(value)
+                    if not record:
+                        continue
+                    if user_id in record["participant_ids"]:
+                        if record["status"] != "deleted":
+                            guild = self.bot.get_guild(guild_id)
+                            if guild is None:
+                                raise TicketError("Cannot safely revoke a guest grant while the server is unavailable; retry data deletion.")
+                            await self._revoke_guests(guild, {**record, "participant_ids": [user_id]}, 0)
+                        record["participant_ids"].remove(user_id)
+                        changed = True
+                    for field in ("owner_id", "claimed_by_id", "closed_by_id"):
+                        if record[field] == user_id:
+                            record[field], changed = 0, True
+                    tickets[key] = record
+                if changed:
+                    await self.config.guild_from_id(guild_id).tickets.set(tickets)

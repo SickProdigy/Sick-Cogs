@@ -19,7 +19,7 @@ class TicketModelTests(unittest.TestCase):
             {
                 "number", "channel_id", "owner_id", "mode", "claims_enabled", "statuses_enabled", "close_behavior", "topic_prefix", "topic_label", "status", "claimed_by_id",
                 "created_at", "updated_at", "closed_at", "closed_by_id", "close_reason",
-                "control_message_id",
+                "control_message_id", "participant_ids",
             },
         )
         self.assertEqual(record["created_at"], 123)

@@ -4,6 +4,14 @@ import time
 
 OPEN_STATUSES = {"open", "waiting_member", "waiting_staff"}
 ALL_STATUSES = OPEN_STATUSES | {"closed", "deleted"}
+MAX_PARTICIPANTS = 10
+
+
+def participant_ids(value):
+    """Normalize old records without dropping tracked grants during recovery."""
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(int(item) for item in value if str(item).isdigit() and int(item) > 0))
 
 
 def new_ticket_record(
@@ -37,6 +45,7 @@ def new_ticket_record(
         "closed_by_id": 0,
         "close_reason": "",
         "control_message_id": int(control_message_id),
+        "participant_ids": [],
     }
 
 
@@ -77,6 +86,7 @@ def normalized_record(value):
             "closed_by_id": int(value.get("closed_by_id", 0) or 0),
             "close_reason": str(value.get("close_reason", ""))[:500],
             "control_message_id": int(value.get("control_message_id", 0) or 0),
+            "participant_ids": participant_ids(value.get("participant_ids", [])),
         }
     except (KeyError, TypeError, ValueError):
         return None

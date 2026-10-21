@@ -63,6 +63,20 @@ Each ticket has persistent controls for claim/unclaim, status, and close/reopen.
 
 Transcripts, automatic retention deletion, external help-desk integrations, and DM relay are not part of this release.
 
+### Optional ticket guests
+
+Support staff can run these commands inside an open ticket:
+
+    [p]tickets add <member>
+    [p]tickets remove <user or ID>
+    [p]tickets participants
+
+Up to ten guests can be tracked per ticket. Adding a guest exposes the existing conversation history; it does not grant claim, status, close, or other staff controls. The requester, bots, claimant, and support staff cannot be managed as guests. Members who already have independent access are not taken over by these commands.
+
+Text/voice guest management requires the bot's Manage Permissions (Manage Roles) permission. Removing a connected voice guest also requires Move Members and disconnects them. Private threads require Manage Threads for the bot and View Channel, Read Message History, and Send Messages in Threads on the parent for the guest. Threads must remain private and non-invitable.
+
+Review-mode closure revokes tracked guest access before marking the ticket closed. Reopening does not restore guests automatically. Guests promoted to staff retain their independent staff access. Interrupted or rejected changes remain tracked for retry/removal; `tickets participants` includes these pending records, not a guarantee of current Discord access. Repair permissions and retry if a change cannot complete. User-data deletion likewise requires successful guest-access cleanup before forgetting the ID and may need retry when Discord is unavailable.
+
 ## Custom topic launcher
 
 Switch from the generic mode buttons to recognizable support topics by adding buttons. Each topic uses a 2-10 character lowercase prefix and maps to text, voice, or thread mode:
