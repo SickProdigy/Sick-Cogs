@@ -1,6 +1,6 @@
 # GitForge
 
-GitForge connects a Discord server to approved Gitea, GitHub, and GitLab repositories. It provides requester-bound issue drafts with an explicit preview and confirmation, bounded issue browsing, and separate channels for newly opened issues and CI failures or recoveries.
+GitForge connects a Discord server to approved Gitea, GitHub, and GitLab repositories. It provides requester-bound issue drafts with an explicit preview and confirmation, bounded issue browsing, and separate channels for newly opened issues, CI failures or recoveries, and published releases.
 
 ## Setup
 
@@ -20,6 +20,7 @@ Repository controls:
     [p]gitset labels <alias> bug, discord-submitted
     [p]gitset issuechannel <alias> [channel]
     [p]gitset cichannel <alias> [channel]
+    [p]gitset releasechannel <alias> [channel]
     [p]gitset removerepo <alias>
     [p]gitset removeconnection <alias>
 
@@ -63,3 +64,29 @@ not block unrelated repositories or Discord destinations.
 The first successful poll seeds its cursor without reposting existing events. Later polls announce
 newly observed issues and CI transitions into or out of failure. Optional webhook delivery can use
 the same routing model in a later release.
+
+
+## Release announcements (0.1.4)
+
+Use `[p]gitset releasechannel <alias> #releases`. The first successful poll records existing
+releases silently, including an empty repository baseline. Later polls post newly seen releases,
+oldest first, with bounded notes, tag, date and a link to the configured forge. Mentions are disabled.
+Gitea/GitHub drafts and prereleases, and future-dated GitLab releases, are excluded. GitLab does
+not supply the same prerelease flag; its already-published releases are eligible regardless of tag naming.
+
+Each poll reads one page of at most 50 release records per unique repository/credential combination.
+This is bounded monitoring, not a complete historical sync: releases outside that page during a
+long outage or large burst are not recovered. Each repository alias retains up to 200 delivered or
+seeded release IDs. Release edits do not repost an already tracked ID (GitLab uses its release tag).
+No release route means no release request. Release errors use the existing grouped backoff and do
+not block issue or CI routes. A missing/inaccessible Discord destination does not consume pending
+release IDs; successful sends before a later failure are saved for retry. As with ordinary Discord
+posting, an ambiguous send or crash before saving can still produce a duplicate.
+
+Omit the channel to pause the route. Re-enabling or moving channels keeps its history, so releases
+published while paused can be caught within the bounded window. Re-registering the same alias
+preserves release state; changing its repository or connection reseeds it. Existing issue/CI state
+and settings are not migrated. No provider credentials or runtime dependencies are added.
+
+Full live provider/Discord acceptance remains deferred until the planned command surface is ready.
+Pull/merge-request and selected-push announcement routes remain separate follow-ups in #221.

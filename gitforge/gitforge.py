@@ -139,9 +139,10 @@ class GitForge(commands.Cog):
         for alias, data in sorted(repositories.items()):
             issues = f"<#{data['issue_channel_id']}>" if data.get("issue_channel_id") else "off"
             ci = f"<#{data['ci_channel_id']}>" if data.get("ci_channel_id") else "off"
+            releases = f"<#{data['release_channel_id']}>" if data.get("release_channel_id") else "off"
             repository_lines.append(
                 f"**{alias}** - {data.get('owner')}/{data.get('repo')} via {data.get('connection')} "
-                f"- create: {data.get('policy', 'admins')} - issues: {issues} - CI: {ci}"
+                f"- create: {data.get('policy', 'admins')} - issues: {issues} - CI: {ci} - releases: {releases}"
             )
         embed.add_field(name="Connections", value="\n".join(connection_lines)[:1024] or "None", inline=False)
         embed.add_field(name="Repositories", value="\n".join(repository_lines)[:1024] or "None", inline=False)
@@ -188,44 +189,48 @@ class GitForge(commands.Cog):
 
     @gitset.command(name="policy")
     async def set_policy(self, ctx, repo_alias: str, policy: str):
-        policy = policy.casefold()
-        if policy not in {"admins", "members"}:
-            await ctx.send("Policy must be admins or members.")
-            return
-        alias = normalize_alias(repo_alias)
-        repositories = await self.config.guild(ctx.guild).repositories()
-        if alias not in repositories:
-            await ctx.send(f"Repository {alias} is not registered.")
-            return
-        repositories[alias]["policy"] = policy
-        await self.config.guild(ctx.guild).repositories.set(repositories)
-        await ctx.send(f"Repository {alias} now allows {policy} to create issues.")
+        async with self.poll_lock:
+            policy = policy.casefold()
+            if policy not in {"admins", "members"}:
+                await ctx.send("Policy must be admins or members.")
+                return
+            alias = normalize_alias(repo_alias)
+            repositories = await self.config.guild(ctx.guild).repositories()
+            if alias not in repositories:
+                await ctx.send(f"Repository {alias} is not registered.")
+                return
+            repositories[alias]["policy"] = policy
+            await self.config.guild(ctx.guild).repositories.set(repositories)
+            await ctx.send(f"Repository {alias} now allows {policy} to create issues.")
 
     @gitset.command(name="labels")
     async def set_labels(self, ctx, repo_alias: str, *, labels: str = ""):
-        alias = normalize_alias(repo_alias)
-        repositories = await self.config.guild(ctx.guild).repositories()
-        if alias not in repositories:
-            await ctx.send(f"Repository {alias} is not registered.")
-            return
-        values = [value.strip() for value in labels.split(",") if value.strip()]
-        if len(values) > 25 or any(len(value) > 50 for value in values):
-            await ctx.send("Configure at most 25 labels of at most 50 characters each.")
-            return
-        repositories[alias]["allowed_labels"] = values
-        await self.config.guild(ctx.guild).repositories.set(repositories)
-        await ctx.send(f"Allowed labels for {alias}: {', '.join(values) if values else 'none'}.")
+        async with self.poll_lock:
+            alias = normalize_alias(repo_alias)
+            repositories = await self.config.guild(ctx.guild).repositories()
+            if alias not in repositories:
+                await ctx.send(f"Repository {alias} is not registered.")
+                return
+            values = [value.strip() for value in labels.split(",") if value.strip()]
+            if len(values) > 25 or any(len(value) > 50 for value in values):
+                await ctx.send("Configure at most 25 labels of at most 50 characters each.")
+                return
+            repositories[alias]["allowed_labels"] = values
+            await self.config.guild(ctx.guild).repositories.set(repositories)
+            await ctx.send(f"Allowed labels for {alias}: {', '.join(values) if values else 'none'}.")
 
     async def _set_channel(self, ctx, repo_alias, key, channel):
-        alias = normalize_alias(repo_alias)
-        repositories = await self.config.guild(ctx.guild).repositories()
-        if alias not in repositories:
-            await ctx.send(f"Repository {alias} is not registered.")
-            return
-        repositories[alias][key] = channel.id if channel else 0
-        await self.config.guild(ctx.guild).repositories.set(repositories)
-        label = "issue events" if key == "issue_channel_id" else "CI failures"
-        await ctx.send(f"{label.title()} for {alias}: {channel.mention if channel else 'disabled'}.")
+        async with self.poll_lock:
+            alias = normalize_alias(repo_alias)
+            repositories = await self.config.guild(ctx.guild).repositories()
+            if alias not in repositories:
+                await ctx.send(f"Repository {alias} is not registered.")
+                return
+            repositories[alias][key] = channel.id if channel else 0
+            await self.config.guild(ctx.guild).repositories.set(repositories)
+            label = {"issue_channel_id": "issue events", "ci_channel_id": "CI failures",
+                     "release_channel_id": "release announcements"}[key]
+            await ctx.send(f"{label.title()} for {alias}: {channel.mention if channel else 'disabled'}.")
 
     @gitset.command(name="issuechannel")
     async def issue_channel(self, ctx, repo_alias: str, channel: discord.TextChannel = None):
@@ -235,15 +240,25 @@ class GitForge(commands.Cog):
     async def ci_channel(self, ctx, repo_alias: str, channel: discord.TextChannel = None):
         await self._set_channel(ctx, repo_alias, "ci_channel_id", channel)
 
+    @gitset.command(name="releasechannel")
+    async def release_channel(self, ctx, repo_alias: str, channel: discord.TextChannel = None):
+        """Set a release channel, or omit it to pause without resetting history."""
+        if channel is not None:
+            permissions = channel.permissions_for(ctx.guild.me)
+            if not (permissions.view_channel and permissions.send_messages and permissions.embed_links):
+                raise ValueError("I need View Channel, Send Messages and Embed Links in that channel.")
+        await self._set_channel(ctx, repo_alias, "release_channel_id", channel)
+
     @gitset.command(name="removerepo")
     async def remove_repo(self, ctx, repo_alias: str):
-        alias = normalize_alias(repo_alias)
-        repositories = await self.config.guild(ctx.guild).repositories()
-        if repositories.pop(alias, None) is None:
-            await ctx.send(f"Repository {alias} is not registered.")
-            return
-        await self.config.guild(ctx.guild).repositories.set(repositories)
-        await ctx.send(f"Removed repository {alias}.")
+        async with self.poll_lock:
+            alias = normalize_alias(repo_alias)
+            repositories = await self.config.guild(ctx.guild).repositories()
+            if repositories.pop(alias, None) is None:
+                await ctx.send(f"Repository {alias} is not registered.")
+                return
+            await self.config.guild(ctx.guild).repositories.set(repositories)
+            await ctx.send(f"Removed repository {alias}.")
 
     @gitset.command(name="removeconnection")
     async def remove_connection(self, ctx, connection_alias: str):
@@ -451,6 +466,8 @@ class GitForge(commands.Cog):
                     resources.append("issues")
                 if repository.get("ci_channel_id"):
                     resources.append("ci")
+                if repository.get("release_channel_id"):
+                    resources.append("releases")
                 if not resources:
                     continue
                 connection = str(repository.get("connection") or "")
@@ -492,6 +509,8 @@ class GitForge(commands.Cog):
                 async with semaphore:
                     if job["resource"] == "issues":
                         items = await job["client"].list_issues(job["owner"], job["repo"])
+                    elif job["resource"] == "releases":
+                        items = await job["client"].list_releases(job["owner"], job["repo"])
                     else:
                         items = await job["client"].list_ci_runs(job["owner"], job["repo"])
             except asyncio.CancelledError:
@@ -540,6 +559,8 @@ class GitForge(commands.Cog):
                             job["client"],
                             issues=items,
                         )
+                    elif job["resource"] == "releases":
+                        changed = await self._poll_releases(guild, alias, repository, items)
                     else:
                         changed = await self._poll_ci(
                             guild,
@@ -625,3 +646,36 @@ class GitForge(commands.Cog):
                 await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
         repository["ci_states"] = dict(list(current.items())[:50])
         return True
+
+
+    async def _poll_releases(self, guild, alias, repository, releases):
+        """Seed once, then retain successful deliveries even if a later send fails."""
+        seen = list(dict.fromkeys(str(value) for value in repository.get("seen_release_ids", [])))
+        if not repository.get("releases_initialized", False):
+            repository["seen_release_ids"] = [item["id"] for item in releases][-200:]
+            repository["releases_initialized"] = True
+            return True
+        channel = guild.get_channel(int(repository["release_channel_id"]))
+        if channel is None:
+            return False
+        changed = False
+        for item in releases:
+            if item["id"] in seen:
+                continue
+            embed = discord.Embed(
+                title=self.browse_text(f"New release — {item['name']}", 256),
+                description=self.browse_text(item["body"], 3000), url=item["url"],
+                color=discord.Color.green(),
+            )
+            embed.add_field(name="Tag", value=self.browse_text(item["tag"], 200))
+            embed.add_field(name="Published", value=self.browse_text(item["published"], 100))
+            embed.set_footer(text=f"{alias} • Follow the title link for full release notes.")
+            try:
+                await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException:
+                log.warning("GitForge release delivery failed for guild %s repository %s", guild.id, alias)
+                break
+            seen.append(item["id"])
+            repository["seen_release_ids"] = seen[-200:]
+            changed = True
+        return changed

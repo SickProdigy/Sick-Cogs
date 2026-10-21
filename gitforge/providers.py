@@ -1,6 +1,7 @@
 """Provider-neutral async clients for Gitea, GitHub, and GitLab."""
 
 import asyncio
+import datetime
 import ipaddress
 import socket
 from dataclasses import dataclass
@@ -239,6 +240,45 @@ class ForgeClient:
                 "body": str(data.get("description") or data.get("body") or "No release notes provided."),
                 "published": str(data.get("released_at") or data.get("published_at") or "Unknown"),
                 "url": self.browser_url(links.get("self") or data.get("html_url"))}
+
+    async def list_releases(self, owner, repo):
+        """Read one bounded page of published releases, oldest first."""
+        params = {"limit" if self.provider == "gitea" else "per_page": 50, "page": 1}
+        if self.provider == "gitea":
+            params.update({"draft": "false", "pre-release": "false"})
+        elif self.provider == "gitlab":
+            params.update({"order_by": "released_at", "sort": "desc"})
+        rows = self._rows(await self.request(
+            "GET", self.repo_path(owner, repo) + "/releases", params=params
+        ))
+        if len(rows) > 50:
+            raise ForgeError("The forge exceeded the release page limit.", code="invalid_response")
+        now = datetime.datetime.now(datetime.timezone.utc)
+        releases = {}
+        for row in rows:
+            if row.get("draft") or row.get("prerelease") or row.get("upcoming_release"):
+                continue
+            tag = str(row.get("tag_name") or "").strip()
+            identity = tag if self.provider == "gitlab" else str(row.get("id") or "")
+            published = str(row.get("released_at") or row.get("published_at") or "")
+            links = row.get("_links") if isinstance(row.get("_links"), dict) else {}
+            url = self.browser_url(links.get("self") or row.get("html_url"))
+            try:
+                stamp = datetime.datetime.fromisoformat(published.replace("Z", "+00:00"))
+                if stamp.tzinfo is None:
+                    raise ValueError
+            except ValueError as exc:
+                raise ForgeError("The forge returned an invalid release date.", code="invalid_response") from exc
+            if stamp > now:
+                continue
+            if not tag or not identity or len(identity) > 200 or not url:
+                raise ForgeError("The forge returned an incomplete release.", code="invalid_response")
+            releases[identity] = {
+                "id": identity, "name": str(row.get("name") or tag), "tag": tag,
+                "body": str(row.get("description") or row.get("body") or "No release notes provided."),
+                "published": stamp.astimezone(datetime.timezone.utc).isoformat(), "url": url,
+            }
+        return sorted(releases.values(), key=lambda item: (item["published"], item["id"]))
 
     async def resolve_labels(self, owner, repo, labels):
         labels = [label.strip() for label in labels if label.strip()]

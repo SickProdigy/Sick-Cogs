@@ -109,19 +109,25 @@ class RepositoryModal(discord.ui.Modal, title="Register a repository"):
         except ForgeError as error:
             await self.view.show_error(interaction, error)
             return
-        repositories = await self.view.cog.config.guild(interaction.guild).repositories()
-        old = repositories.get(alias, {})
-        repositories[alias] = {
-            "connection": connection, "owner": owner, "repo": repo,
-            "policy": old.get("policy", "admins"),
-            "issue_channel_id": int(old.get("issue_channel_id", 0) or 0),
-            "ci_channel_id": int(old.get("ci_channel_id", 0) or 0),
-            "seen_issue_ids": old.get("seen_issue_ids", []),
-            "issues_initialized": bool(old.get("issues_initialized", False)),
-            "ci_states": old.get("ci_states", {}),
-            "ci_initialized": bool(old.get("ci_initialized", False)),
-        }
-        await self.view.cog.config.guild(interaction.guild).repositories.set(repositories)
+        async with self.view.cog.poll_lock:
+            repositories = await self.view.cog.config.guild(interaction.guild).repositories()
+            old = repositories.get(alias, {})
+            same_backend = all(old.get(key) == value for key, value in
+                               (("connection", connection), ("owner", owner), ("repo", repo)))
+            repositories[alias] = {
+                "connection": connection, "owner": owner, "repo": repo,
+                "policy": old.get("policy", "admins"),
+                "issue_channel_id": int(old.get("issue_channel_id", 0) or 0),
+                "ci_channel_id": int(old.get("ci_channel_id", 0) or 0),
+                "release_channel_id": int(old.get("release_channel_id", 0) or 0),
+                "seen_release_ids": old.get("seen_release_ids", []) if same_backend else [],
+                "releases_initialized": bool(old.get("releases_initialized", False)) if same_backend else False,
+                "seen_issue_ids": old.get("seen_issue_ids", []),
+                "issues_initialized": bool(old.get("issues_initialized", False)),
+                "ci_states": old.get("ci_states", {}),
+                "ci_initialized": bool(old.get("ci_initialized", False)),
+            }
+            await self.view.cog.config.guild(interaction.guild).repositories.set(repositories)
         name = details.get("full_name") or details.get("path_with_namespace") or value
         await interaction.edit_original_response(
             content=f"Registered {alias} for {str(name)[:200]}.",
