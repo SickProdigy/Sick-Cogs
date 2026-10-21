@@ -37,7 +37,7 @@ class MovieReleases(commands.Cog):
     """Post new movie release announcements from TMDb."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.4"
+    __version__ = "1.2.5"
 
     default_guild = {
         "enabled": False,
@@ -435,7 +435,7 @@ class MovieReleases(commands.Cog):
         vote_average = movie.get("vote_average")
         if vote_average:
             embed.add_field(name="TMDb rating", value=f"{float(vote_average):.1f}/10", inline=True)
-        embed.set_footer(text="Movie data from TMDb")
+        embed.set_footer(text="New & recently released movies • TMDb")
         poster_path = movie.get("poster_path")
         if poster_path:
             embed.set_thumbnail(url=f"{TMDB_IMAGE_BASE}{poster_path}")

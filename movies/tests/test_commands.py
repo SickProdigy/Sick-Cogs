@@ -118,6 +118,18 @@ class MovieReleaseTests(unittest.IsolatedAsyncioTestCase):
         normal_call = channel.send.await_args.kwargs
         self.assertFalse(normal_call["silent"]);self.assertEqual(normal_call["content"], "<@&7>");self.assertTrue(normal_call["allowed_mentions"].roles)
 
+    async def test_release_footer_describes_feed_and_retains_attribution(self):
+        cog = object.__new__(MovieReleases)
+        channel = SimpleNamespace(send=AsyncMock())
+        for mode in ("normal", "silent"):
+            await cog.send_movie(channel, {"id": 101, "title": "First"}, None, mode)
+            embed = channel.send.await_args.kwargs["embed"]
+            self.assertEqual(embed.to_dict()["footer"]["text"], "New & recently released movies • TMDb")
+            self.assertEqual(embed.title, "First")
+            self.assertEqual(embed.url, "https://www.themoviedb.org/movie/101")
+        lookup = cog.movie_lookup_embed({"id": 101, "title": "First"})
+        self.assertEqual(lookup.footer.text, "Movie data provided by TMDb")
+
     async def test_notification_command_is_per_server(self):
         mode = AsyncMock(return_value="normal");mode.set = AsyncMock();cog = object.__new__(MovieReleases)
         cog.config = SimpleNamespace(guild=MagicMock(return_value=SimpleNamespace(notification_mode=mode)))
