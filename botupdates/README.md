@@ -1,6 +1,6 @@
 # BotUpdates
 
-BotUpdates turns project changes into bot-branded announcements while keeping publication behind human review. Version 0.2.1 can collect public Sick-Cogs and configured GitHub upstream commits automatically, but it never approves or publishes a draft.
+BotUpdates turns project changes into bot-branded announcements while keeping publication behind human review. Version 0.2.2 can collect public Sick-Cogs and configured GitHub upstream commits automatically and optionally suggest AI wording, but it never approves or publishes a draft automatically.
 
 ## Review and publication
 
@@ -46,7 +46,7 @@ Scheduled slots are the 1st and 15th of each month in UTC. An hourly task checks
 
 If an unpublished draft is already active, collection waits rather than replacing it. API failures retain the cursor and store a credential-free status message. A missing cursor in the bounded history also stops collection instead of silently skipping changes. `collector check` runs the same process manually.
 
-The collector reads the public `sickprodigy/Sick-Cogs` Gitea API and requires no repository credential. Optional AI-assisted wording is not implemented yet.
+The collector reads the public `sickprodigy/Sick-Cogs` Gitea API and requires no repository credential. AI wording is separate, opt-in, and manually requested as described below.
 
 ## Public GitHub upstream sources
 
@@ -69,6 +69,65 @@ The hourly task makes no upstream requests between completed twice-monthly slots
 All collected references, the draft, cursors and completed slot are saved together. An active draft defers new collection; manual creation and collection cannot replace one another. Overlapping sources attach the same commit once. Draft text distinguishes project changes from **available upstream changes**, which are not evidence that the bot installed them. Nothing installs cogs, approves drafts or publishes automatically. Review every reference with `botupdates draft sources <page>` (five per page), since the preview card is intentionally compact.
 
 Full Discord review and delivery testing remains required before release.
+
+## Optional AI-assisted wording
+
+This integration reuses the optional **Assistant** cog's model/provider configuration for the
+review channel's server (including Assistant's global fallback). It adds no SDK, credentials,
+or endpoint settings to BotUpdates. Assistant is not required for any existing workflow.
+
+After configuring Assistant and a private review channel, the bot owner may opt in:
+
+```text
+[p]botupdatesowner ai true
+[p]botupdatesowner ai
+[p]botupdates draft ai
+[p]botupdates draft proposals 1
+[p]botupdates draft apply 1
+[p]botupdates draft approve
+[p]botupdates draft publish
+```
+
+`draft ai` is available only to trusted editors/publishers in the exact review channel, with
+`@everyone` denied View Channel. Administrators must also restrict any other channel access
+roles appropriately. Assistant must be loaded, configured, and not disabled in that server.
+This is a separate authorized BotUpdates workflow, not an Assistant chat conversation.
+
+The request sends the current title, draft text, and **all** attached source kinds, labels and
+references to Assistant's configured provider. Source URLs are not separately included or fetched,
+but any URL or sensitive information already in the draft text is part of the input. Do not put
+secrets in drafts. It includes no chat history, prior edits, attachments, user IDs, tools, RAG,
+or repository contents. Provider charges and retention policies apply. Local data deletion does
+not delete provider-side records. Owner enablement opts this integration into that processing;
+no provider calls are made just by enabling or viewing settings.
+
+Generated text is labeled **AI-assisted**, saved as a pending proposal, and shown in full with
+mentions suppressed. It does not replace the draft or alter approval/delivery state. Publishers
+must explicitly apply it, approve it, and publish it using the existing commands. Applying any
+proposal invalidates previous approval. Only unapproved drafts with no deliveries may request AI
+wording. Source classification distinguishes available upstream changes from installed bot changes;
+human reviewers must still verify every claim because model instructions are not a factual guarantee.
+
+Safety and cost limits:
+
+- One in-flight request per installation, one attempt per minute, and 20 attempts per UTC day.
+  Rate counters persist across restarts; failed attempts count and there is no automatic retry.
+- At most 24,000 JSON input characters and 1,200 output tokens (or Assistant's smaller configured
+  response limit), a 60-second timeout, and 3,800 output characters. Oversized inputs fail without
+  silently omitting references. These limits bound requests, not their exact monetary cost.
+- Stop requesting AI once a draft has 25 proposals; finish human review instead.
+- Provider failures leave the draft intact and return a generic error, not raw provider details.
+- Draft edits, approval/publication, review-channel changes, disablement, reload, or data deletion
+  during generation invalidate the result. Permissions are checked again before saving it.
+- No scheduled AI calls, autonomous approval/publication, tool execution, or source-link retrieval.
+
+Read a complete proposal using `draft proposals <id>`. List pending proposals eight at a time
+with `draft proposals` or `draft proposals 0 <page>`. Disable the integration with
+`botupdatesowner ai false`; human drafts and already saved proposals remain available.
+
+Automated tests use a mocked Assistant boundary. Real provider compatibility, generated wording,
+private-channel permissions, reload recovery and the full Discord approval/delivery workflow remain
+live acceptance checks before a `main` release. No live AI request or bot reconfiguration is implied.
 
 ## Guild subscriptions
 

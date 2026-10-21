@@ -2,7 +2,7 @@
   "author": ["SickProdigy"],
   "description": "Collect Sick-Cogs and configured public GitHub upstream changes into scheduled review drafts, accept trusted human edits, require final approval, and publish to subscribed servers.",
   "disabled": false,
-  "end_user_data_statement": "This cog stores configured editor and publisher user IDs, proposal author IDs and text, approval history, guild channel and optional role IDs, public commit cursors, source references, and delivery history. User-data deletion removes configured access and anonymizes retained draft history.",
+  "end_user_data_statement": "This cog stores configured editor and publisher user IDs, proposal author IDs and text, approval history, guild channel and optional role IDs, public commit cursors, source references, delivery history, and bounded AI request counters. Optional owner-enabled AI drafting sends current draft text and source labels/references to the provider configured in Assistant; no conversation history or attachments are included. User-data deletion removes configured access and anonymizes retained draft history; provider retention is governed separately by that provider.",
   "hidden": false,
   "install_msg": "BotUpdates never publishes automatically. Configure a private review channel, then optionally start twice-monthly Sick-Cogs collection with `[p]botupdatesowner collector start`.",
   "min_bot_version": "3.5.0",
@@ -13,5 +13,5 @@
   "short": "Human-reviewed bot update announcements.",
   "tags": ["updates", "announcements", "changelog", "collaboration"],
   "type": "COG",
-  "version": "0.2.1"
+  "version": "0.2.2"
 }

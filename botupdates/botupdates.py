@@ -2,6 +2,8 @@
 
 import asyncio
 import datetime
+import functools
+import json
 import logging
 import time
 
@@ -9,6 +11,8 @@ import aiohttp
 import discord
 from discord.ext import tasks
 from redbot.core import Config, commands
+
+from .ai import build_messages, suggest
 
 from .collector import (
     REPOSITORY_BRANCH,
@@ -48,6 +52,9 @@ GLOBAL_DEFAULTS = {
     "collector_last_slot": "",
     "collector_last_check_at": 0,
     "collector_last_error": "",
+    "ai_enabled": False,
+    "ai_last_request_at": 0,
+    "ai_daily_usage": {"date": "", "attempts": 0},
 }
 GUILD_DEFAULTS = {
     "enabled": False,
@@ -57,11 +64,20 @@ GUILD_DEFAULTS = {
 }
 
 
+def serialize_draft(method):
+    """Keep all draft writes consistent with collectors and pending AI results."""
+    @functools.wraps(method)
+    async def wrapped(self, *args, **kwargs):
+        async with self._collector_lock:
+            return await method(self, *args, **kwargs)
+    return wrapped
+
+
 class BotUpdates(commands.Cog):
     """Prepare, review, approve, and distribute bot update posts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.1"
+    __version__ = "0.2.2"
 
     def __init__(self, bot):
         self.bot = bot
@@ -72,11 +88,14 @@ class BotUpdates(commands.Cog):
         self.config.register_guild(**GUILD_DEFAULTS)
         self.session = None
         self._collector_lock = asyncio.Lock()
+        self._ai_lock = asyncio.Lock()
+        self._ai_epoch = 0
 
     async def cog_load(self):
         self.collector_loop.start()
 
     def cog_unload(self):
+        self._ai_epoch += 1  # An old command may finish after this cog is reloaded.
         self.collector_loop.cancel()
         if self.session and not self.session.closed:
             self.bot.loop.create_task(self.session.close())
@@ -85,7 +104,7 @@ class BotUpdates(commands.Cog):
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=20),
-                headers={"User-Agent": "Sick-Cogs-BotUpdates/0.2.1"},
+                headers={"User-Agent": "Sick-Cogs-BotUpdates/0.2.2"},
             )
         return self.session
 
@@ -193,7 +212,9 @@ class BotUpdates(commands.Cog):
     async def before_collector_loop(self):
         await self.bot.wait_until_red_ready()
 
+    @serialize_draft
     async def red_delete_data_for_user(self, *, requester, user_id):
+        self._ai_epoch = getattr(self, "_ai_epoch", 0) + 1
         user_id = int(user_id)
         await self.config.editor_user_ids.set(
             [value for value in await self.config.editor_user_ids() if int(value) != user_id]
@@ -430,6 +451,7 @@ class BotUpdates(commands.Cog):
         await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     @draft.command(name="source")
+    @serialize_draft
     async def draft_source(
         self, ctx, kind: str, url: str, reference: str, *, label: str
     ):
@@ -458,6 +480,7 @@ class BotUpdates(commands.Cog):
         await ctx.send(f"Added {kind} source **{label}**.")
 
     @draft.command(name="propose")
+    @serialize_draft
     async def draft_propose(self, ctx, *, text: str):
         """Submit complete replacement text for the active draft."""
         await self._require_editor(ctx)
@@ -478,23 +501,108 @@ class BotUpdates(commands.Cog):
         )
         await ctx.send(f"Submitted proposal #{next_id} for publisher review.")
 
+    async def _require_ai_context(self, ctx):
+        await self._require_editor(ctx)
+        if not await self.config.ai_enabled():
+            raise commands.UserFeedbackCheckFailure("AI drafting is disabled; the bot owner must enable it explicitly.")
+        if (ctx.guild is None or ctx.channel.id != int(await self.config.review_channel_id())
+                or ctx.channel.permissions_for(ctx.guild.default_role).view_channel):
+            raise commands.UserFeedbackCheckFailure("Request AI wording only in the configured private review channel.")
+        permissions = ctx.channel.permissions_for(ctx.guild.me)
+        if not (permissions.view_channel and permissions.send_messages and permissions.embed_links):
+            raise commands.UserFeedbackCheckFailure("I need View Channel, Send Messages and Embed Links in the review channel.")
+        assistant = self.bot.get_cog("Assistant")
+        if assistant is None or not callable(getattr(assistant, "request_response", None)):
+            raise commands.UserFeedbackCheckFailure("Load and configure a compatible Assistant cog first.")
+        if await self.bot.cog_disabled_in_guild(assistant, ctx.guild):
+            raise commands.UserFeedbackCheckFailure("Assistant is disabled in this server.")
+        return assistant
+
+    @draft.command(name="ai")
+    async def draft_ai(self, ctx):
+        """Request AI wording as a proposal in the private review channel; never publish."""
+        assistant = await self._require_ai_context(ctx)
+        if self._ai_lock.locked():
+            raise commands.UserFeedbackCheckFailure("An AI wording request is already running.")
+        async with self._ai_lock:
+            async with self._collector_lock:
+                _, key, record = await self._active()
+                if record.get("status") != "draft" or record.get("delivered_guild_ids"):
+                    raise commands.UserFeedbackCheckFailure("AI wording requires an unapproved, unpublished draft.")
+                if len(record.get("proposals", [])) >= 25:
+                    raise commands.UserFeedbackCheckFailure("This draft already has 25 proposals; finish human review before requesting more.")
+                try:
+                    messages = build_messages(record)
+                except ValueError as exc:
+                    raise commands.UserFeedbackCheckFailure(str(exc)) from exc
+                fingerprint = json.dumps(record, sort_keys=True)
+                epoch = self._ai_epoch
+                now = int(time.time())
+                today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+                last = int(await self.config.ai_last_request_at())
+                usage = await self.config.ai_daily_usage()
+                attempts = int(usage.get("attempts", 0)) if usage.get("date") == today else 0
+                if now - last < 60 or attempts >= 20:
+                    raise commands.UserFeedbackCheckFailure("AI limit reached: one request per minute and 20 attempts per UTC day.")
+                # Count attempts before contacting a provider, including failures; no auto-retry.
+                async with self.config.all() as state:
+                    state["ai_last_request_at"] = now
+                    state["ai_daily_usage"] = {"date": today, "attempts": attempts + 1}
+            try:
+                text = await suggest(assistant, ctx.guild, messages)
+                text = discord.utils.escape_mentions(text)
+                if len(text) > 3800:
+                    raise ValueError("Escaped proposal is too long.")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Provider errors can contain credentials, endpoints or prompt text.
+                await ctx.send("AI wording failed or returned unusable text. The draft is unchanged; no automatic retry was made.")
+                return
+            async with self._collector_lock:
+                await self._require_ai_context(ctx)
+                drafts, current_key, current = await self._active()
+                if current_key != key or self._ai_epoch != epoch or json.dumps(current, sort_keys=True) != fingerprint:
+                    await ctx.send("The draft or review configuration changed during generation; the AI result was discarded.")
+                    return
+                next_id = 1 + max((int(p.get("id", 0)) for p in current.get("proposals", [])), default=0)
+                proposal = add_proposal(current, next_id, ctx.author.id, text, int(time.time()))
+                proposal["origin"] = "ai"
+                proposal["provider"] = "Assistant"
+                await self._save_active(drafts, key, current, f"AI-assisted proposal #{next_id} awaits human review. Nothing was applied or approved.")
+            embed = discord.Embed(title=f"AI-assisted proposal #{next_id} — verify every claim", description=proposal["text"])
+            await ctx.send("Review the complete proposal, then explicitly apply, approve and publish if appropriate.",
+                           embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
     @draft.command(name="proposals")
-    async def draft_proposals(self, ctx):
-        """List pending proposals for the active draft."""
+    async def draft_proposals(self, ctx, proposal_id: int = None, page: int = 1):
+        """Read a complete proposal by ID; use ID 0 and a page to list eight at a time."""
         await self._require_editor(ctx)
         _, _, record = await self._active()
+        if proposal_id not in (None, 0):
+            proposal = next((item for item in record.get("proposals", []) if item["id"] == proposal_id), None)
+            if proposal is None:
+                raise commands.UserFeedbackCheckFailure("Proposal not found.")
+            origin = "AI-assisted — verify every claim" if proposal.get("origin") == "ai" else "Human-written"
+            embed = discord.Embed(title=f"Proposal #{proposal_id} • {origin}", description=proposal["text"][:3800])
+            await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            return
+        pending = [item for item in record.get("proposals", []) if item.get("status") == "pending"]
+        pages = max(1, (len(pending) + 7) // 8)
+        if page < 1 or page > pages:
+            raise commands.UserFeedbackCheckFailure(f"Choose a proposal page from 1 to {pages}.")
         lines = [
-            f"#{item['id']} by <@{item.get('author_id', 0)}> - "
+            f"#{item['id']} ({'AI-assisted' if item.get('origin') == 'ai' else 'human'}) by <@{item.get('author_id', 0)}> - "
             f"{item.get('text', '')[:160]}"
-            for item in record.get("proposals", [])
-            if item.get("status") == "pending"
+            for item in pending[(page - 1) * 8:page * 8]
         ]
         await ctx.send(
-            "\n".join(lines) or "No pending proposals.",
+            (f"Pending proposals — {page}/{pages}\n" + "\n".join(lines)) if lines else "No pending proposals.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @draft.command(name="apply")
+    @serialize_draft
     async def draft_apply(self, ctx, proposal_id: int):
         """Apply a trusted editor's proposed replacement text."""
         await self._require_publisher(ctx)
@@ -511,6 +619,7 @@ class BotUpdates(commands.Cog):
         )
 
     @draft.command(name="edit")
+    @serialize_draft
     async def draft_edit(self, ctx, *, text: str):
         """Directly replace the active draft text as a publisher."""
         await self._require_publisher(ctx)
@@ -550,6 +659,7 @@ class BotUpdates(commands.Cog):
         )
 
     @draft.command(name="approve")
+    @serialize_draft
     async def draft_approve(self, ctx):
         """Approve the active draft for global publishing."""
         await self._require_publisher(ctx)
@@ -573,6 +683,7 @@ class BotUpdates(commands.Cog):
         )
 
     @draft.command(name="publish")
+    @serialize_draft
     async def draft_publish(self, ctx):
         """Publish the approved draft to matching subscribed servers."""
         await self._require_publisher(ctx)
@@ -663,11 +774,29 @@ class BotUpdates(commands.Cog):
         await ctx.send_help()
 
     @botupdatesowner.command(name="reviewchannel")
+    @serialize_draft
     async def review_channel(self, ctx, channel: discord.TextChannel):
         """Set the private channel used for collaborative draft previews."""
         await self.config.review_channel_id.set(channel.id)
+        self._ai_epoch = getattr(self, "_ai_epoch", 0) + 1
         await ctx.send(
             f"BotUpdates review previews will use {channel.mention}."
+        )
+
+    @botupdatesowner.command(name="ai")
+    @serialize_draft
+    async def ai_settings(self, ctx, enabled: bool = None):
+        """Opt into Assistant-backed draft proposals; draft text goes to its configured provider."""
+        if enabled is not None:
+            await self.config.ai_enabled.set(enabled)
+            self._ai_epoch = getattr(self, "_ai_epoch", 0) + 1
+        enabled = await self.config.ai_enabled()
+        await ctx.send(
+            f"AI drafting: {'enabled' if enabled else 'disabled'}. Uses Assistant's review-server model and provider. "
+            "Manual requests send the current title, draft text and source labels/references to that provider; "
+            "do not include secrets. No chat history, attachments, tools or source-page fetching. "
+            "Limits: one request at a time, one per minute, 20 attempts per UTC day, 1,200 output tokens maximum. "
+            "Provider charges may apply. Suggestions never apply, approve or publish themselves."
         )
 
     async def _toggle_id(self, group, value, action):
