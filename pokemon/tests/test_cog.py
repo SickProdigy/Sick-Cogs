@@ -278,8 +278,8 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemon moves",player_names)
         self.assertIn("pokemon profilestyle",player_names)
         self.assertIn("pokemon menustyle",player_names)
-        self.assertIn("pokemonset profile",admin_names)
-        self.assertIn("pokemonownerset profile",owner_names)
+        self.assertIn("pokemonset pace",admin_names)
+        self.assertIn("pokemonownerset pace",owner_names)
         self.assertIn("pokemonset notifications",admin_names)
         self.assertIn("pokemonset notificationrole",admin_names)
         self.assertIn("pokemonset quiethours",admin_names)
@@ -992,7 +992,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx=SimpleNamespace(guild=SimpleNamespace(id=42,get_role=lambda role_id:None),send=AsyncMock())
         await Pokemon.spawn_status.callback(cog,ctx)
         message=ctx.send.await_args.args[0]
-        self.assertIn("Profile: **custom**",message)
+        self.assertIn("Pace: **normal**",message)
         self.assertIn("Spawn channels: <#10>, <#20>",message)
         self.assertIn("Activity: **5/12**",message)
         self.assertIn("Concurrency limit: **2** (server selected 4; bot-wide ceiling 2)",message)
@@ -1054,23 +1054,27 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_spawn_profiles_apply_values_and_owner_overrides(self):
         self.assertEqual(SPAWN_PROFILES["active"],{"timer_minutes":10,"encounter_minutes":5,"battle_minutes":15,"concurrency":3})
-        self.assertEqual(SPAWN_PROFILES["balanced"],{"timer_minutes":30,"encounter_minutes":15,"battle_minutes":15,"concurrency":2})
+        self.assertEqual(SPAWN_PROFILES["normal"],{"timer_minutes":30,"encounter_minutes":15,"battle_minutes":15,"concurrency":2})
         self.assertEqual(SPAWN_PROFILES["relaxed"],{"timer_minutes":60,"encounter_minutes":20,"battle_minutes":20,"concurrency":1})
         conf={**GUILD};section=StoredSection(conf);policy={"minimum_timer":15,"maximum_concurrency":5,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900}
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section,all=AsyncMock(return_value=policy));ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
-        await Pokemon.spawn_profile.callback(cog,ctx,"balanced")
-        self.assertEqual((section.value["spawn_profile"],section.value["timer_minutes"],section.value["encounter_timeout"],section.value["battle_timeout"],section.value["max_active_encounters"]),("balanced",30,900,900,2))
+        await Pokemon.pace.callback(cog,ctx,"normal")
+        self.assertEqual((section.value["spawn_profile"],section.value["timer_minutes"],section.value["encounter_timeout"],section.value["battle_timeout"],section.value["max_active_encounters"]),("normal",30,900,900,2))
         self.assertFalse(section.value["timer_owner_override"]);self.assertFalse(section.value["encounter_owner_override"]);self.assertFalse(section.value["concurrency_owner_override"])
-        await Pokemon.owner_spawn_profile.callback(cog,ctx,"active")
+        await Pokemon.owner_pace.callback(cog,ctx,"active")
         self.assertEqual((section.value["spawn_profile"],section.value["timer_minutes"],section.value["encounter_timeout"],section.value["battle_timeout"],section.value["max_active_encounters"]),("active",10,300,900,3))
         self.assertTrue(section.value["timer_owner_override"]);self.assertTrue(section.value["encounter_owner_override"]);self.assertTrue(section.value["concurrency_owner_override"])
-        await Pokemon.owner_spawn_profile.callback(cog,ctx,"relaxed");self.assertEqual(effective_encounter_timeout(section.value,policy),1200)
+        await Pokemon.owner_pace.callback(cog,ctx,"relaxed");self.assertEqual(effective_encounter_timeout(section.value,policy),1200)
 
     async def test_admin_profile_respects_bot_wide_policy_without_partial_write(self):
         conf={**GUILD};section=StoredSection(conf);policy={"minimum_timer":15,"maximum_concurrency":2,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900}
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section,all=AsyncMock(return_value=policy));ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
-        before=dict(section.value);await Pokemon.spawn_profile.callback(cog,ctx,"active");self.assertEqual(section.value,before);self.assertIn("cannot be applied",ctx.send.await_args.args[0])
-        await Pokemon.spawn_profile.callback(cog,ctx,"relaxed");self.assertEqual(section.value,before);self.assertIn("20m",ctx.send.await_args.args[0])
+        await Pokemon.pace.callback(cog,ctx,"active")
+        self.assertEqual((section.value["timer_minutes"],section.value["max_active_encounters"]),(15,2))
+        self.assertIn("bot-wide limits applied",ctx.send.await_args.args[0])
+        await Pokemon.pace.callback(cog,ctx,"relaxed")
+        self.assertEqual(section.value["encounter_timeout"],900)
+        self.assertIn("15m",ctx.send.await_args.args[0])
 
     def test_effective_timer_honors_floor_and_owner_override(self):
         self.assertEqual(effective_timer_minutes({"timer_minutes":10},{"minimum_timer":30}),30)

@@ -9,12 +9,13 @@ class SettingsHelpTests(unittest.TestCase):
         help_text = Pokemon.pokemon_set.get_command("pace").help
         for name, (minimum, maximum, cooldown) in PACE.items():
             self.assertIn(f"{name}: {minimum}–{maximum} activity points, {cooldown}-second", help_text)
-        self.assertIn("Only affects activity mode", help_text)
-        self.assertIn("Bot-wide minimums", help_text)
+        self.assertIn("Timed mode", help_text)
+        self.assertIn("Activity mode", help_text)
+        self.assertIn("Bot-wide limits", help_text)
 
     def test_choices_and_limits_are_discoverable(self):
         expected = {
-            "profile": tuple(SPAWN_PROFILES),
+            "pace": tuple(SPAWN_PROFILES),
             "mode": ("timed", "activity"),
             "notifications": ("silent", "normal", "role"),
             "notificationrole": ("mention", "ID", "clear", "none", "off", "reset"),
