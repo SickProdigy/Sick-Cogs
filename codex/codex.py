@@ -14,6 +14,8 @@ from .models import (
     due_alerts,
     iter_limit_windows,
     validate_alert_levels,
+    available_resets,
+    reset_observations,
 )
 
 log = logging.getLogger("red.sickcogs.codex")
@@ -25,6 +27,8 @@ DEFAULT_USER = {
     "alert_levels": [50, 75, 95],
     "sent_alerts": [],
     "last_checked_at": 0,
+    "reset_observation": {},
+    "sent_reset_suggestions": [],
 }
 
 
@@ -42,7 +46,7 @@ class Codex(commands.Cog):
     """Private live Codex allowance status and notifications."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.0.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -144,7 +148,7 @@ class Codex(commands.Cog):
             )
         embed = discord.Embed(
             title="Codex account usage",
-            description="Live allowance reported by Codex app-server.",
+            description="Live allowance reported by Codex app-server. Window length is not time until reset; use the exact dates below.",
             color=discord.Color.blurple(),
         )
         for window in windows[:10]:
@@ -161,6 +165,13 @@ class Codex(commands.Cog):
                 ),
                 inline=False,
             )
+        count = available_resets(payload)
+        embed.add_field(
+            name="Banked resets",
+            value=(f"**{count} available**" if count is not None else "Not reported by this account/CLI")
+            + "\nFuture reset-grant dates are not reported. No Monday schedule is assumed. Resets are never used automatically.",
+            inline=False,
+        )
         data = await self.config.user_from_id(user_id).all()
         state = "on" if data["enabled"] else "paused"
         levels = ", ".join(f"{level}%" for level in data["alert_levels"])
@@ -204,6 +215,20 @@ class Codex(commands.Cog):
         group = self.config.user_from_id(user_id)
         await group.sent_alerts.set(sent[-30:])
         await group.last_checked_at.set(int(time.time()))
+        previous = data.get("reset_observation", {})
+        suggestions = list(data.get("sent_reset_suggestions", []))
+        messages, snapshot, new_keys = reset_observations(payload, previous, suggestions, int(time.time()))
+        # One observation batch: a failed DM leaves its baseline intact for retry.
+        if messages:
+            embed = discord.Embed(title="Codex allowance update", color=discord.Color.blurple())
+            for index, message in enumerate(messages[:22]):
+                embed.add_field(name="Update" if index else "Since the previous check", value=message, inline=False)
+            if await self._send_user(user_id, embed=embed):
+                await group.reset_observation.set(snapshot)
+                await group.sent_reset_suggestions.set((suggestions+new_keys)[-30:])
+                delivered += 1
+        else:
+            await group.reset_observation.set(snapshot)
         return delivered
 
     @tasks.loop(minutes=15)
@@ -273,6 +298,8 @@ class Codex(commands.Cog):
                 )
             await self.config.user(ctx.author).connected.set(True)
             await self.config.user(ctx.author).sent_alerts.set([])
+            await self.config.user(ctx.author).reset_observation.set({})
+            await self.config.user(ctx.author).sent_reset_suggestions.set([])
             await message.edit(
                 content=(
                     "**Codex connected**\n"
