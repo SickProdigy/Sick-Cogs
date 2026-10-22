@@ -100,3 +100,44 @@ def alert_key(window: LimitWindow, level: int) -> str:
         f"{window.limit_id}:{window.window_name}:"
         f"{window.resets_at or 0}:{level}"
     )
+
+
+def available_resets(payload):
+    summary = payload.get("rateLimitResetCredits")
+    value = summary.get("availableCount") if isinstance(summary, dict) else None
+    return value if type(value) is int and value >= 0 else None
+
+
+def reset_observations(payload, previous, sent, now):
+    """Read-only observations; never infer a Monday schedule or consume a credit."""
+    count = available_resets(payload)
+    prior_count = previous.get("available_resets")
+    messages, suggestion_keys = [], []
+    if count is not None and type(prior_count) is int and count > prior_count:
+        messages.append(f"Banked Codex resets increased from **{prior_count}** to **{count}**.")
+    windows = dict(previous.get("windows", {}))
+    for window in list(iter_limit_windows(payload))[:10]:
+        key = f"{window.limit_id}:{window.window_name}"
+        old = windows.get(key)
+        if old and window.used_percent < old["used_percent"]:
+            reset = f" Next reported reset: <t:{window.resets_at}:F> (<t:{window.resets_at}:R>)." if window.resets_at else ""
+            messages.append(
+                f"Observed allowance increase for **{window.limit_name} {window.window_name}**: "
+                f"{100-old['used_percent']}% → **{window.remaining_percent}% remaining**.{reset} "
+                "This is an observation between checks, not confirmation of a scheduled or banked reset."
+            )
+        windows[key] = {"used_percent": window.used_percent, "resets_at": window.resets_at}
+        suggestion = f"reset-suggestion:{key}:{window.resets_at}"
+        if (window.limit_id == "codex" and window.duration_minutes == 10080
+                and window.remaining_percent <= 5 and count is not None and count > 0
+                and window.resets_at and window.resets_at-now > 4*86400 and suggestion not in sent):
+            messages.append(
+                f"Your weekly Codex allowance has **{window.remaining_percent}% remaining**, "
+                f"with its next reported reset <t:{window.resets_at}:F> (<t:{window.resets_at}:R>). "
+                f"You have **{count} banked reset(s)**; consider using one in Codex if you need to continue. "
+                "This bot will not use it for you."
+            )
+            suggestion_keys.append(suggestion)
+    snapshot = {"windows": dict(list(windows.items())[-20:]),
+                "available_resets": count if count is not None else prior_count}
+    return messages, snapshot, suggestion_keys
