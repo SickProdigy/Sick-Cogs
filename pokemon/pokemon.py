@@ -108,8 +108,13 @@ def encounter_shiny(rng):
 def encounter_needs_level_migration(raw):
     return not raw.get("level_locked") or int(raw.get("level", 0)) < 1
 
+def encounter_state(raw):
+    # Older saves used the battle engine's active label at the encounter level.
+    state=raw.get("state")
+    return "battle" if state=="active" and raw.get("battle",{}).get("state")=="active" else state
+
 def active_guild_encounters(encounters,guild_id):
-    return {int(key):raw for key,raw in encounters.items() if int(raw.get("guild_id",0))==int(guild_id) and raw.get("state") in {"open","battle"}}
+    return {int(key):raw for key,raw in encounters.items() if int(raw.get("guild_id",0))==int(guild_id) and encounter_state(raw) in {"open","battle"}}
 
 def effective_concurrency(conf,policy):
     selected=max(1,min(5,int(conf.get("max_active_encounters",1))))
@@ -265,11 +270,11 @@ def bounded_pace(minimum,maximum,cooldown,policy):
 def encounter_is_expired(raw,now):
     try:due=datetime.fromisoformat(raw.get("expires_at",""))
     except (TypeError,ValueError):return False
-    return raw.get("state") in {"open","battle"} and due<=now
+    return encounter_state(raw) in {"open","battle"} and due<=now
 
 def encounter_returns_after_timeout(raw):
     battle=raw.get("battle",{})
-    return raw.get("kind","wild")=="wild" and raw.get("state")=="battle" and int(battle.get("action_count",0))==0
+    return raw.get("kind","wild")=="wild" and encounter_state(raw)=="battle" and int(battle.get("action_count",0))==0
 
 def migrate_ball_items(data):
     items=dict(data.get("items",{}));items.setdefault("great_ball",3);items.setdefault("ultra_ball",1);data["items"]=items
@@ -304,7 +309,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="1.1.4";__author__="SickProdigy"
+    __version__="1.1.5";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -315,11 +320,17 @@ class Pokemon(commands.Cog):
         await self._migrate()
         await self.recover_trades()
         for key,raw in (await self.config.encounters()).items():
-            if raw.get("battle"):
+            if raw.get("battle") and encounter_state(raw)=="battle":
                 battle=Battle.from_raw(raw["battle"]);self.battles[battle.encounter_id]=battle
                 if battle.state=="active":
                     for view in (BattleView,FightView,PartyView,BagView):self.bot.add_view(view(self,battle.encounter_id),message_id=battle.message_id)
                     for item_key in ("potion","revive"):self.bot.add_view(MedicineView(self,battle.encounter_id,item_key),message_id=battle.message_id)
+                    # Reconcile even if an older build already cleared its retry flag.
+                    async with self.lock("encounters"):
+                        records=await self.config.encounters();current=records.get(key)
+                        if current and encounter_state(current)=="battle":
+                            current["message_sync_pending"]=True;current.pop("message_sync_retry_at",None)
+                            await self.config.encounters.set(records)
             elif raw.get("state")=="open":self.bot.add_view(EncounterView(self,int(key)),message_id=raw.get("message_id"))
         for key,raw in (await self.config.trades()).items():
             if raw.get("state")=="offered" and raw.get("message_id"):
@@ -328,72 +339,64 @@ class Pokemon(commands.Cog):
         self.cleanup_loop.cancel();self.bot.loop.create_task(self.renderer.close())
     @tasks.loop(seconds=60)
     async def cleanup_loop(self):
-        now=datetime.now(timezone.utc);await self.expire_trades(now);expired=[];returned=[]
-        async with self.lock("encounters"):
-            encounters=await self.config.encounters()
-            for key,raw in encounters.items():
-                if not encounter_is_expired(raw,now):continue
-                if encounter_returns_after_timeout(raw):
-                    raw["state"]="open";raw.pop("battle",None)
-                    raw["expires_at"]=(now+timedelta(seconds=int(raw.get("encounter_timeout",900)))).isoformat()
-                    returned.append((int(key),dict(raw)))
-                    raw["message_sync_pending"]=True;raw.pop("message_sync_attempts",None);raw.pop("message_sync_retry_at",None)
-                else:
-                    raw["state"]="expired";expired.append((int(key),dict(raw)));raw["message_sync_pending"]=True;raw.pop("message_sync_attempts",None);raw.pop("message_sync_retry_at",None)
-            if expired or returned:await self.config.encounters.set(encounters)
-        for eid,raw in returned:
-            self.battles.pop(eid,None)
-            channel=self.bot.get_channel(int(raw["channel_id"]))
-            if channel:
-                try:
-                    message=await channel.fetch_message(int(raw["message_id"]));await message.edit(content="The previous trainer timed out. This encounter is available again.",view=EncounterView(self,eid))
-                except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
-        for eid,raw in expired:
-            if raw.get("battle"):await self.settle_expired_battle(raw)
-            self.battles.pop(eid,None);await self.clear_guild(int(raw["guild_id"]),eid)
-            if raw.get("battle"):
-                channel=self.bot.get_channel(int(raw["channel_id"]))
-                if channel:
-                    try:
-                        message=await channel.fetch_message(int(raw["message_id"]));species=SPECIES.get(int(raw.get("species_id",0)));name=(("Shiny " if raw.get("shiny") else "")+species.name) if species else "Pokemon"
-                        await message.edit(content=f"The wild {name} escaped.",view=None)
-                    except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
-            else:await self.expire_unclaimed_message(raw)
+        now=datetime.now(timezone.utc);await self.expire_trades(now)
+        for key,raw in (await self.config.encounters()).items():
+            if encounter_is_expired(raw,now):await self.expire_encounter(int(key),now)
         await self.retry_pending_encounter_messages()
         await self.process_timed_spawns(now)
+
+    async def expire_encounter(self,eid,now):
+        # Use the same lock order as moves/claims; recheck after waiting for a turn.
+        async with self.lock(("battle",eid)):
+            async with self.lock("encounters"):
+                encounters=await self.config.encounters();raw=encounters.get(str(eid))
+                if not raw or not encounter_is_expired(raw,now):return
+                returned=encounter_returns_after_timeout(raw)
+                if returned:
+                    raw["state"]="open";raw.pop("battle",None)
+                    raw["expires_at"]=(now+timedelta(seconds=int(raw.get("encounter_timeout",900)))).isoformat()
+                else:raw["state"]="expired"
+                raw["message_sync_pending"]=True;raw.pop("message_sync_attempts",None);raw.pop("message_sync_retry_at",None)
+                await self.config.encounters.set(encounters)
+            self.battles.pop(eid,None)
+            if not returned:
+                if raw.get("battle"):await self.settle_expired_battle(raw)
+                await self.clear_guild(int(raw["guild_id"]),eid)
     async def retry_pending_encounter_messages(self,now=None):
-        now=now or datetime.now(timezone.utc);encounters=await self.config.encounters();results=[]
-        for key,raw in encounters.items():
-            if not raw.get("message_sync_pending"):continue
-            try:retry_at=datetime.fromisoformat(raw.get("message_sync_retry_at",""))
-            except (TypeError,ValueError):retry_at=None
-            if retry_at and retry_at>now:continue
-            results.append((str(key),dict(raw),await self.sync_encounter_message(int(key),dict(raw))))
-        if not results:return
-        async with self.lock("encounters"):
-            encounters=await self.config.encounters()
-            for key,attempted,synced in results:
-                current=encounters.get(key)
-                if not current or not current.get("message_sync_pending"):continue
-                if current.get("state")!=attempted.get("state") or current.get("expires_at")!=attempted.get("expires_at"):continue
-                if synced:
-                    current.pop("message_sync_pending",None);current.pop("message_sync_attempts",None);current.pop("message_sync_retry_at",None)
-                else:
-                    attempts=max(0,int(current.get("message_sync_attempts",0)));delay=min(3600,60*(2**min(attempts,6)))
-                    current["message_sync_attempts"]=attempts+1;current["message_sync_retry_at"]=(now+timedelta(seconds=delay)).isoformat()
-            await self.config.encounters.set(encounters)
+        now=now or datetime.now(timezone.utc)
+        pending=await self.config.encounters()
+        for key,snapshot in pending.items():
+            if not snapshot.get("message_sync_pending"):continue
+            async with self.lock(("battle",int(key))):
+                raw=(await self.config.encounters()).get(key)
+                if not raw or not raw.get("message_sync_pending"):continue
+                try:retry_at=datetime.fromisoformat(raw.get("message_sync_retry_at",""))
+                except (TypeError,ValueError):retry_at=None
+                if retry_at and retry_at>now:continue
+                synced=await self.sync_encounter_message(int(key),raw)
+                async with self.lock("encounters"):
+                    encounters=await self.config.encounters();current=encounters.get(key)
+                    if not current or current!=raw:continue
+                    if synced:
+                        current.pop("message_sync_pending",None);current.pop("message_sync_attempts",None);current.pop("message_sync_retry_at",None)
+                    else:
+                        attempts=max(0,int(current.get("message_sync_attempts",0)));delay=min(3600,60*(2**min(attempts,6)))
+                        current["message_sync_attempts"]=attempts+1;current["message_sync_retry_at"]=(now+timedelta(seconds=delay)).isoformat()
+                    await self.config.encounters.set(encounters)
     async def sync_encounter_message(self,eid,raw):
         channel=self.bot.get_channel(int(raw.get("channel_id",0)))
         if not channel:return False
         try:message=await channel.fetch_message(int(raw["message_id"]))
         except discord.NotFound:return True
-        except (discord.Forbidden,discord.HTTPException,KeyError,TypeError,ValueError):return False
-        state=raw.get("state")
+        except (discord.Forbidden,discord.HTTPException,OSError,asyncio.TimeoutError,KeyError,TypeError,ValueError):return False
+        state=encounter_state(raw)
         try:
             if state=="open":
                 await message.edit(content="The previous trainer timed out. This encounter is available again.",view=EncounterView(self,eid));return True
             if state=="battle":
-                battle=Battle.from_raw(raw["battle"]);self.battles[eid]=battle;embed,files=await self.rendered_battle(battle)
+                battle=self.battles.get(eid) or Battle.from_raw(raw["battle"])
+                if battle.state!="active":return False
+                self.battles[eid]=battle;embed,files=await self.rendered_battle(battle)
                 await message.edit(content=None,embed=embed,attachments=files,view=BattleView(self,eid));return True
             if state=="expired" and not raw.get("battle"):
                 mode=await self.config.guild_from_id(int(raw["guild_id"])).expired_card_mode()
@@ -408,7 +411,7 @@ class Pokemon(commands.Cog):
                 battle=Battle.from_raw(raw["battle"]);embed,files=await self.rendered_battle(battle)
                 await message.edit(content=None,embed=embed,attachments=files,view=None);return True
         except discord.NotFound:return True
-        except (discord.Forbidden,discord.HTTPException,KeyError,TypeError,ValueError):return False
+        except (discord.Forbidden,discord.HTTPException,OSError,asyncio.TimeoutError,KeyError,TypeError,ValueError):return False
         return True
     async def mark_encounter_message_synced(self,eid):
         async with self.lock("encounters"):
@@ -777,7 +780,7 @@ class Pokemon(commands.Cog):
         await section.last_spawn_at.set(spawned_at.isoformat())
         if conf.get("spawn_mode","timed")=="timed":await section.next_spawn_at.set(jittered_spawn_due(spawned_at,effective_timer_minutes(conf,policy)).isoformat())
     async def claim(self,i,eid):
-        async with self.lock(("user",i.user.id)), self.lock(("encounter",eid)), self.lock("encounters"):
+        async with self.lock(("battle",eid)), self.lock(("user",i.user.id)), self.lock(("encounter",eid)), self.lock("encounters"):
             if any(b.user_id==i.user.id and b.state=="active" for b in self.battles.values()):
                 await i.response.send_message("Finish your active encounter first.",ephemeral=True);return
             encounters=await self.config.encounters();raw=encounters.get(str(eid))
@@ -1265,7 +1268,7 @@ class Pokemon(commands.Cog):
             encounters=await self.config.encounters()
             raw=encounters[str(b.encounter_id)]
             raw["battle"]=b.raw()
-            raw["state"]=b.state
+            raw["state"]="battle" if b.state=="active" else b.state
             raw["message_sync_pending"]=True
             raw.pop("message_sync_attempts",None);raw.pop("message_sync_retry_at",None)
             raw["expires_at"]=(datetime.now(timezone.utc)+timedelta(seconds=seconds)).isoformat()
