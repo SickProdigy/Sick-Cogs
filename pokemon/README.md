@@ -27,6 +27,10 @@ Player commands use `[p]pokemon`, with `[p]poke` and `[p]pkmn` available as shor
 
 Collections are global only within one bot installation. Separate bots do not share data.
 
+### Encounter message recovery
+
+Ongoing battles retain their controls when a saved move needs a Discord-message retry. Failed repairs use exponential backoff (one minute up to one hour); a newly saved turn resets that retry delay. Reload schedules a control refresh for ongoing saved battles, including older `active` encounter records, without replaying moves or extending their expiry. Expired and completed encounters are not reopened. Retry and timeout processing wait for an in-progress turn and reread the current record before acting. Recovery does not recreate a deleted Discord message.
+
 ## Setup
 
 1. Load the cog.
