@@ -6,6 +6,7 @@ from typing import Any, Mapping, Optional, Sequence, Union
 
 import discord
 import feedparser
+from redbot.core.utils.chat_formatting import pagify
 
 from .models import FeedMode, entry_identity, feed_filter_failures, normalize_mode
 
