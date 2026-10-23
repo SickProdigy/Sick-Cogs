@@ -27,7 +27,7 @@ class ExternalSignInClient:
     async def request(self, path, payload):
         await reject_private_destination(self.board_url)
         timeout = aiohttp.ClientTimeout(total=20)
-        headers = {"Accept": "application/json", "User-Agent": "SickCogs-MyBB/0.2"}
+        headers = {"Accept": "application/json", "User-Agent": "SickCogs-MyBB/0.3"}
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
@@ -55,9 +55,11 @@ class ExternalSignInClient:
             raise MembershipError("Could not connect to External Sign-In.", code="connection_failed") from exc
         return body
 
-    async def start_link(self, discord_user_id, context):
+    async def start_link(self, discord_user_id, discord_username, context):
         body = await self.request("/device/authorize", {
-            "discord_user_id": str(int(discord_user_id)), "context": context,
+            "discord_user_id": str(int(discord_user_id)),
+            "discord_username": str(discord_username),
+            "context": context,
         })
         required = ("device_code", "user_code", "verification_uri_complete", "expires_in", "interval")
         if any(not body.get(key) for key in required):
@@ -76,8 +78,11 @@ class ExternalSignInClient:
     async def poll_link(self, device_code):
         return await self.request("/device/poll", {"device_code": device_code})
 
-    async def membership(self, link_token):
-        body = await self.request("/membership", {"link_token": link_token})
+    async def membership(self, link_token, discord_username):
+        body = await self.request("/membership", {
+            "link_token": link_token,
+            "discord_username": str(discord_username),
+        })
         status = body.get("status")
         if status not in {"active", "inactive", "unlinked"}:
             raise MembershipError("External Sign-In returned an unknown membership state.", code="invalid_response")

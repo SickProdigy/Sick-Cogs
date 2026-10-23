@@ -382,7 +382,11 @@ class MembershipView(OwnedView):
             return
         try:
             client = await self.cog.membership_client(interaction.guild)
-            started = await client.start_link(interaction.user.id, f"guild:{interaction.guild.id}")
+            started = await client.start_link(
+                interaction.user.id,
+                interaction.user.name,
+                f"guild:{interaction.guild.id}",
+            )
         except MembershipError as error:
             await interaction.response.send_message(f"Could not start linking: {error}", ephemeral=True)
             return

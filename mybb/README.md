@@ -12,7 +12,7 @@ MyBB's built-in announcements provide a shorter setup for forum owners.
 
 ## Requirements
 
-- MyBB External Sign-In 0.1.13 or newer for account linking and membership roles.
+- MyBB External Sign-In 0.1.14 or newer for account linking and membership roles.
 - SickProdigy MyBB API v1 1.0.0 or newer only for optional forum tools.
 - Public HTTPS URLs. The bot needs outbound HTTPS only; no inbound bot port or
   callback listener is required.
@@ -30,7 +30,10 @@ In MyBB Admin CP, create a dedicated confidential External Sign-In client:
 
 - Enable **Account linking service**.
 - Keep `openid` and `entitlements` in its scopes.
-- Allow every named entitlement this Discord server may consume, such as `vip`.
+- Configure a baseline entitlement such as `discord_link` for every forum group
+  allowed to link, independently of paid/VIP access.
+- Allow every named entitlement this Discord server may consume, such as
+  `discord_link`, `vip`, `vip_gold`, or `vip_diamond`.
 - A linking-only client does not need callback URLs.
 - Do not reuse a website OIDC client or API-v1 token.
 
@@ -49,6 +52,7 @@ https://forum.example.com/external-signin
 Map entitlements and enable synchronization:
 
 ```text
+[p]mybbset membership map discord_link @Website-Linked
 [p]mybbset membership map vip @VIP
 [p]mybbset membership enabled true
 [p]mybbset membership
@@ -57,13 +61,26 @@ Map entitlements and enable synchronization:
 Members run `[p]mybb membership` (or `[p]mybb connect`), press **Link MyBB**,
 open the private approval URL, sign in on the forum, and approve the displayed
 Discord ID and server context. The bot polls outbound and immediately synchronizes
-roles. `[p]mybb membership sync` requests a manual refresh.
+roles. `[p]mybb membership sync` requests a manual refresh. A member may remain
+linked with only `discord_link`; losing `vip` removes the cog-managed VIP role
+without removing the website link or the linked-member role. New mappings also
+apply to already-linked members on their next successful synchronization.
+
+The cog sends the stable numeric Discord user ID as the authorization identity.
+It also sends the current canonical Discord account username (never a nickname,
+mention, or legacy discriminator) as optional display metadata during linking and
+later membership checks. External Sign-In may copy that plain username into an
+existing MyBB custom profile field named `Discord`; it must never use the mutable
+username to select, transfer, or authorize a link.
 
 The loop wakes once a minute but checks a guild only on its 15-minute due cycle.
 It handles at most 100 linked members per pass with a rotating cursor. Failures
-back off up to six hours. Only authenticated HTTP 200 `inactive` or `unlinked`
-states remove roles owned by the cog. Timeouts, malformed responses, 401/403,
-rate limits, and server failures preserve roles for later retry.
+back off up to six hours. Every authenticated HTTP 200 response is authoritative:
+an `active` response reconciles the complete returned entitlement set, while
+`inactive` and `unlinked` remove applicable cog-managed membership roles. Timeouts,
+malformed responses, identity-binding mismatches, 401/403, rate limits, and server
+failures preserve roles for later retry. A profile-display update failure must not
+change membership state, roles, or the durable link.
 
 ### 2. Optional API-v1 forum tools
 

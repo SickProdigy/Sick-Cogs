@@ -22,9 +22,11 @@ class ExternalSignInContractTests(unittest.IsolatedAsyncioTestCase):
             "verification_uri_complete": "https://forum.example/community/external-signin/device?user_code=ABCD-EFGH",
             "expires_in": 5000, "interval": 1,
         })
-        result = await client.start_link(123, "guild:456")
+        result = await client.start_link(123, "sickprodigy", "guild:456")
         client.request.assert_awaited_once_with("/device/authorize", {
-            "discord_user_id": "123", "context": "guild:456",
+            "discord_user_id": "123",
+            "discord_username": "sickprodigy",
+            "context": "guild:456",
         })
         self.assertEqual(result["expires_in"], 600)
         self.assertEqual(result["interval"], 5)
@@ -37,7 +39,7 @@ class ExternalSignInContractTests(unittest.IsolatedAsyncioTestCase):
             "expires_in": 600, "interval": 5,
         })
         with self.assertRaisesRegex(MembershipError, "unsafe"):
-            await client.start_link(123, "guild:456")
+            await client.start_link(123, "sickprodigy", "guild:456")
 
     async def test_active_membership_returns_validated_entitlement_set(self):
         client = self.client()
@@ -46,16 +48,19 @@ class ExternalSignInContractTests(unittest.IsolatedAsyncioTestCase):
             "context": "guild:456", "checked_at": 1, "status": "active",
             "entitlements": ["vip", "media.access"],
         })
-        result = await client.membership("link-token")
+        result = await client.membership("link-token", "renamed-user")
         self.assertEqual(result["entitlements"], {"vip", "media.access"})
-        client.request.assert_awaited_once_with("/membership", {"link_token": "link-token"})
+        client.request.assert_awaited_once_with("/membership", {
+            "link_token": "link-token",
+            "discord_username": "renamed-user",
+        })
 
     async def test_only_explicit_inactive_states_allow_empty_snapshot(self):
         for status in ("inactive", "unlinked"):
             with self.subTest(status=status):
                 client = self.client()
                 client.request = AsyncMock(return_value={"status": status, "entitlements": []})
-                result = await client.membership("link-token")
+                result = await client.membership("link-token", "sickprodigy")
                 self.assertEqual(result["entitlements"], set())
 
     async def test_ambiguous_or_malformed_states_are_errors(self):
@@ -70,7 +75,7 @@ class ExternalSignInContractTests(unittest.IsolatedAsyncioTestCase):
                 client = self.client()
                 client.request = AsyncMock(return_value=body)
                 with self.assertRaises(MembershipError):
-                    await client.membership("link-token")
+                    await client.membership("link-token", "sickprodigy")
 
     async def test_unlink_uses_durable_link_credential(self):
         client = self.client()

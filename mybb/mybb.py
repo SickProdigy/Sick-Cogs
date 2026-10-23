@@ -139,7 +139,7 @@ class MyBB(commands.Cog):
                 raise MembershipError("Your MyBB membership is not linked.", code="not_linked")
             client = await self.membership_client(member.guild)
             try:
-                result = await client.membership(token)
+                result = await client.membership(token, member.name)
                 expected = {
                     "issuer": client.issuer,
                     "discord_user_id": str(member.id),
@@ -469,14 +469,27 @@ class MyBB(commands.Cog):
             ),
             color=discord.Color.blurple(),
         )
-        embed.add_field(name="Board", value=data["board_url"] or "Not connected", inline=False)
-        embed.add_field(name="Server access", value="Enabled" if data["enabled"] else "Disabled")
-        embed.add_field(name="Website membership", value="Linked" if membership_link else "Not linked")
+        embed.add_field(
+            name="Website account linking",
+            value=(
+                f"Provider: {data.get('membership_url') or 'Not configured'}\n"
+                f"Your account: {'Linked' if membership_link else 'Not linked'}"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Optional forum tools",
+            value=(
+                f"Board: {data['board_url'] or 'Not connected'}\n"
+                f"Server access: {'Enabled' if data['enabled'] else 'Disabled'}"
+            ),
+            inline=False,
+        )
         embed.add_field(
             name="Default publishing forum",
             value=f"ID {data['default_forum_id']}" if data["default_forum_id"] else "Not set",
         )
-        embed.set_footer(text=f"Link your account with {ctx.clean_prefix}mybb membership • Server setup: {ctx.clean_prefix}mybbset setup")
+        embed.set_footer(text=f"Link your account with {ctx.clean_prefix}mybb membership • Membership setup: {ctx.clean_prefix}mybbset membership setup")
         await ctx.send(embed=embed, view=MyBBHome(self, ctx.author))
 
     @mybb.command(name="connect")
@@ -794,7 +807,7 @@ class MyBB(commands.Cog):
         from .views import MembershipSetupView
 
         await ctx.send(
-            "Configure the dedicated External Sign-In confidential client. Its Account linking service must be enabled.",
+            "Configure the dedicated External Sign-In confidential client. Enable its Account linking service and allow a baseline entitlement such as `discord_link` for every eligible forum member.",
             view=MembershipSetupView(self, ctx.author),
         )
 
