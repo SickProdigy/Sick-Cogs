@@ -1,12 +1,18 @@
-"""Per-guild and per-member bridge for the SickProdigy MyBB API v1 plugin."""
+"""Per-guild MyBB bridge with verified External Sign-In membership roles."""
 
+import asyncio
+import logging
+import time
+from collections import defaultdict
 from typing import Optional
 
 import discord
+from discord.ext import tasks
 from redbot.core import Config, commands
 
 from .client import MyBBAPIError, MyBBClient
-from .roles import RoleSyncError, entitlement_name, validate_role
+from .membership import ExternalSignInClient, MembershipError
+from .roles import RoleSyncError, entitlement_name, reconcile_roles, validate_role
 
 
 GUILD_DEFAULTS = {
@@ -16,15 +22,26 @@ GUILD_DEFAULTS = {
     "forum_aliases": {},
     "manager_role_id": None,
     "membership_roles": {},
+    "membership_enabled": False,
+    "membership_failures": 0,
+    "membership_next_check": 0,
+    "membership_cursor": 0,
 }
-MEMBER_DEFAULTS = {"connected": False}
+MEMBER_DEFAULTS = {
+    "connected": False,
+    "membership_link": {},
+    "membership_owned_role_ids": [],
+    "membership_last_success": 0,
+    "membership_last_error": None,
+}
+log = logging.getLogger("red.sick-cogs.MyBB")
 
 
 class MyBB(commands.Cog):
     """Connect a Discord server to MyBB and let members optionally use personal access."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.1"
+    __version__ = "0.2.0"
     CONFIG_IDENTIFIER = 620260922060001
 
     def __init__(self, bot):
@@ -32,6 +49,14 @@ class MyBB(commands.Cog):
         self.config = Config.get_conf(self, identifier=self.CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_guild(**GUILD_DEFAULTS)
         self.config.register_member(**MEMBER_DEFAULTS)
+        self._membership_locks = defaultdict(asyncio.Lock)
+        self._membership_guild_locks = defaultdict(asyncio.Lock)
+
+    async def cog_load(self):
+        self.membership_loop.start()
+
+    def cog_unload(self):
+        self.membership_loop.cancel()
 
     @staticmethod
     def guild_namespace(guild_id):
@@ -41,12 +66,26 @@ class MyBB(commands.Cog):
     def member_namespace(guild_id, user_id):
         return f"mybb_user_{int(guild_id)}_{int(user_id)}"
 
+    @staticmethod
+    def membership_guild_namespace(guild_id):
+        return f"mybb_membership_guild_{int(guild_id)}"
+
+    @staticmethod
+    def membership_member_namespace(guild_id, user_id):
+        return f"mybb_membership_link_{int(guild_id)}_{int(user_id)}"
+
     async def red_delete_data_for_user(self, *, user_id: int, **kwargs):
-        """Remove member connection markers and their stored MyBB tokens."""
+        """Remove personal API access and verified membership-link data."""
         for guild_id in await self.config.all_guilds():
+            guild = self.bot.get_guild(guild_id)
+            if guild is not None:
+                await self.clear_membership(guild, user_id, notify_provider=True)
             await self.config.member_from_ids(guild_id, user_id).clear()
             await self.bot.remove_shared_api_tokens(
                 self.member_namespace(guild_id, user_id), "token"
+            )
+            await self.bot.remove_shared_api_tokens(
+                self.membership_member_namespace(guild_id, user_id), "link_token"
             )
 
     async def is_manager(self, member):
@@ -65,7 +104,148 @@ class MyBB(commands.Cog):
             await self.bot.remove_shared_api_tokens(
                 self.member_namespace(guild.id, user_id), "token"
             )
-            await self.config.member_from_ids(guild.id, user_id).clear()
+            await self.config.member_from_ids(guild.id, user_id).connected.clear()
+
+    async def clear_guild_memberships(self, guild, *, notify_provider=True):
+        members = await self.config.all_members(guild)
+        for user_id, data in members.items():
+            if data.get("membership_link") or data.get("membership_owned_role_ids"):
+                await self.clear_membership(guild, user_id, notify_provider=notify_provider)
+
+    async def membership_client(self, guild):
+        board_url = await self.config.guild(guild).board_url()
+        tokens = await self.bot.get_shared_api_tokens(self.membership_guild_namespace(guild.id))
+        if not board_url or not tokens.get("client_id") or not tokens.get("client_secret"):
+            raise MembershipError("Membership linking is not configured for this server.", code="not_configured")
+        return ExternalSignInClient(board_url, tokens["client_id"], tokens["client_secret"])
+
+    async def membership_token(self, guild_id, user_id):
+        tokens = await self.bot.get_shared_api_tokens(self.membership_member_namespace(guild_id, user_id))
+        return tokens.get("link_token")
+
+    async def reconcile_membership(self, member):
+        """Fetch one authoritative snapshot and apply only owned mapped roles."""
+        async with self._membership_guild_locks[member.guild.id], self._membership_locks[(member.guild.id, member.id)]:
+            group = self.config.member(member)
+            link = await group.membership_link()
+            token = await self.membership_token(member.guild.id, member.id)
+            if not link or not token:
+                raise MembershipError("Your MyBB membership is not linked.", code="not_linked")
+            client = await self.membership_client(member.guild)
+            try:
+                result = await client.membership(token)
+                expected = {
+                    "issuer": client.issuer,
+                    "discord_user_id": str(member.id),
+                    "context": f"guild:{member.guild.id}",
+                    "sub": str(link.get("sub", "")),
+                }
+                if any(str(result.get(key, "")) != value for key, value in expected.items()):
+                    raise MembershipError("External Sign-In returned mismatched link identity.", code="invalid_response")
+                entitlements = result["entitlements"] if result["status"] == "active" else set()
+                mappings = await self.config.guild(member.guild).membership_roles()
+                owned = await group.membership_owned_role_ids()
+                await reconcile_roles(
+                    member, mappings, entitlements, owned,
+                    group.membership_owned_role_ids.set,
+                )
+                now = int(time.time())
+                await group.membership_last_success.set(now)
+                await group.membership_last_error.clear()
+                link["status"] = result["status"]
+                link["checked_at"] = int(result.get("checked_at") or now)
+                await group.membership_link.set(link)
+                return result
+            except (MembershipError, discord.HTTPException, RoleSyncError) as error:
+                await group.membership_last_error.set(str(error)[:300])
+                raise
+
+    async def finish_membership_link(self, member, client, result):
+        expected = {
+            "issuer": client.issuer,
+            "discord_user_id": str(member.id),
+            "context": f"guild:{member.guild.id}",
+        }
+        if any(str(result.get(key, "")) != value for key, value in expected.items()):
+            raise MembershipError("External Sign-In returned mismatched link identity.", code="invalid_response")
+        if not all(result.get(key) for key in ("sub", "link_id", "link_token")):
+            raise MembershipError("External Sign-In returned incomplete link credentials.", code="invalid_response")
+        async with self._membership_locks[(member.guild.id, member.id)]:
+            await self.bot.set_shared_api_tokens(
+                self.membership_member_namespace(member.guild.id, member.id),
+                link_token=str(result["link_token"]),
+            )
+            await self.config.member(member).membership_link.set({
+                "issuer": client.issuer, "sub": str(result["sub"]),
+                "link_id": str(result["link_id"]), "status": "linked", "checked_at": 0,
+            })
+        return await self.reconcile_membership(member)
+
+    async def clear_membership(self, guild, user_id, *, notify_provider):
+        """Deliberately unlink, then remove roles owned by this cog."""
+        async with self._membership_guild_locks[guild.id], self._membership_locks[(guild.id, user_id)]:
+            group = self.config.member_from_ids(guild.id, user_id)
+            token = await self.membership_token(guild.id, user_id)
+            if notify_provider and token:
+                client = await self.membership_client(guild)
+                await client.unlink(token)  # ambiguous failure preserves local access for retry
+            member = guild.get_member(user_id)
+            owned = await group.membership_owned_role_ids()
+            if member is not None:
+                await reconcile_roles(member, {}, set(), owned, group.membership_owned_role_ids.set)
+            elif owned:
+                await group.membership_owned_role_ids.set([])
+            await self.bot.remove_shared_api_tokens(
+                self.membership_member_namespace(guild.id, user_id), "link_token"
+            )
+            await group.membership_link.clear()
+            await group.membership_last_success.clear()
+            await group.membership_last_error.clear()
+
+    @tasks.loop(minutes=1)
+    async def membership_loop(self):
+        """Run one bounded reconciliation pass only when its due cycle arrives."""
+        now = int(time.time())
+        for guild_id, data in (await self.config.all_guilds()).items():
+            if not data.get("membership_enabled") or now < int(data.get("membership_next_check", 0)):
+                continue
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                continue
+            failures = 0
+            linked = [
+                (user_id, member_data)
+                for user_id, member_data in (await self.config.all_members(guild)).items()
+                if member_data.get("membership_link")
+            ]
+            cursor = int(data.get("membership_cursor", 0)) % max(len(linked), 1)
+            ordered = linked[cursor:] + linked[:cursor]
+            checked = 0
+            for user_id, member_data in ordered[:100]:
+                member = guild.get_member(user_id)
+                if member is None:
+                    continue
+                checked += 1
+                try:
+                    await self.reconcile_membership(member)
+                except (MembershipError, discord.HTTPException, RoleSyncError):
+                    failures += 1
+            await self.config.guild(guild).membership_cursor.set(
+                (cursor + min(len(ordered), 100)) % max(len(linked), 1)
+            )
+            previous = int(data.get("membership_failures", 0))
+            failure_count = min(previous + 1, 5) if failures else 0
+            await self.config.guild(guild).membership_failures.set(failure_count)
+            delay = min(900 * (2 ** failure_count), 21600)
+            await self.config.guild(guild).membership_next_check.set(now + delay)
+
+    @membership_loop.before_loop
+    async def before_membership_loop(self):
+        await self.bot.wait_until_red_ready()
+
+    @membership_loop.error
+    async def membership_loop_error(self, error):
+        log.exception("MyBB membership loop failed; Discord roles were not inferred from the error.", exc_info=error)
 
     async def client_for(self, guild, member=None, *, authenticated=True, personal_only=False):
         board_url = await self.config.guild(guild).board_url()
@@ -236,6 +416,46 @@ class MyBB(commands.Cog):
         )
         await self.config.member(ctx.author).connected.set(False)
         await ctx.send("Your personal MyBB connection has been removed.")
+
+    @mybb.group(name="membership", invoke_without_command=True)
+    async def mybb_membership(self, ctx):
+        """Link MyBB membership and manage synchronized Discord access."""
+        from .views import MembershipView
+
+        link = await self.config.member(ctx.author).membership_link()
+        await ctx.send(
+            "Open your private membership controls below. Forum API access and verified membership linking are separate connections.",
+            view=MembershipView(self, ctx.author, bool(link)),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @mybb_membership.command(name="status")
+    async def mybb_membership_status(self, ctx):
+        link = await self.config.member(ctx.author).membership_link()
+        last = await self.config.member(ctx.author).membership_last_success()
+        error = await self.config.member(ctx.author).membership_last_error()
+        message = (
+            f"Linked · status `{link.get('status', 'unknown')}`"
+            + (f" · last successful check <t:{last}:R>" if last else " · first successful check pending")
+            if link else "No verified MyBB membership link is active."
+        )
+        await ctx.send(
+            message + (f" · last error: {error}" if error else ""),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @mybb_membership.command(name="sync")
+    @commands.cooldown(1, 60, commands.BucketType.member)
+    async def mybb_membership_sync(self, ctx):
+        try:
+            result = await self.reconcile_membership(ctx.author)
+        except (MembershipError, discord.HTTPException, RoleSyncError) as error:
+            await ctx.send(
+                f"Membership sync could not complete; existing roles were preserved. {error}",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
+        await ctx.send(f"Membership synchronized: `{result['status']}`.")
 
     @mybb.command(name="forums")
     async def forums(self, ctx):
@@ -437,7 +657,11 @@ class MyBB(commands.Cog):
         embed.add_field(name="Manager role", value=role.mention if role else "Manage Server only")
         embed.add_field(
             name="Membership roles",
-            value=f"{len(data.get('membership_roles', {}))} mapping(s) · inactive: External Sign-In integration pending",
+            value=(
+                f"{len(data.get('membership_roles', {}))} mapping(s) · "
+                f"{'Enabled' if data.get('membership_enabled') else 'Disabled'} · "
+                f"client {'stored' if (await self.bot.get_shared_api_tokens(self.membership_guild_namespace(guild.id))).get('client_id') else 'not configured'}"
+            ),
             inline=False,
         )
         embed.set_footer(text="Tokens are never displayed. RSSPublisher remains the better tool for automatic announcements.")
@@ -449,44 +673,69 @@ class MyBB(commands.Cog):
 
     @mybbset.group(name="membership", invoke_without_command=True)
     async def mybbset_membership(self, ctx):
-        """Prepare membership role mappings; live linking/sync is not available yet."""
+        """Show membership linking and role synchronization configuration."""
         mappings = await self.config.guild(ctx.guild).membership_roles()
+        enabled = await self.config.guild(ctx.guild).membership_enabled()
+        credentials = await self.bot.get_shared_api_tokens(self.membership_guild_namespace(ctx.guild.id))
         lines = [f"`{name}` → role ID `{role_id}`" for name, role_id in sorted(mappings.items())]
         from redbot.core.utils.chat_formatting import pagify
         message = (
-            "MyBB membership sync: **inactive**. External Sign-In linking and membership "
-            "verification are pending (#261 / plugin #4). No roles are currently changed.\n"
+            f"MyBB membership sync: **{'enabled' if enabled else 'disabled'}** · "
+            f"client: **{'configured' if credentials.get('client_id') and credentials.get('client_secret') else 'not configured'}**.\n"
             "These are named forum permissions, not numeric MyBB group IDs.\n"
             + ("\n".join(lines) or "No role mappings configured.")
         )
         for page in pagify(message):
             await ctx.send(page, allowed_mentions=discord.AllowedMentions.none())
 
+    @mybbset_membership.command(name="setup")
+    async def mybbset_membership_setup(self, ctx):
+        """Open private setup for the External Sign-In linking client."""
+        from .views import MembershipSetupView
+
+        await ctx.send(
+            "Configure the dedicated External Sign-In confidential client. Its Account linking service must be enabled.",
+            view=MembershipSetupView(self, ctx.author),
+        )
+
+    @mybbset_membership.command(name="enabled")
+    async def mybbset_membership_enabled(self, ctx, enabled: bool):
+        if enabled:
+            tokens = await self.bot.get_shared_api_tokens(self.membership_guild_namespace(ctx.guild.id))
+            if not await self.config.guild(ctx.guild).board_url() or not tokens.get("client_id") or not tokens.get("client_secret"):
+                await ctx.send("Connect the board and configure the External Sign-In client first.")
+                return
+        await self.config.guild(ctx.guild).membership_enabled.set(enabled)
+        await self.config.guild(ctx.guild).membership_next_check.set(0)
+        await ctx.send(f"Membership synchronization {'enabled' if enabled else 'disabled'}. Existing roles are unchanged.")
+
     @mybbset_membership.command(name="map")
     @commands.admin_or_permissions(manage_guild=True, manage_roles=True)
     async def mybbset_membership_map(self, ctx, entitlement: str, role: discord.Role):
-        """Prepare a named MyBB permission → Discord role mapping (sync inactive)."""
+        """Map a named MyBB entitlement to a Discord role."""
         try:
             entitlement = entitlement_name(entitlement)
             validate_role(ctx.guild, role, ctx.author)
-            async with self.config.guild(ctx.guild).membership_roles() as mappings:
-                if entitlement not in mappings and len(mappings) >= 50:
-                    raise RoleSyncError("At most 50 membership mappings are supported per server.")
-                mappings[entitlement] = role.id
+            async with self._membership_guild_locks[ctx.guild.id]:
+                async with self.config.guild(ctx.guild).membership_roles() as mappings:
+                    if entitlement not in mappings and len(mappings) >= 50:
+                        raise RoleSyncError("At most 50 membership mappings are supported per server.")
+                    mappings[entitlement] = role.id
         except RoleSyncError as error:
             await ctx.send(str(error))
             return
         await ctx.send(
-            f"Prepared `{entitlement}` → role ID `{role.id}`. Sync is inactive until External Sign-In integration is complete.",
+            f"Mapped `{entitlement}` → role ID `{role.id}`. Linked members update on their next sync.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @mybbset_membership.command(name="unmap")
     @commands.admin_or_permissions(manage_guild=True, manage_roles=True)
     async def mybbset_membership_unmap(self, ctx, entitlement: str):
-        """Remove a prepared mapping; no Discord roles are changed."""
-        async with self.config.guild(ctx.guild).membership_roles() as mappings:
-            removed = mappings.pop(entitlement, None)
+        """Remove a mapping; linked members update on their next sync."""
+        async with self._membership_guild_locks[ctx.guild.id]:
+            async with self.config.guild(ctx.guild).membership_roles() as mappings:
+                removed = mappings.pop(entitlement, None)
         await ctx.send("Mapping removed; no Discord roles changed." if removed else "That mapping does not exist.")
 
     @mybbset.command(name="enabled")
@@ -562,11 +811,20 @@ class MyBB(commands.Cog):
         if confirmation.casefold() != "confirm":
             await ctx.send(f"Run `{ctx.clean_prefix}mybbset disconnect confirm` to remove the server connector. Personal tokens are removed separately by their owners.")
             return
+        try:
+            await self.clear_guild_memberships(ctx.guild, notify_provider=True)
+        except (MembershipError, discord.HTTPException, RoleSyncError) as error:
+            await ctx.send(f"Disconnect stopped because membership cleanup could not be confirmed: {error}")
+            return
         await self.bot.remove_shared_api_tokens(self.guild_namespace(ctx.guild.id), "token")
+        await self.bot.remove_shared_api_tokens(
+            self.membership_guild_namespace(ctx.guild.id), "client_id", "client_secret"
+        )
         await self.clear_guild_member_connections(ctx.guild)
         await self.config.guild(ctx.guild).board_url.clear()
         await self.config.guild(ctx.guild).default_forum_id.clear()
         await self.config.guild(ctx.guild).forum_aliases.clear()
         await self.config.guild(ctx.guild).membership_roles.clear()
+        await self.config.guild(ctx.guild).membership_enabled.set(False)
         await self.config.guild(ctx.guild).enabled.set(False)
         await ctx.send("This Discord server's MyBB board connector has been removed and the bridge disabled.")

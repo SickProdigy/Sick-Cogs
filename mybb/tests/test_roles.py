@@ -1,4 +1,5 @@
 import unittest
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -153,11 +154,12 @@ class ReconcileTests(unittest.IsolatedAsyncioTestCase):
         async def value():
             yield mappings
         cog = object.__new__(MyBB)
+        cog._membership_guild_locks = defaultdict(__import__("asyncio").Lock)
         cog.config = SimpleNamespace(guild=lambda guild: SimpleNamespace(membership_roles=value))
         ctx = SimpleNamespace(guild=guild, author=SimpleNamespace(id=99), send=AsyncMock())
         await MyBB.mybbset_membership_map.callback(cog, ctx, "vip", role)
         self.assertEqual(mappings, {"vip": 10})
-        self.assertIn("inactive", ctx.send.await_args.args[0])
+        self.assertIn("Mapped", ctx.send.await_args.args[0])
         await MyBB.mybbset_membership_unmap.callback(cog, ctx, "vip")
         self.assertEqual(mappings, {})
         member.add_roles.assert_not_awaited()
@@ -169,10 +171,11 @@ class ReconcileTests(unittest.IsolatedAsyncioTestCase):
         async def value():
             yield mappings
         cog = object.__new__(MyBB)
+        cog._membership_guild_locks = defaultdict(__import__("asyncio").Lock)
         cog.config = SimpleNamespace(guild=lambda guild: SimpleNamespace(membership_roles=value))
         ctx = SimpleNamespace(guild=guild, author=SimpleNamespace(id=99), send=AsyncMock())
         await MyBB.mybbset_membership_map.callback(cog, ctx, "vip", role)
         self.assertNotIn("vip", mappings)
         self.assertIn("50", ctx.send.await_args.args[0])
         await MyBB.mybbset_membership_map.callback(cog, ctx, "p0", role)
-        self.assertIn("Prepared", ctx.send.await_args.args[0])
+        self.assertIn("Mapped", ctx.send.await_args.args[0])

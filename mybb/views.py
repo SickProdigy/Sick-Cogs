@@ -1,8 +1,13 @@
 """Interactive setup, discovery, and publishing views for MyBB."""
 
+import asyncio
+import time
+
 import discord
 
 from .client import MyBBAPIError, MyBBClient
+from .membership import MembershipError
+from .roles import RoleSyncError
 
 
 class OwnedView(discord.ui.View):
@@ -134,6 +139,14 @@ class MyBBHome(OwnedView):
         connected = await self.cog.has_personal_connection(
             interaction.guild.id, interaction.user.id
         )
+
+    @discord.ui.button(label="Membership", style=discord.ButtonStyle.success, row=1)
+    async def membership(self, interaction, button):
+        link = await self.cog.config.member(interaction.user).membership_link()
+        await interaction.response.send_message(
+            "Verified membership controls. This is separate from your personal forum API token.",
+            view=MembershipView(self.cog, interaction.user, bool(link)), ephemeral=True,
+        )
         await interaction.response.send_message(
             "Your personal MyBB connection is active. Use the text command `mybb connect` to replace or remove it."
             if connected
@@ -180,10 +193,19 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this Discord server 
         guild = interaction.guild
         old_url = await self.view.cog.config.guild(guild).board_url()
         if old_url and old_url != client.base_url:
+            try:
+                await self.view.cog.clear_guild_memberships(guild, notify_provider=True)
+            except (MembershipError, discord.HTTPException, RoleSyncError) as error:
+                await self.view.show_error(interaction, error)
+                return
+            await self.view.cog.bot.remove_shared_api_tokens(
+                self.view.cog.membership_guild_namespace(guild.id), "client_id", "client_secret"
+            )
             await self.view.cog.clear_guild_member_connections(guild)
             await self.view.cog.config.guild(guild).default_forum_id.clear()
             await self.view.cog.config.guild(guild).forum_aliases.clear()
             await self.view.cog.config.guild(guild).membership_roles.clear()
+            await self.view.cog.config.guild(guild).membership_enabled.set(False)
         await self.view.cog.bot.set_shared_api_tokens(
             self.view.cog.guild_namespace(guild.id), token=str(self.token).strip()
         )
@@ -276,6 +298,174 @@ class MyBBSetupView(OwnedView):
             item.disabled = True
         await interaction.response.edit_message(view=self)
         self.stop()
+
+
+class MembershipClientModal(discord.ui.Modal, title="Configure MyBB membership linking"):
+    client_id = discord.ui.TextInput(label="External Sign-In client ID", max_length=190)
+    client_secret = discord.ui.TextInput(label="Client secret", max_length=500)
+
+    def __init__(self, view):
+        super().__init__()
+        self.view = view
+
+    async def on_submit(self, interaction):
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("Manage Server permission is required.", ephemeral=True)
+            return
+        if not await self.view.cog.config.guild(interaction.guild).board_url():
+            await interaction.response.send_message("Connect the MyBB board first.", ephemeral=True)
+            return
+        await self.view.cog.bot.set_shared_api_tokens(
+            self.view.cog.membership_guild_namespace(interaction.guild.id),
+            client_id=str(self.client_id).strip(), client_secret=str(self.client_secret).strip(),
+        )
+        await self.view.cog.config.guild(interaction.guild).membership_enabled.set(True)
+        await self.view.cog.config.guild(interaction.guild).membership_next_check.set(0)
+        await interaction.response.edit_message(
+            content="External Sign-In membership client stored and synchronization enabled. Use your own Membership panel to test linking.",
+            view=MembershipSetupView(self.view.cog, interaction.user),
+        )
+
+
+class MembershipSetupView(OwnedView):
+    @discord.ui.button(label="Set client", style=discord.ButtonStyle.success)
+    async def configure(self, interaction, button):
+        await interaction.response.send_modal(MembershipClientModal(self))
+
+    @discord.ui.button(label="Disable", style=discord.ButtonStyle.secondary)
+    async def disable(self, interaction, button):
+        await self.cog.config.guild(interaction.guild).membership_enabled.set(False)
+        await interaction.response.edit_message(
+            content="Membership synchronization disabled. Existing roles and links are preserved.", view=self,
+        )
+
+    @discord.ui.button(label="Remove client", style=discord.ButtonStyle.danger)
+    async def remove(self, interaction, button):
+        await interaction.response.defer()
+        try:
+            await self.cog.clear_guild_memberships(interaction.guild, notify_provider=True)
+        except (MembershipError, discord.HTTPException, RoleSyncError) as error:
+            await self.show_error(interaction, error)
+            return
+        await self.cog.bot.remove_shared_api_tokens(
+            self.cog.membership_guild_namespace(interaction.guild.id), "client_id", "client_secret"
+        )
+        await self.cog.config.guild(interaction.guild).membership_enabled.set(False)
+        await interaction.edit_original_response(
+            content="Membership links were revoked, cog-managed roles removed, and the client credentials deleted.", view=self,
+        )
+
+    @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary)
+    async def done(self, interaction, button):
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+
+class MembershipView(OwnedView):
+    def __init__(self, cog, owner, linked):
+        super().__init__(cog, owner, timeout=660)
+        self.linked = linked
+
+    @discord.ui.button(label="Link MyBB", style=discord.ButtonStyle.success)
+    async def link(self, interaction, button):
+        if not await self.cog.config.guild(interaction.guild).membership_enabled():
+            await interaction.response.send_message("Membership linking is not enabled for this server.", ephemeral=True)
+            return
+        if await self.cog.config.member(interaction.user).membership_link():
+            await interaction.response.send_message("Your membership is already linked. Unlink it before linking another account.", ephemeral=True)
+            return
+        try:
+            client = await self.cog.membership_client(interaction.guild)
+            started = await client.start_link(interaction.user.id, f"guild:{interaction.guild.id}")
+        except MembershipError as error:
+            await interaction.response.send_message(f"Could not start linking: {error}", ephemeral=True)
+            return
+        url_view = discord.ui.View(timeout=int(started["expires_in"]))
+        url_view.add_item(discord.ui.Button(label="Approve on MyBB", url=str(started["verification_uri_complete"])))
+        await interaction.response.send_message(
+            f"Open MyBB and approve code `{started['user_code']}`. This expires in {int(started['expires_in']) // 60} minutes. Waiting for approval…",
+            view=url_view, ephemeral=True,
+        )
+        deadline = time.monotonic() + int(started["expires_in"])
+        interval = int(started["interval"])
+        while time.monotonic() < deadline:
+            await asyncio.sleep(interval)
+            try:
+                result = await client.poll_link(started["device_code"])
+            except MembershipError as error:
+                if error.code == "authorization_pending":
+                    continue
+                if error.code == "slow_down":
+                    try:
+                        interval = max(interval + 5, int(error.retry_after or 5))
+                    except ValueError:
+                        interval += 5
+                    continue
+                message = "Linking was denied or expired. Start a new link." if error.code in {"access_denied", "expired_token"} else "Linking could not be confirmed. Start a new link; the single-use completion is never retried after an ambiguous response."
+                await interaction.edit_original_response(content=message, view=None)
+                return
+            try:
+                membership = await self.cog.finish_membership_link(interaction.user, client, result)
+            except (MembershipError, discord.HTTPException, RoleSyncError) as error:
+                await interaction.edit_original_response(content=f"Your accounts linked, but the first role sync did not complete. Existing roles were preserved; use Sync later. {error}", view=None)
+                return
+            await interaction.edit_original_response(content=f"MyBB membership linked and synchronized: `{membership['status']}`.", view=None)
+            return
+        await interaction.edit_original_response(content="The linking request expired. Start a new link when ready.", view=None)
+
+    @discord.ui.button(label="Sync now", style=discord.ButtonStyle.primary)
+    async def sync(self, interaction, button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            result = await self.cog.reconcile_membership(interaction.user)
+            await interaction.followup.send(f"Membership synchronized: `{result['status']}`.", ephemeral=True)
+        except (MembershipError, discord.HTTPException, RoleSyncError) as error:
+            await interaction.followup.send(f"Sync could not complete; existing roles were preserved. {error}", ephemeral=True)
+
+    @discord.ui.button(label="Status", style=discord.ButtonStyle.secondary)
+    async def status(self, interaction, button):
+        group = self.cog.config.member(interaction.user)
+        link = await group.membership_link()
+        last = await group.membership_last_success()
+        error = await group.membership_last_error()
+        message = f"Linked · status `{link.get('status', 'unknown')}`" if link else "Not linked"
+        if last:
+            message += f" · last successful check <t:{last}:R>"
+        if error:
+            message += f"\nLast error: {error}"
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @discord.ui.button(label="Unlink", style=discord.ButtonStyle.danger)
+    async def unlink(self, interaction, button):
+        await interaction.response.send_message(
+            "This revokes the MyBB association and removes roles granted by membership sync. Confirm?",
+            view=ConfirmMembershipUnlink(self.cog, interaction.user), ephemeral=True,
+        )
+
+    @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary)
+    async def done(self, interaction, button):
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+
+class ConfirmMembershipUnlink(OwnedView):
+    @discord.ui.button(label="Confirm unlink", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction, button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self.cog.clear_membership(interaction.guild, interaction.user.id, notify_provider=True)
+        except (MembershipError, discord.HTTPException, RoleSyncError) as error:
+            await interaction.followup.send(f"Unlink could not be confirmed; the link and existing roles were preserved. {error}", ephemeral=True)
+            return
+        await interaction.edit_original_response(content="MyBB membership unlinked and cog-managed roles removed.", view=None)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction, button):
+        await interaction.response.edit_message(content="Unlink cancelled.", view=None)
 
 
 class PersonalConnectionModal(discord.ui.Modal, title="Connect your MyBB account"):

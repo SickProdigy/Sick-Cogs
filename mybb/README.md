@@ -60,44 +60,51 @@ The private panel accepts a scoped personal API token for the guild's configured
 prefer that personal token, letting MyBB enforce the member's forum visibility and posting rights.
 `[p]mybb disconnect` removes it. Tokens are never displayed in Discord responses.
 
-This is an interim connector. The intended later experience is a browser authorization link with a
-short-lived, one-time callback, so users do not need to paste tokens into Discord. That requires a
-new ownership/authorization route in the MyBB plugin; the current public user lookup is not proof of
-account ownership.
+Personal forum API access is separate from verified membership linking. A personal
+API token controls forum browsing and publishing; it is never accepted as proof of
+account ownership for Discord roles.
 
-## Membership roles (preparation only)
+## Membership roles
 
-Version 0.1.1 lets administrators prepare named permission-to-role mappings:
+Install External Sign-In 0.1.13 or newer. Create a dedicated confidential client,
+enable **Account linking service**, and list every named entitlement this Discord
+server may consume. Do not reuse a website OIDC client or the API v1 token.
+
+Configure its client ID and secret privately, map entitlements, then enable sync:
 
 ```text
+[p]mybbset membership setup
 [p]mybbset membership
 [p]mybbset membership map vip @VIP
 [p]mybbset membership unmap vip
+[p]mybbset membership enabled true
 ```
 
-**Linking and live synchronization are not enabled yet.** No polling task or role
-changes run in this version. Personal API tokens are not verified membership links.
-External Sign-In is the planned identity/membership provider; API v1 continues to
-handle browsing and publishing. Provider prerequisites are tracked in
-[External Sign-In #4](https://gitea.rcs1.top/sickprodigy/mybb_external-signin_plugin/issues/4),
-with integration in [Sick-Cogs #261](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/issues/261).
+Members use `[p]mybb membership` and press **Link MyBB**. The cog starts the
+provider's device-style flow, shows the member a private approval URL, polls outbound,
+verifies issuer/Discord ID/guild context, stores the returned link credential in Red
+shared API tokens, and immediately synchronizes roles. No inbound bot port is needed.
+`[p]mybb membership sync` performs a manual check.
 
 Names are case-sensitive provider permissions (for example `vip`), not numeric
 forum group IDs. Up to 50 mappings are stored per guild. Mapping changes require
 Manage Server and Manage Roles (or administrator access); roles must be below both
 the bot and configuring member, except the guild owner has no member hierarchy
 restriction. Everyone, integration, and administrative/moderation roles are rejected.
-Changing boards or disconnecting clears prepared mappings.
 
-The provider-independent reconciliation helper is tested but intentionally not
-wired to live commands. It tracks grants before sending them, leaves failed changes
-retryable, and never adopts/removes pre-existing unowned roles. Multiple permissions
-can grant one role; losing one permission does not revoke it while another remains.
-Unknown membership preserves roles; only an authoritative empty result revokes owned
-roles. The future integration must supply verified fresh identity-bound results,
-persistent ownership records, locking, scheduling/backoff, unlink cleanup and live
-acceptance tests before enabling this helper. Ownership cannot distinguish a later
-manual grant of the same role; use dedicated membership roles.
+The loop wakes once a minute but checks a guild only when its 15-minute due cycle
+arrives. Provider failures exponentially back off up to six hours. Only authenticated
+HTTP 200 `inactive` or `unlinked` states remove cog-owned roles. Timeouts, malformed
+responses, 401/403, rate limits and server errors preserve roles for retry. Role
+ownership is recorded before grants; failed Discord changes remain retryable. The cog
+never adopts or removes a pre-existing unowned role. Use dedicated membership roles,
+because a later manual grant of a role already tracked as cog-owned is indistinguishable.
+
+Intentional unlink revokes the provider association before removing roles and local
+credentials. If provider confirmation is ambiguous, the operation stops and preserves
+access. Changing boards, removing the membership client, server disconnect and Red
+user-data deletion follow the same confirmed-cleanup rule. External Sign-In client
+secret rotation revokes its links and therefore requires members to link again.
 
 ## Discovery commands
 
