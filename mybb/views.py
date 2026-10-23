@@ -143,9 +143,10 @@ class MyBBHome(OwnedView):
     @discord.ui.button(label="Membership", style=discord.ButtonStyle.success, row=1)
     async def membership(self, interaction, button):
         link = await self.cog.config.member(interaction.user).membership_link()
+        enabled = await self.cog.config.guild(interaction.guild).membership_enabled()
         await interaction.response.send_message(
             "Verified membership controls. This is separate from your personal forum API token.",
-            view=MembershipView(self.cog, interaction.user, bool(link)), ephemeral=True,
+            view=MembershipView(self.cog, interaction.user, bool(link), enabled), ephemeral=True,
         )
         await interaction.response.send_message(
             "Your personal MyBB connection is active. Use the text command `mybb connect` to replace or remove it."
@@ -364,9 +365,12 @@ class MembershipSetupView(OwnedView):
 
 
 class MembershipView(OwnedView):
-    def __init__(self, cog, owner, linked):
+    def __init__(self, cog, owner, linked, enabled):
         super().__init__(cog, owner, timeout=660)
         self.linked = linked
+        self.link.disabled = linked or not enabled
+        self.sync.disabled = not linked
+        self.unlink.disabled = not linked
 
     @discord.ui.button(label="Link MyBB", style=discord.ButtonStyle.success)
     async def link(self, interaction, button):

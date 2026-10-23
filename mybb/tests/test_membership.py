@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from mybb.membership import ExternalSignInClient, MembershipError
+from mybb.views import MembershipView
 
 
 class ExternalSignInContractTests(unittest.IsolatedAsyncioTestCase):
@@ -70,6 +71,26 @@ class ExternalSignInContractTests(unittest.IsolatedAsyncioTestCase):
         client.request = AsyncMock(return_value={})
         await client.unlink("link-token")
         client.request.assert_awaited_once_with("/unlink", {"link_token": "link-token"})
+
+    async def test_panel_disables_actions_that_cannot_succeed(self):
+        owner = type("Owner", (), {"id": 1})()
+        unavailable = MembershipView(object(), owner, linked=False, enabled=False)
+        buttons = {item.label: item for item in unavailable.children}
+        self.assertTrue(buttons["Link MyBB"].disabled)
+        self.assertTrue(buttons["Sync now"].disabled)
+        self.assertTrue(buttons["Unlink"].disabled)
+
+        available = MembershipView(object(), owner, linked=False, enabled=True)
+        buttons = {item.label: item for item in available.children}
+        self.assertFalse(buttons["Link MyBB"].disabled)
+        self.assertTrue(buttons["Sync now"].disabled)
+        self.assertTrue(buttons["Unlink"].disabled)
+
+        linked = MembershipView(object(), owner, linked=True, enabled=True)
+        buttons = {item.label: item for item in linked.children}
+        self.assertTrue(buttons["Link MyBB"].disabled)
+        self.assertFalse(buttons["Sync now"].disabled)
+        self.assertFalse(buttons["Unlink"].disabled)
 
 
 if __name__ == "__main__":

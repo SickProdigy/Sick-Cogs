@@ -41,7 +41,7 @@ class MyBB(commands.Cog):
     """Connect a Discord server to MyBB and let members optionally use personal access."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
     CONFIG_IDENTIFIER = 620260922060001
 
     def __init__(self, bot):
@@ -185,7 +185,10 @@ class MyBB(commands.Cog):
         """Deliberately unlink, then remove roles owned by this cog."""
         async with self._membership_guild_locks[guild.id], self._membership_locks[(guild.id, user_id)]:
             group = self.config.member_from_ids(guild.id, user_id)
+            link = await group.membership_link()
             token = await self.membership_token(guild.id, user_id)
+            if not link or not token:
+                raise MembershipError("No verified MyBB membership link is active.", code="not_linked")
             if notify_provider and token:
                 client = await self.membership_client(guild)
                 await client.unlink(token)  # ambiguous failure preserves local access for retry
@@ -423,9 +426,10 @@ class MyBB(commands.Cog):
         from .views import MembershipView
 
         link = await self.config.member(ctx.author).membership_link()
+        enabled = await self.config.guild(ctx.guild).membership_enabled()
         await ctx.send(
             "Open your private membership controls below. Forum API access and verified membership linking are separate connections.",
-            view=MembershipView(self, ctx.author, bool(link)),
+            view=MembershipView(self, ctx.author, bool(link), enabled),
             allowed_mentions=discord.AllowedMentions.none(),
         )
 

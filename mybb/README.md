@@ -85,6 +85,8 @@ provider's device-style flow, shows the member a private approval URL, polls out
 verifies issuer/Discord ID/guild context, stores the returned link credential in Red
 shared API tokens, and immediately synchronizes roles. No inbound bot port is needed.
 `[p]mybb membership sync` performs a manual check.
+The membership panel disables **Link MyBB** until server setup is enabled and
+disables sync/unlink controls until that member has completed a verified link.
 
 Names are case-sensitive provider permissions (for example `vip`), not numeric
 forum group IDs. Up to 50 mappings are stored per guild. Mapping changes require
