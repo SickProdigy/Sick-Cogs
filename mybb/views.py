@@ -157,9 +157,8 @@ class MyBBHome(OwnedView):
 
     @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary)
     async def done(self, interaction, button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(view=self)
+        await interaction.response.defer()
+        await interaction.message.delete()
         self.stop()
 
 
@@ -289,9 +288,8 @@ class MyBBSetupView(OwnedView):
 
     @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary)
     async def done(self, interaction, button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(view=self)
+        await interaction.response.defer()
+        await interaction.message.delete()
         self.stop()
 
 
@@ -358,9 +356,8 @@ class MembershipSetupView(OwnedView):
 
     @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary)
     async def done(self, interaction, button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(view=self)
+        await interaction.response.defer()
+        await interaction.message.delete()
         self.stop()
 
 
@@ -459,9 +456,8 @@ class MembershipView(OwnedView):
 
     @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary)
     async def done(self, interaction, button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(view=self)
+        await interaction.response.defer()
+        await interaction.message.delete()
         self.stop()
 
 
