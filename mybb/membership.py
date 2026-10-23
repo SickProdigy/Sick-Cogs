@@ -45,6 +45,12 @@ class ExternalSignInClient:
                             if not raw.strip():
                                 return {}
                         raise MembershipError("External Sign-In returned an invalid response.", code="invalid_response", status=response.status) from exc
+                    if (
+                        allow_empty_success
+                        and 200 <= response.status < 300
+                        and body == []
+                    ):
+                        return {}
                     if not isinstance(body, dict):
                         raise MembershipError("External Sign-In returned an invalid response.", code="invalid_response", status=response.status)
                     if response.status >= 400:

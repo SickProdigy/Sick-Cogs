@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from mybb.membership import ExternalSignInClient, MembershipError
 from mybb.views import MembershipView
@@ -14,6 +14,42 @@ class ExternalSignInContractTests(unittest.IsolatedAsyncioTestCase):
             "https://forum.example/community/external-signin", "cog", "secret"
         )
         self.assertEqual(client.issuer, "https://forum.example/community/external-signin")
+
+    async def test_only_unlink_accepts_provider_empty_array_success(self):
+        class Response:
+            status = 200
+            headers = {}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def json(self, content_type=None):
+                return []
+
+        class Session:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            def post(self, *args, **kwargs):
+                return Response()
+
+        client = self.client()
+        with (
+            patch("mybb.membership.reject_private_destination", new=AsyncMock()),
+            patch("mybb.membership.aiohttp.ClientSession", return_value=Session()),
+        ):
+            self.assertEqual(
+                await client.request("/unlink", {}, allow_empty_success=True),
+                {},
+            )
+            with self.assertRaises(MembershipError):
+                await client.request("/membership", {})
 
     async def test_start_link_uses_provider_contract_and_bounds_polling(self):
         client = self.client()
