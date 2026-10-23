@@ -81,7 +81,11 @@ class ExternalSignInContractTests(unittest.IsolatedAsyncioTestCase):
         client = self.client()
         client.request = AsyncMock(return_value={})
         await client.unlink("link-token")
-        client.request.assert_awaited_once_with("/unlink", {"link_token": "link-token"})
+        client.request.assert_awaited_once_with(
+            "/unlink",
+            {"link_token": "link-token"},
+            allow_empty_success=True,
+        )
 
     async def test_panel_disables_actions_that_cannot_succeed(self):
         owner = type("Owner", (), {"id": 1})()

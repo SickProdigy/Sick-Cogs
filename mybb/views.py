@@ -380,6 +380,7 @@ class MembershipView(OwnedView):
         if await self.cog.config.member(interaction.user).membership_link():
             await interaction.response.send_message("Your membership is already linked. Unlink it before linking another account.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
         try:
             client = await self.cog.membership_client(interaction.guild)
             started = await client.start_link(
@@ -388,13 +389,17 @@ class MembershipView(OwnedView):
                 f"guild:{interaction.guild.id}",
             )
         except MembershipError as error:
-            await interaction.response.send_message(f"Could not start linking: {error}", ephemeral=True)
+            await interaction.edit_original_response(content=f"Could not start linking: {error}")
             return
         url_view = discord.ui.View(timeout=int(started["expires_in"]))
         url_view.add_item(discord.ui.Button(label="Approve on MyBB", url=str(started["verification_uri_complete"])))
-        await interaction.response.send_message(
-            f"Open MyBB and approve code `{started['user_code']}`. This expires in {int(started['expires_in']) // 60} minutes. Waiting for approval…",
-            view=url_view, ephemeral=True,
+        await interaction.edit_original_response(
+            content=(
+                f"Open MyBB and approve code `{started['user_code']}`. "
+                f"This expires in {int(started['expires_in']) // 60} minutes. "
+                "Waiting for approval…"
+            ),
+            view=url_view,
         )
         deadline = time.monotonic() + int(started["expires_in"])
         interval = int(started["interval"])

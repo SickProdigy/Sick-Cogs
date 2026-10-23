@@ -24,7 +24,7 @@ class ExternalSignInClient:
         if not self.client_id or not self.client_secret:
             raise MembershipError("The account-linking client ID and secret are required.", code="not_configured")
 
-    async def request(self, path, payload):
+    async def request(self, path, payload, *, allow_empty_success=False):
         await reject_private_destination(self.board_url)
         timeout = aiohttp.ClientTimeout(total=20)
         headers = {"Accept": "application/json", "User-Agent": "SickCogs-MyBB/0.3"}
@@ -40,6 +40,10 @@ class ExternalSignInClient:
                     try:
                         body = await response.json(content_type=None)
                     except (aiohttp.ContentTypeError, ValueError) as exc:
+                        if allow_empty_success and 200 <= response.status < 300:
+                            raw = await response.text()
+                            if not raw.strip():
+                                return {}
                         raise MembershipError("External Sign-In returned an invalid response.", code="invalid_response", status=response.status) from exc
                     if not isinstance(body, dict):
                         raise MembershipError("External Sign-In returned an invalid response.", code="invalid_response", status=response.status)
@@ -98,4 +102,8 @@ class ExternalSignInClient:
         return body
 
     async def unlink(self, link_token):
-        await self.request("/unlink", {"link_token": link_token})
+        await self.request(
+            "/unlink",
+            {"link_token": link_token},
+            allow_empty_success=True,
+        )
