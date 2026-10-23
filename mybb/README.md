@@ -65,6 +65,40 @@ short-lived, one-time callback, so users do not need to paste tokens into Discor
 new ownership/authorization route in the MyBB plugin; the current public user lookup is not proof of
 account ownership.
 
+## Membership roles (preparation only)
+
+Version 0.1.1 lets administrators prepare named permission-to-role mappings:
+
+```text
+[p]mybbset membership
+[p]mybbset membership map vip @VIP
+[p]mybbset membership unmap vip
+```
+
+**Linking and live synchronization are not enabled yet.** No polling task or role
+changes run in this version. Personal API tokens are not verified membership links.
+External Sign-In is the planned identity/membership provider; API v1 continues to
+handle browsing and publishing. Provider prerequisites are tracked in
+[External Sign-In #4](https://gitea.rcs1.top/sickprodigy/mybb_external-signin_plugin/issues/4),
+with integration in [Sick-Cogs #261](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/issues/261).
+
+Names are case-sensitive provider permissions (for example `vip`), not numeric
+forum group IDs. Up to 50 mappings are stored per guild. Mapping changes require
+Manage Server and Manage Roles (or administrator access); roles must be below both
+the bot and configuring member, except the guild owner has no member hierarchy
+restriction. Everyone, integration, and administrative/moderation roles are rejected.
+Changing boards or disconnecting clears prepared mappings.
+
+The provider-independent reconciliation helper is tested but intentionally not
+wired to live commands. It tracks grants before sending them, leaves failed changes
+retryable, and never adopts/removes pre-existing unowned roles. Multiple permissions
+can grant one role; losing one permission does not revoke it while another remains.
+Unknown membership preserves roles; only an authoritative empty result revokes owned
+roles. The future integration must supply verified fresh identity-bound results,
+persistent ownership records, locking, scheduling/backoff, unlink cleanup and live
+acceptance tests before enabling this helper. Ownership cannot distinguish a later
+manual grant of the same role; use dedicated membership roles.
+
 ## Discovery commands
 
 - `[p]mybb` — interactive home card.

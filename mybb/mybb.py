@@ -6,6 +6,7 @@ import discord
 from redbot.core import Config, commands
 
 from .client import MyBBAPIError, MyBBClient
+from .roles import RoleSyncError, entitlement_name, validate_role
 
 
 GUILD_DEFAULTS = {
@@ -14,6 +15,7 @@ GUILD_DEFAULTS = {
     "default_forum_id": None,
     "forum_aliases": {},
     "manager_role_id": None,
+    "membership_roles": {},
 }
 MEMBER_DEFAULTS = {"connected": False}
 
@@ -22,7 +24,7 @@ class MyBB(commands.Cog):
     """Connect a Discord server to MyBB and let members optionally use personal access."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.1.1"
     CONFIG_IDENTIFIER = 620260922060001
 
     def __init__(self, bot):
@@ -433,12 +435,59 @@ class MyBB(commands.Cog):
             inline=False,
         )
         embed.add_field(name="Manager role", value=role.mention if role else "Manage Server only")
+        embed.add_field(
+            name="Membership roles",
+            value=f"{len(data.get('membership_roles', {}))} mapping(s) · inactive: External Sign-In integration pending",
+            inline=False,
+        )
         embed.set_footer(text="Tokens are never displayed. RSSPublisher remains the better tool for automatic announcements.")
         return embed
 
     @mybbset.command(name="status")
     async def mybbset_status(self, ctx):
         await ctx.send(embed=await self.settings_embed(ctx.guild))
+
+    @mybbset.group(name="membership", invoke_without_command=True)
+    async def mybbset_membership(self, ctx):
+        """Prepare membership role mappings; live linking/sync is not available yet."""
+        mappings = await self.config.guild(ctx.guild).membership_roles()
+        lines = [f"`{name}` → role ID `{role_id}`" for name, role_id in sorted(mappings.items())]
+        from redbot.core.utils.chat_formatting import pagify
+        message = (
+            "MyBB membership sync: **inactive**. External Sign-In linking and membership "
+            "verification are pending (#261 / plugin #4). No roles are currently changed.\n"
+            "These are named forum permissions, not numeric MyBB group IDs.\n"
+            + ("\n".join(lines) or "No role mappings configured.")
+        )
+        for page in pagify(message):
+            await ctx.send(page, allowed_mentions=discord.AllowedMentions.none())
+
+    @mybbset_membership.command(name="map")
+    @commands.admin_or_permissions(manage_guild=True, manage_roles=True)
+    async def mybbset_membership_map(self, ctx, entitlement: str, role: discord.Role):
+        """Prepare a named MyBB permission → Discord role mapping (sync inactive)."""
+        try:
+            entitlement = entitlement_name(entitlement)
+            validate_role(ctx.guild, role, ctx.author)
+            async with self.config.guild(ctx.guild).membership_roles() as mappings:
+                if entitlement not in mappings and len(mappings) >= 50:
+                    raise RoleSyncError("At most 50 membership mappings are supported per server.")
+                mappings[entitlement] = role.id
+        except RoleSyncError as error:
+            await ctx.send(str(error))
+            return
+        await ctx.send(
+            f"Prepared `{entitlement}` → role ID `{role.id}`. Sync is inactive until External Sign-In integration is complete.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @mybbset_membership.command(name="unmap")
+    @commands.admin_or_permissions(manage_guild=True, manage_roles=True)
+    async def mybbset_membership_unmap(self, ctx, entitlement: str):
+        """Remove a prepared mapping; no Discord roles are changed."""
+        async with self.config.guild(ctx.guild).membership_roles() as mappings:
+            removed = mappings.pop(entitlement, None)
+        await ctx.send("Mapping removed; no Discord roles changed." if removed else "That mapping does not exist.")
 
     @mybbset.command(name="enabled")
     async def mybbset_enabled(self, ctx, enabled: bool):
@@ -518,5 +567,6 @@ class MyBB(commands.Cog):
         await self.config.guild(ctx.guild).board_url.clear()
         await self.config.guild(ctx.guild).default_forum_id.clear()
         await self.config.guild(ctx.guild).forum_aliases.clear()
+        await self.config.guild(ctx.guild).membership_roles.clear()
         await self.config.guild(ctx.guild).enabled.set(False)
         await ctx.send("This Discord server's MyBB board connector has been removed and the bridge disabled.")

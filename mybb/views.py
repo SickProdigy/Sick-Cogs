@@ -183,6 +183,7 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this Discord server 
             await self.view.cog.clear_guild_member_connections(guild)
             await self.view.cog.config.guild(guild).default_forum_id.clear()
             await self.view.cog.config.guild(guild).forum_aliases.clear()
+            await self.view.cog.config.guild(guild).membership_roles.clear()
         await self.view.cog.bot.set_shared_api_tokens(
             self.view.cog.guild_namespace(guild.id), token=str(self.token).strip()
         )
