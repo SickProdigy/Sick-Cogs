@@ -32,6 +32,25 @@ allow outbound HTTPS and execution from Red's data directory.
 The default milestones are 50, 75, and 95 percent used. The cog polls connected accounts every
 15 minutes and sends each milestone once per allowance window.
 
+The usage card distinguishes the window length from its exact next reset date, displayed
+in your Discord-local timezone alongside relative time. It also shows the available banked
+reset count when reported; missing data means unknown, not zero. There is no assumed
+Monday reset or calculated `last reset + six days` schedule.
+
+The same 15-minute checks privately notify you when the reported banked-reset count rises
+or a monitored window's remaining allowance increases. The first check establishes a
+baseline rather than claiming a replenishment happened. These are observations between
+polls, not proof of whether a natural reset, banked reset, or provider adjustment caused
+the change; changes between checks can be missed. Up to ten windows are monitored.
+
+If the reported seven-day Codex window has at most 5% remaining, its next reset is more
+than four days away, and at least one banked reset is reported, the bot suggests using
+one in Codex. This suggestion is deduplicated per window reset timestamp, independently
+of your chosen usage milestones. Pause/resume controls all automatic notifications.
+Failed DMs retain the previous observation for retry; restarting preserves the baseline.
+The cog never consumes resets. Future reset-credit grant dates are not exposed by the
+documented response and cannot be predicted by this feature.
+
 ## Privacy and storage
 
 Each Discord user receives a separate private Codex home directory with mode 0700. Codex
@@ -40,7 +59,8 @@ member is offline. Account credentials are never placed in Red Config, Discord m
 URLs, logs, source control, or another member's process environment.
 
 Red Config stores only the Discord user ID, connection state, notification preference,
-alert milestones, sent-alert keys, and last-check time. The cog does not read or store prompts,
+alert milestones, sent-alert keys, last-check time, bounded allowance observations and
+the last reported banked-reset count. The cog does not read or store prompts,
 conversations, source code, or OpenAI API keys. Disconnect and Red user-data deletion
 attempt remote logout, remove the user's private Codex home, and clear their configuration.
 
@@ -52,6 +72,8 @@ as 100 minus the reported used percentage. Both legacy single-bucket and current
 multi-bucket responses are supported.
 
 Official references:
+
+- https://learn.chatgpt.com/docs/app-server (rate limits and earned-reset fields)
 
 - https://developers.openai.com/siwc/token-sharing-open-source
 - https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server
