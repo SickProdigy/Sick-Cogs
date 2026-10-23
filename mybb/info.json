@@ -2,11 +2,11 @@
     "author": [
         "SickProdigy"
     ],
-    "description": "Connect Discord to MyBB for forum access and verified External Sign-In membership role synchronization.",
+    "description": "Link MyBB accounts and membership roles through External Sign-In, with optional owner-controlled API-v1 announcements and reviewed forum publishing.",
     "disabled": false,
-    "end_user_data_statement": "This cog stores each guild's MyBB board settings, forum aliases, manager role, membership entitlement-to-role mappings and synchronization state. For linked members it stores the verified MyBB issuer/subject/link identifier, synchronization status/timestamps/errors, and role IDs granted by the cog. API tokens, External Sign-In client credentials, and per-member link credentials are stored separately in Red shared API tokens and removed on deliberate disconnect or user-data deletion.",
+    "end_user_data_statement": "This cog stores each guild's independent External Sign-In URL, membership mappings/synchronization state, optional API-v1 board settings, publisher-role and forum allowlists, and announcement routes/cursors. For linked members it stores verified issuer/subject/link metadata, status/timestamps/errors, and cog-owned role IDs. API tokens, External Sign-In client credentials, and member link credentials are stored separately in Red shared API tokens and removed through their corresponding deliberate disconnect or user-data deletion flow.",
     "hidden": false,
-    "install_msg": "Run `[p]mybbset setup` with Manage Server to connect this Discord server to its MyBB board using a restricted API token. Members can optionally run `[p]mybb connect` for personal access.",
+    "install_msg": "For membership roles, run `[p]mybbset membership setup` and configure External Sign-In. The Discord server owner may optionally run `[p]mybbset setup` for API-v1 announcements and reviewed forum publishing. See the README for the required private-plugin setup order.",
     "min_bot_version": "3.5.0",
     "permissions": [
         "embed_links",
@@ -14,7 +14,7 @@
     ],
     "name": "MyBB",
     "requirements": [],
-    "short": "Per-server MyBB boards, personal connections, search, and publishing",
+    "short": "MyBB account linking, membership roles, announcements, and reviewed publishing",
     "tags": [
         "mybb",
         "forum",
@@ -23,5 +23,5 @@
         "community"
     ],
     "type": "COG",
-    "version": "0.2.1"
+    "version": "0.3.0"
 }

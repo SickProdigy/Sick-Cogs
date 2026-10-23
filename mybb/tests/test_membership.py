@@ -9,6 +9,12 @@ class ExternalSignInContractTests(unittest.IsolatedAsyncioTestCase):
     def client(self):
         return ExternalSignInClient("https://forum.example/community", "cog", "secret")
 
+    def test_accepts_complete_external_signin_url(self):
+        client = ExternalSignInClient(
+            "https://forum.example/community/external-signin", "cog", "secret"
+        )
+        self.assertEqual(client.issuer, "https://forum.example/community/external-signin")
+
     async def test_start_link_uses_provider_contract_and_bounds_polling(self):
         client = self.client()
         client.request = AsyncMock(return_value={

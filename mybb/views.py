@@ -6,7 +6,7 @@ import time
 import discord
 
 from .client import MyBBAPIError, MyBBClient
-from .membership import MembershipError
+from .membership import ExternalSignInClient, MembershipError
 from .roles import RoleSyncError
 
 
@@ -40,6 +40,9 @@ class SearchModal(discord.ui.Modal, title="Search recent MyBB threads"):
         self.view = view
 
     async def on_submit(self, interaction):
+        if not await self.view.cog.is_publisher(interaction.user):
+            await interaction.response.send_message("Forum tools are limited to configured publisher roles.", ephemeral=True)
+            return
         forum_id = await self.view.cog.config.guild(interaction.guild).default_forum_id()
         if not forum_id:
             await interaction.response.send_message(
@@ -71,6 +74,9 @@ class SearchModal(discord.ui.Modal, title="Search recent MyBB threads"):
 class MyBBHome(OwnedView):
     @discord.ui.button(label="Forums", style=discord.ButtonStyle.primary)
     async def forums(self, interaction, button):
+        if not await self.cog.is_publisher(interaction.user):
+            await interaction.response.send_message("Forum tools are limited to configured publisher roles.", ephemeral=True)
+            return
         if not await self.cog.config.guild(interaction.guild).enabled():
             await interaction.response.send_message("The MyBB bridge is disabled.", ephemeral=True)
             return
@@ -94,6 +100,9 @@ class MyBBHome(OwnedView):
 
     @discord.ui.button(label="Recent threads", style=discord.ButtonStyle.primary)
     async def recent(self, interaction, button):
+        if not await self.cog.is_publisher(interaction.user):
+            await interaction.response.send_message("Forum tools are limited to configured publisher roles.", ephemeral=True)
+            return
         if not await self.cog.config.guild(interaction.guild).enabled():
             await interaction.response.send_message("The MyBB bridge is disabled.", ephemeral=True)
             return
@@ -129,30 +138,21 @@ class MyBBHome(OwnedView):
 
     @discord.ui.button(label="Search", style=discord.ButtonStyle.primary)
     async def search(self, interaction, button):
+        if not await self.cog.is_publisher(interaction.user):
+            await interaction.response.send_message("Forum tools are limited to configured publisher roles.", ephemeral=True)
+            return
         if not await self.cog.config.guild(interaction.guild).enabled():
             await interaction.response.send_message("The MyBB bridge is disabled.", ephemeral=True)
             return
         await interaction.response.send_modal(SearchModal(self))
-
-    @discord.ui.button(label="My connection", style=discord.ButtonStyle.secondary)
-    async def connection(self, interaction, button):
-        connected = await self.cog.has_personal_connection(
-            interaction.guild.id, interaction.user.id
-        )
 
     @discord.ui.button(label="Membership", style=discord.ButtonStyle.success, row=1)
     async def membership(self, interaction, button):
         link = await self.cog.config.member(interaction.user).membership_link()
         enabled = await self.cog.config.guild(interaction.guild).membership_enabled()
         await interaction.response.send_message(
-            "Verified membership controls. This is separate from your personal forum API token.",
+            "Link your website account and manage synchronized membership roles.",
             view=MembershipView(self.cog, interaction.user, bool(link), enabled), ephemeral=True,
-        )
-        await interaction.response.send_message(
-            "Your personal MyBB connection is active. Use the text command `mybb connect` to replace or remove it."
-            if connected
-            else "You are using the server connector. Use the text command `mybb connect` to add personal access.",
-            ephemeral=True,
         )
 
     @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary)
@@ -176,8 +176,8 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this Discord server 
         self.view = view
 
     async def on_submit(self, interaction):
-        if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("Manage Server permission is required.", ephemeral=True)
+        if interaction.user.id != interaction.guild.owner_id:
+            await interaction.response.send_message("Only the Discord server owner can configure the API connector.", ephemeral=True)
             return
         try:
             client = MyBBClient(str(self.board_url), str(self.token))
@@ -194,19 +194,9 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this Discord server 
         guild = interaction.guild
         old_url = await self.view.cog.config.guild(guild).board_url()
         if old_url and old_url != client.base_url:
-            try:
-                await self.view.cog.clear_guild_memberships(guild, notify_provider=True)
-            except (MembershipError, discord.HTTPException, RoleSyncError) as error:
-                await self.view.show_error(interaction, error)
-                return
-            await self.view.cog.bot.remove_shared_api_tokens(
-                self.view.cog.membership_guild_namespace(guild.id), "client_id", "client_secret"
-            )
             await self.view.cog.clear_guild_member_connections(guild)
             await self.view.cog.config.guild(guild).default_forum_id.clear()
             await self.view.cog.config.guild(guild).forum_aliases.clear()
-            await self.view.cog.config.guild(guild).membership_roles.clear()
-            await self.view.cog.config.guild(guild).membership_enabled.set(False)
         await self.view.cog.bot.set_shared_api_tokens(
             self.view.cog.guild_namespace(guild.id), token=str(self.token).strip()
         )
@@ -256,12 +246,16 @@ class DefaultForumModal(discord.ui.Modal, title="Choose the default MyBB forum")
 
 
 class MyBBSetupView(OwnedView):
-    @discord.ui.button(label="Connect board", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Connect API v1", style=discord.ButtonStyle.success)
     async def connect(self, interaction, button):
-        if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("Manage Server permission is required.", ephemeral=True)
+        if interaction.user.id != interaction.guild.owner_id:
+            await interaction.response.send_message("Only the Discord server owner can configure the API connector.", ephemeral=True)
             return
         await interaction.response.send_modal(GuildConnectionModal(self))
+
+    @discord.ui.button(label="Membership setup", style=discord.ButtonStyle.success, row=1)
+    async def membership_setup(self, interaction, button):
+        await interaction.response.send_modal(MembershipClientModal(self))
 
     @discord.ui.button(label="Default forum", style=discord.ButtonStyle.primary)
     async def default_forum(self, interaction, button):
@@ -302,6 +296,9 @@ class MyBBSetupView(OwnedView):
 
 
 class MembershipClientModal(discord.ui.Modal, title="Configure MyBB membership linking"):
+    provider_url = discord.ui.TextInput(
+        label="External Sign-In URL", placeholder="https://forum.example/external-signin", max_length=500
+    )
     client_id = discord.ui.TextInput(label="External Sign-In client ID", max_length=190)
     client_secret = discord.ui.TextInput(label="Client secret", max_length=500)
 
@@ -313,14 +310,17 @@ class MembershipClientModal(discord.ui.Modal, title="Configure MyBB membership l
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message("Manage Server permission is required.", ephemeral=True)
             return
-        if not await self.view.cog.config.guild(interaction.guild).board_url():
-            await interaction.response.send_message("Connect the MyBB board first.", ephemeral=True)
+        try:
+            client = ExternalSignInClient(str(self.provider_url), str(self.client_id), str(self.client_secret))
+        except (ValueError, MembershipError) as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
             return
         await self.view.cog.bot.set_shared_api_tokens(
             self.view.cog.membership_guild_namespace(interaction.guild.id),
             client_id=str(self.client_id).strip(), client_secret=str(self.client_secret).strip(),
         )
         await self.view.cog.config.guild(interaction.guild).membership_enabled.set(True)
+        await self.view.cog.config.guild(interaction.guild).membership_url.set(client.issuer)
         await self.view.cog.config.guild(interaction.guild).membership_next_check.set(0)
         await interaction.response.edit_message(
             content="External Sign-In membership client stored and synchronization enabled. Use your own Membership panel to test linking.",
@@ -472,72 +472,6 @@ class ConfirmMembershipUnlink(OwnedView):
         await interaction.response.edit_message(content="Unlink cancelled.", view=None)
 
 
-class PersonalConnectionModal(discord.ui.Modal, title="Connect your MyBB account"):
-    token = discord.ui.TextInput(
-        label="Your personal API token", placeholder="Use a scoped, revocable token", max_length=500
-    )
-
-    def __init__(self, view):
-        super().__init__()
-        self.view = view
-
-    async def on_submit(self, interaction):
-        board_url = await self.view.cog.config.guild(interaction.guild).board_url()
-        if not board_url:
-            await interaction.response.send_message("This server has no connected MyBB board.", ephemeral=True)
-            return
-        try:
-            client = MyBBClient(board_url, str(self.token))
-        except ValueError as error:
-            await interaction.response.send_message(
-                f"The personal connection was not saved: {error}", ephemeral=True
-            )
-            return
-        await interaction.response.defer()
-        try:
-            await client.forums()
-        except MyBBAPIError as error:
-            await self.view.show_error(interaction, error)
-            return
-        namespace = self.view.cog.member_namespace(interaction.guild.id, interaction.user.id)
-        await self.view.cog.bot.set_shared_api_tokens(
-            namespace, token=str(self.token).strip()
-        )
-        await self.view.cog.config.member(interaction.user).connected.set(True)
-        await interaction.edit_original_response(
-            content="Your personal MyBB connection is active for this Discord server. MyBB permissions still control what you can read or publish.",
-            view=PersonalConnectionView(self.view.cog, interaction.user, True),
-        )
-
-
-class PersonalConnectionView(OwnedView):
-    def __init__(self, cog, owner, connected):
-        super().__init__(cog, owner)
-        self.connected = connected
-
-    @discord.ui.button(label="Add / replace connection", style=discord.ButtonStyle.success)
-    async def add(self, interaction, button):
-        await interaction.response.send_modal(PersonalConnectionModal(self))
-
-    @discord.ui.button(label="Remove connection", style=discord.ButtonStyle.danger)
-    async def remove(self, interaction, button):
-        await self.cog.bot.remove_shared_api_tokens(
-            self.cog.member_namespace(interaction.guild.id, interaction.user.id), "token"
-        )
-        await self.cog.config.member(interaction.user).connected.set(False)
-        await interaction.response.edit_message(
-            content="Your personal MyBB connection has been removed.",
-            view=PersonalConnectionView(self.cog, interaction.user, False),
-        )
-
-    @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary)
-    async def done(self, interaction, button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(view=self)
-        self.stop()
-
-
 class EditDraftModal(discord.ui.Modal, title="Edit MyBB draft"):
     subject = discord.ui.TextInput(label="Subject", max_length=120)
     body = discord.ui.TextInput(label="Message", style=discord.TextStyle.paragraph, max_length=4000)
@@ -579,7 +513,7 @@ class PublishReview(OwnedView):
         )
         embed.add_field(name="Destination", value=destination)
         embed.add_field(name="Source", value=f"[Discord message]({self.source_url})")
-        embed.set_footer(text="Personal access is preferred. Nothing is published until Publish is pressed.")
+        embed.set_footer(text="Uses the server owner's restricted API connector. Nothing is published until Publish is pressed.")
         return embed
 
     def payload(self):
@@ -597,10 +531,14 @@ class PublishReview(OwnedView):
         if not await self.cog.config.guild(interaction.guild).enabled():
             await interaction.response.send_message("The MyBB bridge is disabled.", ephemeral=True)
             return
-        personal = await self.cog.has_personal_connection(interaction.guild.id, interaction.user.id)
-        if not personal and not await self.cog.is_manager(interaction.user):
+        if not await self.cog.is_publisher(interaction.user):
             await interaction.response.send_message(
-                "Connect your MyBB account or ask a configured MyBB manager to publish this.", ephemeral=True
+                "You no longer have a configured forum-publisher role.", ephemeral=True
+            )
+            return
+        if self.forum_id not in set(await self.cog.config.guild(interaction.guild).publishing_forum_ids()):
+            await interaction.response.send_message(
+                "This destination is no longer in the publishing allowlist.", ephemeral=True
             )
             return
         await interaction.response.defer()

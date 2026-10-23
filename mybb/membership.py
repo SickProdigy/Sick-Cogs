@@ -18,7 +18,7 @@ class MembershipError(RuntimeError):
 class ExternalSignInClient:
     def __init__(self, board_url, client_id, client_secret):
         self.board_url = normalize_base_url(board_url)
-        self.issuer = self.board_url + "/external-signin"
+        self.issuer = self.board_url if self.board_url.endswith("/external-signin") else self.board_url + "/external-signin"
         self.client_id = str(client_id).strip()
         self.client_secret = str(client_secret).strip()
         if not self.client_id or not self.client_secret:

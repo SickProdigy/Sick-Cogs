@@ -67,6 +67,10 @@ class PolicyTests(unittest.TestCase):
 
     def test_default_mapping_empty_and_identity_unchanged(self):
         self.assertEqual(GUILD_DEFAULTS["membership_roles"], {})
+        self.assertIsNone(GUILD_DEFAULTS["membership_url"])
+        self.assertEqual(GUILD_DEFAULTS["publisher_role_ids"], [])
+        self.assertEqual(GUILD_DEFAULTS["publishing_forum_ids"], [])
+        self.assertEqual(GUILD_DEFAULTS["announcement_feeds"], {})
         self.assertEqual(MyBB.CONFIG_IDENTIFIER, 620260922060001)
 
 

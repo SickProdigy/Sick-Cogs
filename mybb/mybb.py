@@ -22,10 +22,16 @@ GUILD_DEFAULTS = {
     "forum_aliases": {},
     "manager_role_id": None,
     "membership_roles": {},
+    "membership_url": None,
     "membership_enabled": False,
     "membership_failures": 0,
     "membership_next_check": 0,
     "membership_cursor": 0,
+    "publisher_role_ids": [],
+    "publishing_forum_ids": [],
+    "announcement_feeds": {},
+    "announcement_next_check": 0,
+    "announcement_failures": 0,
 }
 MEMBER_DEFAULTS = {
     "connected": False,
@@ -38,10 +44,10 @@ log = logging.getLogger("red.sick-cogs.MyBB")
 
 
 class MyBB(commands.Cog):
-    """Connect a Discord server to MyBB and let members optionally use personal access."""
+    """Link MyBB membership with optional owner-controlled forum tools."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.1"
+    __version__ = "0.3.0"
     CONFIG_IDENTIFIER = 620260922060001
 
     def __init__(self, bot):
@@ -54,9 +60,11 @@ class MyBB(commands.Cog):
 
     async def cog_load(self):
         self.membership_loop.start()
+        self.announcement_loop.start()
 
     def cog_unload(self):
         self.membership_loop.cancel()
+        self.announcement_loop.cancel()
 
     @staticmethod
     def guild_namespace(guild_id):
@@ -88,11 +96,9 @@ class MyBB(commands.Cog):
                 self.membership_member_namespace(guild_id, user_id), "link_token"
             )
 
-    async def is_manager(self, member):
-        role_id = await self.config.guild(member.guild).manager_role_id()
-        return member.guild_permissions.manage_guild or (
-            role_id is not None and any(role.id == role_id for role in member.roles)
-        )
+    async def is_publisher(self, member):
+        role_ids = set(await self.config.guild(member.guild).publisher_role_ids())
+        return member.id == member.guild.owner_id or any(role.id in role_ids for role in member.roles)
 
     async def has_personal_connection(self, guild_id, user_id):
         tokens = await self.bot.get_shared_api_tokens(self.member_namespace(guild_id, user_id))
@@ -113,7 +119,7 @@ class MyBB(commands.Cog):
                 await self.clear_membership(guild, user_id, notify_provider=notify_provider)
 
     async def membership_client(self, guild):
-        board_url = await self.config.guild(guild).board_url()
+        board_url = await self.config.guild(guild).membership_url()
         tokens = await self.bot.get_shared_api_tokens(self.membership_guild_namespace(guild.id))
         if not board_url or not tokens.get("client_id") or not tokens.get("client_secret"):
             raise MembershipError("Membership linking is not configured for this server.", code="not_configured")
@@ -250,6 +256,88 @@ class MyBB(commands.Cog):
     async def membership_loop_error(self, error):
         log.exception("MyBB membership loop failed; Discord roles were not inferred from the error.", exc_info=error)
 
+    @staticmethod
+    def _thread_id(thread):
+        try:
+            return int(thread.get("thread_id") or thread.get("tid") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    async def deliver_forum_thread(self, channel, thread, mode):
+        url = str(thread.get("thread_url") or thread.get("url") or thread.get("link") or "")
+        if not url.startswith("https://"):
+            raise MyBBAPIError("MyBB returned a thread without a safe HTTPS link.", code="invalid_response")
+        allowed = discord.AllowedMentions.none()
+        if mode == "link":
+            await channel.send(url, allowed_mentions=allowed)
+            return
+        description = str(thread.get("message") or thread.get("description") or "Open the forum thread to read more.")
+        embed = discord.Embed(
+            title=str(thread.get("subject") or thread.get("title") or "New forum thread")[:256],
+            url=url, description=description[:500], color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Author", value=str(thread.get("username") or thread.get("author") or "Unknown")[:256])
+        embed.add_field(name="Forum", value=str(thread.get("forum_name") or thread.get("forum_id") or "MyBB")[:256])
+        embed.set_footer(text="Read the complete thread on the forum")
+        await channel.send(embed=embed, allowed_mentions=allowed)
+
+    async def check_forum_announcements(self, guild):
+        group = self.config.guild(guild)
+        feeds = await group.announcement_feeds()
+        client = await self.client_for(guild)
+        failures = 0
+        for forum_key, feed in feeds.items():
+            if not feed.get("enabled"):
+                continue
+            channel = guild.get_channel(int(feed.get("channel_id", 0)))
+            if channel is None:
+                failures += 1
+                continue
+            try:
+                response = await client.threads(int(forum_key), page=1, per_page=20)
+                threads = sorted(self.data_list(response, "threads"), key=self._thread_id)
+                marker = int(feed.get("last_thread_id", 0))
+                unseen = [item for item in threads if self._thread_id(item) > marker]
+                if marker == 0:
+                    if threads:
+                        feed["last_thread_id"] = self._thread_id(threads[-1])
+                    continue
+                for thread in unseen:
+                    await self.deliver_forum_thread(channel, thread, feed.get("mode", "link"))
+                    feed["last_thread_id"] = self._thread_id(thread)
+            except (MyBBAPIError, discord.HTTPException):
+                failures += 1
+        await group.announcement_feeds.set(feeds)
+        return failures
+
+    @tasks.loop(minutes=1)
+    async def announcement_loop(self):
+        now = int(time.time())
+        for guild_id, data in (await self.config.all_guilds()).items():
+            if now < int(data.get("announcement_next_check", 0)) or not any(
+                feed.get("enabled") for feed in data.get("announcement_feeds", {}).values()
+            ):
+                continue
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                continue
+            try:
+                failures = await self.check_forum_announcements(guild)
+            except MyBBAPIError:
+                failures = 1
+            previous = int(data.get("announcement_failures", 0))
+            count = min(previous + 1, 5) if failures else 0
+            await self.config.guild(guild).announcement_failures.set(count)
+            await self.config.guild(guild).announcement_next_check.set(now + min(900 * (2 ** count), 21600))
+
+    @announcement_loop.before_loop
+    async def before_announcement_loop(self):
+        await self.bot.wait_until_red_ready()
+
+    @announcement_loop.error
+    async def announcement_loop_error(self, error):
+        log.exception("MyBB announcement loop failed.", exc_info=error)
+
     async def client_for(self, guild, member=None, *, authenticated=True, personal_only=False):
         board_url = await self.config.guild(guild).board_url()
         if not board_url:
@@ -257,12 +345,7 @@ class MyBB(commands.Cog):
                 "This Discord server has not connected a MyBB board yet.", code="not_configured"
             )
         token = None
-        if authenticated and member is not None:
-            personal = await self.bot.get_shared_api_tokens(
-                self.member_namespace(guild.id, member.id)
-            )
-            token = personal.get("token")
-        if authenticated and not token and not personal_only:
+        if authenticated and not personal_only:
             shared = await self.bot.get_shared_api_tokens(self.guild_namespace(guild.id))
             token = shared.get("token")
         if authenticated and not token:
@@ -378,47 +461,33 @@ class MyBB(commands.Cog):
         from .views import MyBBHome
 
         data = await self.config.guild(ctx.guild).all()
-        personal = await self.has_personal_connection(ctx.guild.id, ctx.author.id)
+        membership_link = await self.config.member(ctx.author).membership_link()
         embed = discord.Embed(
             title="MyBB Bridge",
             description=(
-                "Browse the connected board, search its recent thread index, or connect your own "
-                "MyBB access for actions performed as you."
+                "Browse the optional forum connector or link your website account for membership roles."
             ),
             color=discord.Color.blurple(),
         )
         embed.add_field(name="Board", value=data["board_url"] or "Not connected", inline=False)
         embed.add_field(name="Server access", value="Enabled" if data["enabled"] else "Disabled")
-        embed.add_field(name="Your connection", value="Connected" if personal else "Using server access")
+        embed.add_field(name="Website membership", value="Linked" if membership_link else "Not linked")
         embed.add_field(
             name="Default publishing forum",
             value=f"ID {data['default_forum_id']}" if data["default_forum_id"] else "Not set",
         )
-        embed.set_footer(text=f"Connect yourself with {ctx.clean_prefix}mybb connect • Server setup: {ctx.clean_prefix}mybbset setup")
+        embed.set_footer(text=f"Link your account with {ctx.clean_prefix}mybb membership • Server setup: {ctx.clean_prefix}mybbset setup")
         await ctx.send(embed=embed, view=MyBBHome(self, ctx.author))
 
     @mybb.command(name="connect")
     async def connect(self, ctx):
-        """Open the private personal-connection panel."""
-        from .views import PersonalConnectionView
-
-        if not await self.config.guild(ctx.guild).board_url():
-            await ctx.send("A server administrator must connect this Discord server to a MyBB board first.")
-            return
-        connected = await self.has_personal_connection(ctx.guild.id, ctx.author.id)
-        await ctx.send(
-            "Your personal MyBB connection is active." if connected else "Connect your MyBB account to this server's configured board.",
-            view=PersonalConnectionView(self, ctx.author, connected),
-        )
+        """Open verified website-account linking controls."""
+        await ctx.invoke(self.mybb_membership)
 
     @mybb.command(name="disconnect")
     async def disconnect(self, ctx):
-        """Remove your personal MyBB connection from this Discord server."""
-        await self.bot.remove_shared_api_tokens(
-            self.member_namespace(ctx.guild.id, ctx.author.id), "token"
-        )
-        await self.config.member(ctx.author).connected.set(False)
-        await ctx.send("Your personal MyBB connection has been removed.")
+        """Open membership controls to intentionally unlink your website account."""
+        await ctx.invoke(self.mybb_membership)
 
     @mybb.group(name="membership", invoke_without_command=True)
     async def mybb_membership(self, ctx):
@@ -464,6 +533,9 @@ class MyBB(commands.Cog):
     @mybb.command(name="forums")
     async def forums(self, ctx):
         """List forums visible through your or the server connector."""
+        if not await self.is_publisher(ctx.author):
+            await ctx.send("Forum tools are limited to the server owner and configured publisher roles.")
+            return
         if not await self.ensure_enabled(ctx, ctx.guild):
             return
         try:
@@ -486,6 +558,9 @@ class MyBB(commands.Cog):
     @mybb.command(name="threads")
     async def threads(self, ctx, forum_id: Optional[int] = None, page: int = 1):
         """List threads in a readable forum."""
+        if not await self.is_publisher(ctx.author):
+            await ctx.send("Forum tools are limited to the server owner and configured publisher roles.")
+            return
         if not await self.ensure_enabled(ctx, ctx.guild):
             return
         forum_id = forum_id or await self.config.guild(ctx.guild).default_forum_id()
@@ -518,6 +593,9 @@ class MyBB(commands.Cog):
     @mybb.command(name="thread")
     async def thread(self, ctx, thread_id: int):
         """Show one readable MyBB thread."""
+        if not await self.is_publisher(ctx.author):
+            await ctx.send("Forum tools are limited to the server owner and configured publisher roles.")
+            return
         if not await self.ensure_enabled(ctx, ctx.guild):
             return
         try:
@@ -543,6 +621,9 @@ class MyBB(commands.Cog):
     @mybb.command(name="search")
     async def search(self, ctx, *, query: str):
         """Search up to 300 recent threads in the configured default forum."""
+        if not await self.is_publisher(ctx.author):
+            await ctx.send("Forum tools are limited to the server owner and configured publisher roles.")
+            return
         if not await self.ensure_enabled(ctx, ctx.guild):
             return
         forum_id = await self.config.guild(ctx.guild).default_forum_id()
@@ -572,10 +653,9 @@ class MyBB(commands.Cog):
         """Review a replied-to Discord message before publishing it as a MyBB thread."""
         if not await self.ensure_enabled(ctx, ctx.guild):
             return
-        personal = await self.has_personal_connection(ctx.guild.id, ctx.author.id)
-        if not personal and not await self.is_manager(ctx.author):
+        if not await self.is_publisher(ctx.author):
             await ctx.send(
-                f"Connect your MyBB account with `{ctx.clean_prefix}mybb connect`, or ask a configured MyBB manager to publish this."
+                "Only the server owner or a configured forum-publisher role may publish."
             )
             return
         try:
@@ -584,6 +664,10 @@ class MyBB(commands.Cog):
             )
         except ValueError as error:
             await ctx.send(str(error))
+            return
+        allowed_forums = set(await self.config.guild(ctx.guild).publishing_forum_ids())
+        if forum_id not in allowed_forums:
+            await ctx.send("That forum is not in this server's publishing allowlist.")
             return
         reference = ctx.message.reference
         message = reference.resolved if reference and isinstance(reference.resolved, discord.Message) else None
@@ -625,6 +709,7 @@ class MyBB(commands.Cog):
         await ctx.invoke(self.mybbset_setup)
 
     @mybbset.command(name="setup")
+    @commands.guildowner()
     async def mybbset_setup(self, ctx):
         """Open the interactive board connector."""
         from .views import MyBBSetupView
@@ -633,11 +718,11 @@ class MyBB(commands.Cog):
 
     async def settings_embed(self, guild):
         data = await self.config.guild(guild).all()
-        role = guild.get_role(data["manager_role_id"]) if data["manager_role_id"] else None
         shared = await self.bot.get_shared_api_tokens(self.guild_namespace(guild.id))
+        membership_tokens = await self.bot.get_shared_api_tokens(self.membership_guild_namespace(guild.id))
         embed = discord.Embed(
             title="MyBB server setup",
-            description="Connect this Discord server to its own MyBB board. Members may then add personal access without changing the server connector.",
+            description="Configure website membership independently from optional API-v1 forum tools.",
             color=discord.Color.blurple(),
         )
         embed.add_field(name="Board", value=data["board_url"] or "Not connected", inline=False)
@@ -658,17 +743,28 @@ class MyBB(commands.Cog):
             )[:1024],
             inline=False,
         )
-        embed.add_field(name="Manager role", value=role.mention if role else "Manage Server only")
         embed.add_field(
-            name="Membership roles",
+            name="Account linking and membership",
             value=(
+                f"Provider: {data.get('membership_url') or 'Not configured'}\n"
                 f"{len(data.get('membership_roles', {}))} mapping(s) · "
                 f"{'Enabled' if data.get('membership_enabled') else 'Disabled'} · "
-                f"client {'stored' if (await self.bot.get_shared_api_tokens(self.membership_guild_namespace(guild.id))).get('client_id') else 'not configured'}"
+                f"client {'stored' if membership_tokens.get('client_id') else 'not configured'}"
             ),
             inline=False,
         )
-        embed.set_footer(text="Tokens are never displayed. RSSPublisher remains the better tool for automatic announcements.")
+        publisher_roles = [guild.get_role(role_id) for role_id in data.get("publisher_role_ids", [])]
+        embed.add_field(
+            name="Optional forum tools",
+            value=(
+                f"API v1: {'Configured' if shared.get('token') else 'Not configured'} · "
+                f"{'Enabled' if data.get('enabled') else 'Disabled'}\n"
+                f"Publisher roles: {', '.join(role.mention for role in publisher_roles if role) or 'Server owner only'}\n"
+                f"Publishing forums: {', '.join(map(str, data.get('publishing_forum_ids', []))) or 'None'} · "
+                f"Announcement feeds: {len(data.get('announcement_feeds', {}))}"
+            ), inline=False,
+        )
+        embed.set_footer(text="Membership uses External Sign-In. Announcements and publishing use the optional API-v1 connector. Tokens are never displayed.")
         return embed
 
     @mybbset.command(name="status")
@@ -706,8 +802,8 @@ class MyBB(commands.Cog):
     async def mybbset_membership_enabled(self, ctx, enabled: bool):
         if enabled:
             tokens = await self.bot.get_shared_api_tokens(self.membership_guild_namespace(ctx.guild.id))
-            if not await self.config.guild(ctx.guild).board_url() or not tokens.get("client_id") or not tokens.get("client_secret"):
-                await ctx.send("Connect the board and configure the External Sign-In client first.")
+            if not await self.config.guild(ctx.guild).membership_url() or not tokens.get("client_id") or not tokens.get("client_secret"):
+                await ctx.send("Configure the External Sign-In client first.")
                 return
         await self.config.guild(ctx.guild).membership_enabled.set(enabled)
         await self.config.guild(ctx.guild).membership_next_check.set(0)
@@ -743,16 +839,19 @@ class MyBB(commands.Cog):
         await ctx.send("Mapping removed; no Discord roles changed." if removed else "That mapping does not exist.")
 
     @mybbset.command(name="enabled")
+    @commands.guildowner()
     async def mybbset_enabled(self, ctx, enabled: bool):
         await self.config.guild(ctx.guild).enabled.set(enabled)
         await ctx.send(f"MyBB bridge {'enabled' if enabled else 'disabled'} for this server.")
 
     @mybbset.command(name="defaultforum")
+    @commands.guildowner()
     async def mybbset_defaultforum(self, ctx, forum_id: Optional[int] = None):
         await self.config.guild(ctx.guild).default_forum_id.set(forum_id)
         await ctx.send(f"Default MyBB forum set to `{forum_id}`." if forum_id else "Default forum cleared.")
 
     @mybbset.group(name="forumalias", aliases=["forumaliases"], invoke_without_command=True)
+    @commands.guildowner()
     async def mybbset_forumalias(self, ctx):
         """List friendly publishing destinations."""
         aliases = await self.config.guild(ctx.guild).forum_aliases()
@@ -805,30 +904,180 @@ class MyBB(commands.Cog):
         )
 
     @mybbset.command(name="managerrole")
+    @commands.guildowner()
     async def mybbset_managerrole(self, ctx, role: Optional[discord.Role] = None):
-        await self.config.guild(ctx.guild).manager_role_id.set(role.id if role else None)
-        await ctx.send(f"{role.mention} can publish with the server connector." if role else "Only members with Manage Server can publish through the server connector.")
+        """Deprecated compatibility command; use publisherrole add/remove."""
+        await ctx.send(f"Use `{ctx.clean_prefix}mybbset publisherrole add @role` instead.")
+
+    @mybbset.group(name="publisherrole", invoke_without_command=True)
+    @commands.guildowner()
+    async def mybbset_publisherrole(self, ctx):
+        roles = [ctx.guild.get_role(role_id) for role_id in await self.config.guild(ctx.guild).publisher_role_ids()]
+        await ctx.send("Publisher roles: " + (", ".join(role.mention for role in roles if role) or "None"))
+
+    @mybbset_publisherrole.command(name="add")
+    async def mybbset_publisherrole_add(self, ctx, role: discord.Role):
+        async with self.config.guild(ctx.guild).publisher_role_ids() as role_ids:
+            if role.id not in role_ids:
+                role_ids.append(role.id)
+        await ctx.send(f"{role.mention} may use reviewed forum publishing.")
+
+    @mybbset_publisherrole.command(name="remove")
+    async def mybbset_publisherrole_remove(self, ctx, role: discord.Role):
+        async with self.config.guild(ctx.guild).publisher_role_ids() as role_ids:
+            if role.id in role_ids:
+                role_ids.remove(role.id)
+        await ctx.send(f"{role.mention} no longer has forum publishing access.")
+
+    @mybbset.group(name="publishingforum", invoke_without_command=True)
+    @commands.guildowner()
+    async def mybbset_publishingforum(self, ctx):
+        ids = await self.config.guild(ctx.guild).publishing_forum_ids()
+        await ctx.send("Allowed publishing forum IDs: " + (", ".join(map(str, ids)) or "None"))
+
+    @mybbset_publishingforum.command(name="add")
+    async def mybbset_publishingforum_add(self, ctx, forum_id: int):
+        client = await self.client_for(ctx.guild)
+        try:
+            await client.threads(forum_id, page=1, per_page=1)
+        except MyBBAPIError as error:
+            await self.send_error(ctx, error)
+            return
+        async with self.config.guild(ctx.guild).publishing_forum_ids() as ids:
+            if forum_id not in ids:
+                ids.append(forum_id)
+        await ctx.send(f"Forum `{forum_id}` is allowed for reviewed publishing.")
+
+    @mybbset_publishingforum.command(name="remove")
+    async def mybbset_publishingforum_remove(self, ctx, forum_id: int):
+        async with self.config.guild(ctx.guild).publishing_forum_ids() as ids:
+            if forum_id in ids:
+                ids.remove(forum_id)
+        await ctx.send(f"Forum `{forum_id}` removed from the publishing allowlist.")
+
+    @mybbset.group(name="announcements", aliases=["announcement"], invoke_without_command=True)
+    @commands.guildowner()
+    async def mybbset_announcements(self, ctx):
+        """List MyBB forum announcement routes."""
+        feeds = await self.config.guild(ctx.guild).announcement_feeds()
+        if not feeds:
+            await ctx.send("No MyBB forum announcement routes are configured.")
+            return
+        lines = []
+        for forum_id, feed in sorted(feeds.items(), key=lambda item: int(item[0])):
+            lines.append(
+                f"Forum `{forum_id}` → <#{feed.get('channel_id')}> · {feed.get('mode', 'link')} · "
+                f"{'running' if feed.get('enabled') else 'stopped'}"
+            )
+        await ctx.send("\n".join(lines), allowed_mentions=discord.AllowedMentions.none())
+
+    @mybbset_announcements.command(name="add")
+    async def mybbset_announcements_add(
+        self, ctx, forum_id: int, channel: discord.TextChannel, mode: str = "link"
+    ):
+        """Add a forum route in link or card mode; it starts stopped."""
+        mode = mode.casefold()
+        if mode not in {"link", "card"}:
+            await ctx.send("Mode must be `link` or `card`.")
+            return
+        try:
+            client = await self.client_for(ctx.guild)
+            await client.threads(forum_id, page=1, per_page=1)
+        except MyBBAPIError as error:
+            await self.send_error(ctx, error)
+            return
+        permissions = channel.permissions_for(ctx.guild.me)
+        if not permissions.send_messages or (mode == "card" and not permissions.embed_links):
+            await ctx.send("I need Send Messages, plus Embed Links for card mode, in that channel.")
+            return
+        async with self.config.guild(ctx.guild).announcement_feeds() as feeds:
+            previous = feeds.get(str(forum_id), {})
+            feeds[str(forum_id)] = {
+                "channel_id": channel.id, "mode": mode, "enabled": False,
+                "last_thread_id": int(previous.get("last_thread_id", 0)),
+            }
+        await ctx.send(f"Forum `{forum_id}` will announce in {channel.mention} using `{mode}` mode. Run the start command when ready.")
+
+    @mybbset_announcements.command(name="remove")
+    async def mybbset_announcements_remove(self, ctx, forum_id: int):
+        async with self.config.guild(ctx.guild).announcement_feeds() as feeds:
+            removed = feeds.pop(str(forum_id), None)
+        await ctx.send("Announcement route removed." if removed else "That forum route was not configured.")
+
+    @mybbset_announcements.command(name="mode")
+    async def mybbset_announcements_mode(self, ctx, forum_id: int, mode: str):
+        mode = mode.casefold()
+        if mode not in {"link", "card"}:
+            await ctx.send("Mode must be `link` or `card`.")
+            return
+        async with self.config.guild(ctx.guild).announcement_feeds() as feeds:
+            feed = feeds.get(str(forum_id))
+            if not feed:
+                await ctx.send("Add that forum route first.")
+                return
+            feed["mode"] = mode
+        await ctx.send(f"Forum `{forum_id}` now uses `{mode}` announcements.")
+
+    @mybbset_announcements.command(name="start")
+    async def mybbset_announcements_start(self, ctx, forum_id: int, recent: int = 0):
+        """Start a route, optionally posting up to five recent threads."""
+        if recent < 0 or recent > 5:
+            await ctx.send("Recent backfill must be between 0 and 5.")
+            return
+        feeds = await self.config.guild(ctx.guild).announcement_feeds()
+        feed = feeds.get(str(forum_id))
+        if not feed:
+            await ctx.send("Add that forum route first.")
+            return
+        try:
+            client = await self.client_for(ctx.guild)
+            threads = sorted(
+                self.data_list(await client.threads(forum_id, page=1, per_page=max(recent, 1)), "threads"),
+                key=self._thread_id,
+            )
+            channel = ctx.guild.get_channel(int(feed["channel_id"]))
+            if channel is None:
+                raise MyBBAPIError("The configured Discord channel no longer exists.", code="missing_channel")
+            for thread in (threads[-recent:] if recent else []):
+                await self.deliver_forum_thread(channel, thread, feed.get("mode", "link"))
+            if threads:
+                feed["last_thread_id"] = self._thread_id(threads[-1])
+            feed["enabled"] = True
+            feeds[str(forum_id)] = feed
+            await self.config.guild(ctx.guild).announcement_feeds.set(feeds)
+            await self.config.guild(ctx.guild).announcement_next_check.set(int(time.time()) + 900)
+        except (MyBBAPIError, discord.HTTPException) as error:
+            await ctx.send(f"The route was not started: {error}")
+            return
+        await ctx.send(
+            f"Forum `{forum_id}` announcements are running. "
+            + (f"Posted {len(threads[-recent:])} recent thread(s)." if recent else "Existing threads were seeded without flooding the channel.")
+        )
+
+    @mybbset_announcements.command(name="stop")
+    async def mybbset_announcements_stop(self, ctx, forum_id: int):
+        async with self.config.guild(ctx.guild).announcement_feeds() as feeds:
+            feed = feeds.get(str(forum_id))
+            if not feed:
+                await ctx.send("That forum route was not configured.")
+                return
+            feed["enabled"] = False
+        await ctx.send(f"Forum `{forum_id}` announcements stopped; its delivery marker was preserved.")
 
     @mybbset.command(name="disconnect")
+    @commands.guildowner()
     async def mybbset_disconnect(self, ctx, confirmation: str = ""):
         """Disconnect this Discord server from MyBB."""
         if confirmation.casefold() != "confirm":
             await ctx.send(f"Run `{ctx.clean_prefix}mybbset disconnect confirm` to remove the server connector. Personal tokens are removed separately by their owners.")
             return
-        try:
-            await self.clear_guild_memberships(ctx.guild, notify_provider=True)
-        except (MembershipError, discord.HTTPException, RoleSyncError) as error:
-            await ctx.send(f"Disconnect stopped because membership cleanup could not be confirmed: {error}")
-            return
         await self.bot.remove_shared_api_tokens(self.guild_namespace(ctx.guild.id), "token")
-        await self.bot.remove_shared_api_tokens(
-            self.membership_guild_namespace(ctx.guild.id), "client_id", "client_secret"
-        )
         await self.clear_guild_member_connections(ctx.guild)
         await self.config.guild(ctx.guild).board_url.clear()
         await self.config.guild(ctx.guild).default_forum_id.clear()
         await self.config.guild(ctx.guild).forum_aliases.clear()
-        await self.config.guild(ctx.guild).membership_roles.clear()
-        await self.config.guild(ctx.guild).membership_enabled.set(False)
+        await self.config.guild(ctx.guild).publisher_role_ids.clear()
+        await self.config.guild(ctx.guild).publishing_forum_ids.clear()
+        await self.config.guild(ctx.guild).announcement_feeds.clear()
         await self.config.guild(ctx.guild).enabled.set(False)
-        await ctx.send("This Discord server's MyBB board connector has been removed and the bridge disabled.")
+        await ctx.send("The optional API-v1 connector, publishing access, and forum announcements were removed. Membership linking is unchanged.")

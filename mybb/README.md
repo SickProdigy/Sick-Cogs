@@ -1,152 +1,162 @@
 # MyBB
 
-Connect each Discord server to its own installation of the **SickProdigy MyBB API v1 plugin**.
-The guild connector provides shared forum discovery, while members may optionally add a personal,
-scoped token so MyBB applies their individual permissions and authorship. A reviewed publishing
-flow can turn a Discord message into a managed MyBB thread.
+Connect Discord to SickGaming/MyBB through two independent private plugins:
 
-RSSPublisher remains the better cog for automatic new-thread announcements. MyBB is for deliberate
-browsing, recent-thread search, and creating content.
+- **External Sign-In** links a member's website account and synchronizes current
+  named entitlements such as `vip` to Discord roles.
+- **MyBB API v1** optionally powers selected-forum announcements, restricted forum
+  browsing, and reviewed Discord-to-forum publishing.
+
+RSSPublisher is not required. It remains useful for arbitrary RSS/Atom feeds;
+MyBB's built-in announcements provide a shorter setup for forum owners.
 
 ## Requirements
 
-- MyBB with `mybb_api-v1_plugin` 1.0.0 or newer
-- A publicly reachable HTTPS board URL
-- A dedicated, restricted guild token with `forums:read` and `threads:read`
-- `threads:write` on any guild or personal token used to publish
+- MyBB External Sign-In 0.1.13 or newer for account linking and membership roles.
+- SickProdigy MyBB API v1 1.0.0 or newer only for optional forum tools.
+- Public HTTPS URLs. The bot needs outbound HTTPS only; no inbound bot port or
+  callback listener is required.
 
-Connector URLs may not include credentials, query strings, or fragments. Redirects and destinations
-that resolve to private, loopback, or link-local addresses are rejected. Give every Discord server
-and member a separate revocable token rather than reusing an administrator token.
+These plugins are currently private SickGaming products. Obtain and install them
+through the authorized SickGaming distribution for your license. Never share
+client secrets or API tokens in Discord messages, screenshots, logs, or support
+tickets.
 
-## Connect a Discord server
+## New-server setup
 
-A member with Manage Server runs:
+### 1. Account linking and membership roles
+
+In MyBB Admin CP, create a dedicated confidential External Sign-In client:
+
+- Enable **Account linking service**.
+- Keep `openid` and `entitlements` in its scopes.
+- Allow every named entitlement this Discord server may consume, such as `vip`.
+- A linking-only client does not need callback URLs.
+- Do not reuse a website OIDC client or API-v1 token.
+
+In Discord, an administrator runs:
+
+```text
+[p]mybbset membership setup
+```
+
+Press **Set client** and enter the complete provider URL, client ID, and secret:
+
+```text
+https://forum.example.com/external-signin
+```
+
+Map entitlements and enable synchronization:
+
+```text
+[p]mybbset membership map vip @VIP
+[p]mybbset membership enabled true
+[p]mybbset membership
+```
+
+Members run `[p]mybb membership` (or `[p]mybb connect`), press **Link MyBB**,
+open the private approval URL, sign in on the forum, and approve the displayed
+Discord ID and server context. The bot polls outbound and immediately synchronizes
+roles. `[p]mybb membership sync` requests a manual refresh.
+
+The loop wakes once a minute but checks a guild only on its 15-minute due cycle.
+It handles at most 100 linked members per pass with a rotating cursor. Failures
+back off up to six hours. Only authenticated HTTP 200 `inactive` or `unlinked`
+states remove roles owned by the cog. Timeouts, malformed responses, 401/403,
+rate limits, and server failures preserve roles for later retry.
+
+### 2. Optional API-v1 forum tools
+
+Skip this section if the server only needs membership roles.
+
+In MyBB Admin CP, open **Configuration → API access**. Create a dedicated token
+owned by an appropriate forum service account. Grant only what is required:
+
+- `forums:read` and `threads:read` for announcements/browsing.
+- `threads:write` only for Discord-to-forum publishing.
+- Restrict its readable and writable forum lists in the API policy.
+
+Only the Discord server owner can configure the shared API connector:
 
 ```text
 [p]mybbset setup
 ```
 
-Use **Connect board** to enter the board URL and restricted guild token. The cog validates both the
-public health route and authenticated forum access before saving it. Then choose a default forum and
-leave the bridge enabled. Every Discord guild has an independent URL and token namespace.
+Press **Connect board** and enter the board root (not `/api/v1`) plus the API-v1
+token. Example board root: `https://forum.example.com`.
 
-Text-command fallbacks:
-
-```text
-[p]mybbset status
-[p]mybbset defaultforum 2
-[p]mybbset forumalias set ideas 120
-[p]mybbset forumalias set support 45
-[p]mybbset forumalias
-[p]mybbset managerrole @Forum Staff
-[p]mybbset enabled true
-[p]mybbset disconnect confirm
-```
-
-Changing the guild to a different board removes its existing personal connections so a token from
-one MyBB installation is never sent to another. Disconnecting also disables the bridge and removes
-all personal connections for that guild.
-
-## Personal connections
-
-A member can run:
+The shared connector never impersonates individual Discord members. Forum browsing,
+search, and publishing are limited to the Discord server owner and owner-selected
+publisher roles:
 
 ```text
-[p]mybb connect
+[p]mybbset publisherrole add @Content Creator
+[p]mybbset publishingforum add 12
 ```
 
-The private panel accepts a scoped personal API token for the guild's configured board. Requests
-prefer that personal token, letting MyBB enforce the member's forum visibility and posting rights.
-`[p]mybb disconnect` removes it. Tokens are never displayed in Discord responses.
-
-Personal forum API access is separate from verified membership linking. A personal
-API token controls forum browsing and publishing; it is never accepted as proof of
-account ownership for Discord roles.
-
-## Membership roles
-
-Install External Sign-In 0.1.13 or newer. Create a dedicated confidential client,
-enable **Account linking service**, and list every named entitlement this Discord
-server may consume. Do not reuse a website OIDC client or the API v1 token.
-
-Configure its client ID and secret privately, map entitlements, then enable sync:
+Reply to a Discord message and create a reviewed draft with:
 
 ```text
-[p]mybbset membership setup
-[p]mybbset membership
-[p]mybbset membership map vip @VIP
-[p]mybbset membership unmap vip
-[p]mybbset membership enabled true
+[p]mybb draft 12 Useful idea from Discord
 ```
 
-Members use `[p]mybb membership` and press **Link MyBB**. The cog starts the
-provider's device-style flow, shows the member a private approval URL, polls outbound,
-verifies issuer/Discord ID/guild context, stores the returned link credential in Red
-shared API tokens, and immediately synchronizes roles. No inbound bot port is needed.
-`[p]mybb membership sync` performs a manual check.
-The membership panel disables **Link MyBB** until server setup is enabled and
-disables sync/unlink controls until that member has completed a verified link.
+Nothing is posted until the authorized user reviews and presses **Publish**.
+The API token's MyBB write policy and the cog's publishing-forum allowlist must
+both permit the destination.
 
-Names are case-sensitive provider permissions (for example `vip`), not numeric
-forum group IDs. Up to 50 mappings are stored per guild. Mapping changes require
-Manage Server and Manage Roles (or administrator access); roles must be below both
-the bot and configuring member, except the guild owner has no member hierarchy
-restriction. Everyone, integration, and administrative/moderation roles are rejected.
+### 3. Optional new-thread announcements
 
-The loop wakes once a minute but checks a guild only when its 15-minute due cycle
-arrives. Provider failures exponentially back off up to six hours. Only authenticated
-HTTP 200 `inactive` or `unlinked` states remove cog-owned roles. Timeouts, malformed
-responses, 401/403, rate limits and server errors preserve roles for retry. Role
-ownership is recorded before grants; failed Discord changes remain retryable. The cog
-never adopts or removes a pre-existing unowned role. Use dedicated membership roles,
-because a later manual grant of a role already tracked as cog-owned is indistinguishable.
-
-Intentional unlink revokes the provider association before removing roles and local
-credentials. If provider confirmation is ambiguous, the operation stops and preserves
-access. Changing boards, removing the membership client, server disconnect and Red
-user-data deletion follow the same confirmed-cleanup rule. External Sign-In client
-secret rotation revokes its links and therefore requires members to link again.
-
-## Discovery commands
-
-- `[p]mybb` — interactive home card.
-- `[p]mybb forums` — forums visible through the member or guild connector.
-- `[p]mybb threads [forum_id] [page]` — recent threads; defaults to the configured forum.
-- `[p]mybb thread <thread_id>` — open one readable thread.
-- `[p]mybb search <terms>` — search up to 300 recent thread summaries in the default forum.
-
-The API does not currently expose full-text search. The bounded search is intentionally labeled as a
-recent search and does not scrape MyBB HTML. A future API search route should enforce the active
-token's normal MyBB visibility rules and replace this fallback.
-
-## Publishing a Discord message
-
-Server managers can map memorable names to approved destination forums. Reply to a Discord message
-and publish using an alias, the explicit `default` destination, or a numeric forum ID:
+Add a route for one MyBB forum and Discord channel:
 
 ```text
-[p]mybb draft ideas <subject>
-[p]mybb draft default <subject>
-[p]mybb draft 120 <subject>
+[p]mybbset announcements add 12 #forum-news link
+[p]mybbset announcements start 12
 ```
 
-Manage aliases with `[p]mybbset forumalias set <name> <forum_id>` and
-`[p]mybbset forumalias remove <name>`. Publishing requires an explicit destination so a misspelled
-alias cannot silently route a thread to the server default.
+`link` posts only the authoritative thread URL so Discord can use the forum's
+Open Graph preview. `card` posts a consistent embed with title, author, a short
+preview, and a link back to the complete forum thread:
 
-A personally connected member publishes through their own token. Without a personal connection,
-only Manage Server or the configured manager role may publish through the guild connector. The bot
-shows **Edit**, **Publish**, and **Cancel** before sending anything.
+```text
+[p]mybbset announcements mode 12 card
+```
 
-The request includes the Discord jump URL, a stable `source=discord` / `source_id` pair, and an
-idempotency key. Repeating the same source message updates its managed thread rather than creating a
-duplicate. Discord attachments are represented by their CDN URLs.
+Starting without a number silently seeds existing threads. To intentionally post
+up to five recent threads during first setup:
 
-## Stored data
+```text
+[p]mybbset announcements start 12 3
+```
 
-Guild configuration contains the board URL, enabled state, default forum ID, forum aliases, and manager role ID.
-Member configuration contains only a connection marker. Guild and member bearer tokens are stored
-in separate Red shared-API-token namespaces. Personal tokens are removed when members disconnect,
-when a board changes, when the guild connector is removed, or when Red processes that user's data
-deletion request.
+Manage routes with:
+
+```text
+[p]mybbset announcements
+[p]mybbset announcements stop 12
+[p]mybbset announcements remove 12
+```
+
+Announcements poll on a 15-minute due cycle with capped exponential backoff.
+Successful sends advance the per-forum marker; failed sends remain eligible for
+retry. Only the first 20 current API results are considered, so this is bounded
+notification polling rather than full historical synchronization.
+
+## Separation and security
+
+- External Sign-In credentials cannot browse or post forum content.
+- API-v1 tokens cannot prove Discord/MyBB account ownership or grant membership roles.
+- Changing or disconnecting the API-v1 connector does not alter membership links.
+- Removing the External Sign-In client intentionally revokes links and removes
+  cog-owned roles but does not alter the API-v1 connector.
+- The cog never adopts or removes pre-existing unowned roles. Use dedicated
+  membership roles because a later manual grant of an already tracked role cannot
+  be distinguished automatically.
+- Link credentials, API tokens, and client secrets live in separate Red shared API
+  token namespaces. Non-secret configuration stores mappings, delivery cursors,
+  verified issuer/subject metadata, status, and role ownership.
+
+## Existing forum commands
+
+Authorized publishers may use `[p]mybb forums`, `[p]mybb threads`, `[p]mybb thread`,
+and bounded recent `[p]mybb search`. Friendly publishing destinations remain
+available through `[p]mybbset forumalias` and `[p]mybbset defaultforum`.
