@@ -58,7 +58,9 @@ Map entitlements and enable synchronization:
 [p]mybbset membership
 ```
 
-Members run `[p]mybb membership` (or `[p]mybb connect`), press **Link MyBB**,
+Members run `[p]mybb`, `[p]mybb link`, `[p]mybb connect`, or
+`[p]mybb membership`; each opens the same private account-linking controls.
+Press **Link MyBB**,
 open the private approval URL, sign in on the forum, and approve the displayed
 Discord ID and server context. The bot polls outbound and immediately synchronizes
 roles. `[p]mybb membership sync` requests a manual refresh. A member may remain
@@ -81,6 +83,9 @@ an `active` response reconciles the complete returned entitlement set, while
 malformed responses, identity-binding mismatches, 401/403, rate limits, and server
 failures preserve roles for later retry. A profile-display update failure must not
 change membership state, roles, or the durable link.
+
+Optional forum browsing and publishing remain available through
+`[p]mybb tools` and the dedicated forum subcommands.
 
 ### 2. Optional API-v1 forum tools
 

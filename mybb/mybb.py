@@ -457,7 +457,12 @@ class MyBB(commands.Cog):
     @commands.group(name="mybb", aliases=["forum"], invoke_without_command=True)
     @commands.guild_only()
     async def mybb(self, ctx):
-        """Open this server's MyBB bridge."""
+        """Link your website account and synchronize forum-backed roles."""
+        await ctx.invoke(self.mybb_membership)
+
+    @mybb.command(name="tools", aliases=["home"])
+    async def mybb_tools(self, ctx):
+        """Open optional MyBB forum browsing and publishing tools."""
         from .views import MyBBHome
 
         data = await self.config.guild(ctx.guild).all()
@@ -489,28 +494,23 @@ class MyBB(commands.Cog):
             name="Default publishing forum",
             value=f"ID {data['default_forum_id']}" if data["default_forum_id"] else "Not set",
         )
-        embed.set_footer(text=f"Link your account with {ctx.clean_prefix}mybb membership • Membership setup: {ctx.clean_prefix}mybbset membership setup")
+        embed.set_footer(text=f"Account linking: {ctx.clean_prefix}mybb • Membership setup: {ctx.clean_prefix}mybbset membership setup")
         await ctx.send(embed=embed, view=MyBBHome(self, ctx.author))
-
-    @mybb.command(name="connect")
-    async def connect(self, ctx):
-        """Open verified website-account linking controls."""
-        await ctx.invoke(self.mybb_membership)
 
     @mybb.command(name="disconnect")
     async def disconnect(self, ctx):
         """Open membership controls to intentionally unlink your website account."""
         await ctx.invoke(self.mybb_membership)
 
-    @mybb.group(name="membership", invoke_without_command=True)
+    @mybb.group(name="membership", aliases=["connect", "link"], invoke_without_command=True)
     async def mybb_membership(self, ctx):
-        """Link MyBB membership and manage synchronized Discord access."""
+        """Link your website account and manage synchronized Discord access."""
         from .views import MembershipView
 
         link = await self.config.member(ctx.author).membership_link()
         enabled = await self.config.guild(ctx.guild).membership_enabled()
         await ctx.send(
-            "Open your private membership controls below. Forum API access and verified membership linking are separate connections.",
+            "Link your website account to prove forum membership and automatically synchronize configured Discord roles.",
             view=MembershipView(self, ctx.author, bool(link), enabled),
             allowed_mentions=discord.AllowedMentions.none(),
         )
