@@ -1,5 +1,6 @@
 import io
 import unittest
+from unittest.mock import AsyncMock
 from pathlib import Path
 
 from PIL import Image
@@ -374,7 +375,7 @@ class BattleTests(unittest.TestCase):
         source=io.BytesIO()
         Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
         data=source.getvalue();avatar_source=io.BytesIO();Image.new("RGBA",(80,80),(220,40,80,255)).save(avatar_source,"PNG");avatar_data=avatar_source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
-        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);expired=renderer._encounter_sync(10,data,backdrop=0,expired=True);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy",[1]);bag_card=renderer._bag_card_sync([("poke_ball","Poke Ball",8),("moon_stone","Moon Stone",1)],"SickProdigy",[data,data]);registration=renderer._pokedex_registration_sync(starter_pokemon,data,"SickProdigy");menu_conf={"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id]};retro_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"retro",avatar_data=avatar_data);modern_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"modern",avatar_data=avatar_data);starter_pokemon.current_hp=0;center_treating=renderer._pokemon_center_sync([starter_pokemon],[data],"SickProdigy",False);starter_pokemon.current_hp=pokemon_max_hp(starter_pokemon);center_complete=renderer._pokemon_center_sync([starter_pokemon],[data],"SickProdigy",True);trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},[starter_pokemon],[data],"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data,avatar_data);b.gym_key="boulder";gym_victory=renderer._gym_victory_sync(b,data,avatar_data);b.gym_key="";b.state="caught";caught_result=renderer._battle_result_sync(b,data,avatar_data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
+        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);expired=renderer._encounter_sync(10,data,backdrop=0,expired=True);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy",[1]);bag_card=renderer._bag_card_sync([("poke_ball","Poke Ball",8),("moon_stone","Moon Stone",1)],"SickProdigy",[data,data]);registration=renderer._pokedex_registration_sync(starter_pokemon,data,"SickProdigy");menu_conf={"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id]};retro_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"retro",avatar_data=avatar_data);modern_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"modern",avatar_data=avatar_data);starter_pokemon.current_hp=0;center_treating=renderer._pokemon_center_sync([starter_pokemon],[data],"SickProdigy",False);starter_pokemon.current_hp=pokemon_max_hp(starter_pokemon);center_complete=renderer._pokemon_center_sync([starter_pokemon],[data],"SickProdigy",True);trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},[starter_pokemon],[data],"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data,avatar_data);b.gym_key="boulder";gym_victory=renderer._gym_victory_sync(b,data,avatar_data);b.gym_key="";b.state="caught";b.last_ball="great_ball";caught_result=renderer._battle_result_sync(b,data,avatar_data,data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
         self.assertEqual(len(ENCOUNTER_BACKDROPS),12)
         self.assertEqual(len(KANTO_COVERS),11)
         with Image.open(encounter) as image,Image.open(alternate) as other:
@@ -438,6 +439,14 @@ class BattleTests(unittest.TestCase):
         b.state="lost"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
 
+
+class RendererAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_catch_result_uses_the_thrown_ball_sprite(self):
+        renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();current.state="caught";current.last_ball="ultra_ball"
+        renderer.get_sprite=AsyncMock(return_value=b"pokemon");renderer.get_item_sprite=AsyncMock(return_value=b"ball");renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
+        await renderer.battle(current)
+        renderer.get_item_sprite.assert_awaited_once_with("ultra_ball")
+        self.assertEqual(renderer._render.await_args.args[-1],b"ball")
 
 class CatalogVersionTests(unittest.TestCase):
     def test_every_release_versions_all_future_mechanics_dimensions(self):
