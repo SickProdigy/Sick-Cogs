@@ -21,7 +21,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"encounter_owner_override":False,"battle_timeout":900,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","spawn_profile":"balanced","timer_minutes":30,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":2,"concurrency_owner_override":False,"timer_owner_override":False,"notification_mode":"silent","notification_role_id":None,"quiet_timezone":None,"quiet_start":None,"quiet_end":None}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"encounter_owner_override":False,"battle_timeout":900,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","spawn_profile":"balanced","timer_minutes":30,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":2,"concurrency_owner_override":False,"timer_owner_override":False,"notification_mode":"silent","notification_role_id":None,"quiet_timezone":None,"quiet_start":None,"quiet_end":None,"channel_biomes":{}}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{},"menu_style":"retro","vip_reward_month":None}
 MART_ITEMS={
     "poke_ball":("Poke Ball","balls",50),
@@ -36,7 +36,7 @@ MART_ITEMS={
     "moon_stone":("Moon Stone","moon_stone",25000),
 }
 MART_ALIASES={"pokeball":"poke_ball","poke":"poke_ball","greatball":"great_ball","great":"great_ball","ultraball":"ultra_ball","ultra":"ultra_ball","firestone":"fire_stone","waterstone":"water_stone","thunderstone":"thunder_stone","leafstone":"leaf_stone","moonstone":"moon_stone","fire":"fire_stone","water":"water_stone","thunder":"thunder_stone","leaf":"leaf_stone","moon":"moon_stone"}
-GLOBAL={"schema":20,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
+GLOBAL={"schema":21,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False,"mart_prices":{key:value[2] for key,value in MART_ITEMS.items()},"center_cooldown":1800,"maximum_concurrency":5,"minimum_timer":15,"next_trade":1,"trades":{},"vip_guild_id":None,"vip_role_id":None,"vip_monthly_pack":{"balls":20,"great_ball":5,"ultra_ball":2,"potion":10,"revive":3}}
 BOX_SIZE=30
 MAX_BOXES=8
 PARTY_SIZE=6
@@ -80,6 +80,15 @@ RARITY_PROFILES={
     "friendly":{"common":100,"uncommon":65,"rare":35,"very_rare":15},
     "standard":{"common":100,"uncommon":45,"rare":18,"very_rare":5},
     "challenging":{"common":100,"uncommon":30,"rare":8,"very_rare":1},
+}
+BIOMES={
+    "mixed":{},
+    "forest":{"grass":6,"bug":6,"poison":3,"normal":2,"fairy":2},
+    "cave":{"rock":6,"ground":6,"poison":3,"ghost":3,"dark":3,"flying":2},
+    "shoreline":{"water":7,"ice":4,"flying":3,"electric":2},
+    "mountain":{"rock":6,"ground":5,"flying":4,"ice":3,"dragon":2},
+    "grassland":{"normal":5,"grass":5,"flying":4,"ground":3,"fire":2},
+    "urban":{"normal":5,"electric":5,"poison":4,"steel":4,"fighting":3,"psychic":2},
 }
 
 def pace_for_settings(minimum,maximum,cooldown):
@@ -251,9 +260,13 @@ def reward_summary(reward):
     labels={"balls":"Poke Balls","great_ball":"Great Balls","ultra_ball":"Ultra Balls","potion":"Potions","revive":"Revives"}
     return ", ".join(f"{amount} {labels.get(item,item.replace(chr(95),chr(32)).title())}" for item,amount in reward.items())
 
-def spawn_weight(species,profile="friendly"):
+def biome_weight(species,biome="mixed"):
+    affinities=BIOMES.get(str(biome).casefold(),{})
+    return max((affinities.get(kind,1) for kind in species.types),default=1)
+
+def spawn_weight(species,profile="friendly",biome="mixed"):
     weights=RARITY_PROFILES.get(profile,RARITY_PROFILES["friendly"])
-    return weights[rarity_tier(species)]
+    return weights[rarity_tier(species)]*biome_weight(species,biome)
 
 EVOLUTION_LEVELS={evolved:level for evolved,level in EVOLUTIONS.values()}
 
@@ -315,7 +328,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.1.10";__author__="SickProdigy"
+    __version__="1.2.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -562,6 +575,11 @@ class Pokemon(commands.Cog):
                 data.setdefault("spawn_profile","custom");data.setdefault("encounter_owner_override",False)
                 await self.config.guild_from_id(int(guild_id)).set(data)
             await self.config.schema.set(20)
+        if schema<21:
+            for guild_id,data in (await self.config.all_guilds()).items():
+                data.setdefault("channel_biomes",{})
+                await self.config.guild_from_id(int(guild_id)).set(data)
+            await self.config.schema.set(21)
     def lock(self,key):
         if not hasattr(self,"locks"):self.locks={}
         return self.locks.setdefault(key,asyncio.Lock())
@@ -765,10 +783,11 @@ class Pokemon(commands.Cog):
         generations=effective_generations(conf["generations"],policy["allowed_generations"])
         level=await self.spawn_level(channel.guild.id);pool=available_species(generations,policy["allow_special_species"],level)
         if not pool:raise RuntimeError("No Pokemon are available under the bot-wide encounter policy.")
-        rng=random.SystemRandom()
-        chosen=rng.choices(pool,weights=[spawn_weight(item,policy["rarity_profile"]) for item in pool],k=1)[0]
+        rng=random.SystemRandom();biome=str(conf.get("channel_biomes",{}).get(str(channel.id),"mixed")).casefold()
+        if biome not in BIOMES:biome="mixed"
+        chosen=rng.choices(pool,weights=[spawn_weight(item,policy["rarity_profile"],biome) for item in pool],k=1)[0]
         sid=chosen.id;gender=encounter_gender(chosen,rng);shiny=True if force_shiny else encounter_shiny(rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
-        display=("Shiny " if shiny else "")+SPECIES[sid].name;embed=discord.Embed(title=f"A wild {display} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green())
+        display=("Shiny " if shiny else "")+SPECIES[sid].name;embed=discord.Embed(title=f"A wild {display} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green());embed.set_footer(text=f"Biome: {biome.title()}")
         delivery=self.encounter_delivery(channel,conf) if automatic else {"allowed_mentions":discord.AllowedMentions.none()}
         try:
             image=await self.renderer.encounter(sid,level,gender,backdrop,shiny=shiny);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
@@ -776,7 +795,7 @@ class Pokemon(commands.Cog):
         except RenderError:
             log.exception("Encounter rendering failed");embed.set_image(url=sprite(sid,shiny=shiny));msg=await channel.send(embed=embed,view=EncounterView(self,eid),**delivery)
         encounter_timeout=effective_encounter_timeout(conf,policy)
-        raw={"state":"open","species_id":sid,"level":level,"gender":gender,"shiny":shiny,"backdrop":backdrop,"level_locked":True,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=encounter_timeout)).isoformat(),"encounter_timeout":encounter_timeout}
+        raw={"state":"open","species_id":sid,"level":level,"gender":gender,"shiny":shiny,"backdrop":backdrop,"level_locked":True,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=encounter_timeout)).isoformat(),"encounter_timeout":encounter_timeout,"biome":biome}
         await self.put_encounter(eid,raw)
         self.activity[channel.guild.id]=0
         await self.config.guild(channel.guild).activity.set(0)
@@ -2006,7 +2025,25 @@ class Pokemon(commands.Cog):
         """Stop wild encounters in a channel."""
         section=self.config.guild(ctx.guild);channels=await section.channels();previous=len(channels);removed=channel.id in channels
         if removed:channels.remove(channel.id)
+        biomes=await section.channel_biomes();biomes.pop(str(channel.id),None);await section.channel_biomes.set(biomes)
         action="removed from" if removed else "not present in";await section.channels.set(channels);await ctx.send(f"This server: {channel.mention} was {action} the spawn-channel list. Configured channels: **{previous} → {len(channels)}**.")
+
+    @pokemon_set.command(name="biome")
+    async def set_biome(self,ctx,channel:discord.TextChannel=None,biome:str=None):
+        """Choose an optional spawn biome for one configured channel."""
+        choices=", ".join(BIOMES)
+        if channel is None:
+            await ctx.send(f"Choose a configured spawn channel and biome: **{choices}**. Example: `{ctx.clean_prefix}pokemonset biome #pokemon forest`.");return
+        section=self.config.guild(ctx.guild);channels=await section.channels()
+        if channel.id not in channels:await ctx.send("That channel must be enabled with `pokemonset channel` first.");return
+        mapping=await section.channel_biomes();previous=str(mapping.get(str(channel.id),"mixed")).casefold()
+        if biome is None:
+            await ctx.send(f"{channel.mention} biome: **{previous}**. Choices: **{choices}**.");return
+        biome=biome.casefold()
+        if biome not in BIOMES:await ctx.send(f"Choose a biome: **{choices}**.");return
+        if biome=="mixed":mapping.pop(str(channel.id),None)
+        else:mapping[str(channel.id)]=biome
+        await section.channel_biomes.set(mapping);await ctx.send(f"This server: {channel.mention} biome changed from **{previous}** to **{biome}**. Generation, rarity, level, and special-species rules still apply.")
     @pokemon_set.command(name="center")
     async def set_center(self,ctx,channel:discord.TextChannel):
         """Designate the server Pokemon Center."""
@@ -2048,6 +2085,7 @@ class Pokemon(commands.Cog):
         generations=effective_generations(conf.get("generations",[1]),policy.get("allowed_generations",[1]));generation_text=", ".join(map(str,generations))
         enabled=conf.get("enabled",False);encounter_minutes=effective_encounter_timeout(conf,policy)//60;encounter_source="server override" if conf.get("encounter_timeout") is not None else "bot-wide default";battle_minutes=int(conf.get("battle_timeout",GUILD["battle_timeout"]))//60
         rarity=policy.get("rarity_profile","friendly");specials="enabled" if policy.get("allow_special_species") else "event-only";expired_cards=conf.get("expired_card_mode","delete")
+        biome_map=conf.get("channel_biomes",{});biomes=", ".join(f"<#{channel_id}>: {str(name).title()}" for channel_id,name in biome_map.items()) or "all Mixed"
         notification_mode=str(conf.get("notification_mode","silent")).casefold();role_id=conf.get("notification_role_id");notification_role=f"<@&{role_id}>" if role_id and ctx.guild.get_role(int(role_id)) else ("missing/deleted" if role_id else "none")
         if conf.get("quiet_timezone") and conf.get("quiet_start") is not None and conf.get("quiet_end") is not None:
             quiet_state="active now" if quiet_hours_active(conf) else "inactive now";quiet_text=f"{format_quiet_clock(conf['quiet_start'])}–{format_quiet_clock(conf['quiet_end'])} {conf['quiet_timezone']} ({quiet_state})"
@@ -2056,7 +2094,7 @@ class Pokemon(commands.Cog):
             f"**Pokemon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}** · Pace: **{selected_pace(conf)}**\nSpawn channels: {channels}\nPokemon Center: {center} · Free-heal cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m**\n"
             f"{progress}\nConcurrency limit: **{slot_limit}** ({concurrency_source}) · Active encounters: **{len(active)}/{slot_limit}** · Next spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** ({encounter_source}) · Battle lifetime: **{battle_minutes}m**\n"
             f"Notifications: **{notification_mode}** · Alert role: {notification_role} · Quiet hours: **{quiet_text}**\n"
-            f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nExpired unattended cards: **{expired_cards}**\nCatalog species: **{len(SPECIES)}**"
+            f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nChannel biomes: {biomes}\nExpired unattended cards: **{expired_cards}**\nCatalog species: **{len(SPECIES)}**"
         )
 
     @pokemon_set.command(name="notifications",aliases=["notify"])
