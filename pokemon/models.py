@@ -190,6 +190,7 @@ class Battle:
     wild_confusion_turns: int = 0
     last_ball: str = ""
     catch_shakes: int = 0
+    caught_count: int = 0
     opponent_party: list = field(default_factory=list)
     opponent_index: int = 0
     opponents_defeated: list = field(default_factory=list)
@@ -726,6 +727,7 @@ class Battle:
         data.setdefault("wild_confusion_turns",0)
         data.setdefault("last_ball","")
         data.setdefault("catch_shakes",0)
+        data.setdefault("caught_count",0)
         data.setdefault("opponent_party",[])
         data.setdefault("opponent_index",0)
         data.setdefault("opponents_defeated",[])
