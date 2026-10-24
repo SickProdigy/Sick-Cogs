@@ -16,7 +16,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,GymChallengeView,TradeCollectionView,ReleasePokemonView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,GymChallengeView,TradeCollectionView,ReleasePokemonView,MartView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -181,6 +181,11 @@ def mart_item_key(value):
     key=str(value).casefold().replace("-","_").replace(" ","_")
     return MART_ALIASES.get(key,key) if MART_ALIASES.get(key,key) in MART_ITEMS else None
 
+def mart_purchase(value):
+    parts=str(value).strip().split();quantity=1
+    if len(parts)>1 and parts[-1].isdigit():quantity=int(parts.pop())
+    return mart_item_key(" ".join(parts)),quantity
+
 def mart_prices(configured=None):
     configured=configured or {}
     return {key:max(1,int(configured.get(key,details[2]))) for key,details in MART_ITEMS.items()}
@@ -309,7 +314,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="1.1.6";__author__="SickProdigy"
+    __version__="1.1.7";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -967,8 +972,8 @@ class Pokemon(commands.Cog):
             await interaction.response.send_message("Start an exact trade with `poke trade  <your collection number> <their collection number>`. The other trainer must confirm before anything moves.",ephemeral=True);return
         if section=="mart":
             if interaction.guild is None:await interaction.response.send_message("The Poké Mart is available inside a server.",ephemeral=True);return
-            prices=mart_prices(await self.config.mart_prices());currency=await bank.get_currency_name(interaction.guild);balance=await bank.get_balance(user);lines=[f"**{label}** — {prices[key]:,} {currency}" for key,(label,_,_) in MART_ITEMS.items()]
-            await interaction.response.send_message("**Poké Mart**\n"+"\n".join(lines)+f"\n\nYour balance: **{balance:,} {currency}**\nBuy with `poke buy <item> [quantity]`.",ephemeral=True);return
+            embed,files,view=await self.rendered_mart(user,interaction.guild)
+            await interaction.response.send_message(embed=embed,files=files,view=view,ephemeral=True);return
         await interaction.response.send_message("That menu option is unavailable.",ephemeral=True)
 
     async def send_progression(self,interaction,battle):
@@ -1668,40 +1673,47 @@ class Pokemon(commands.Cog):
             conf=await self.config.user(ctx.author).all();self.ensure_daily_research(conf);await self.config.user(ctx.author).set(conf)
         await ctx.send(embed=self.research_embed(conf))
 
-    @pokemon.command(name="mart")
+    async def rendered_mart(self,user,guild):
+        prices=mart_prices(await self.config.mart_prices());currency=await bank.get_currency_name(guild);balance=await bank.get_balance(user);scope="global" if await bank.is_global() else "server-local"
+        items=[(key,label,prices[key]) for key,(label,_,_) in MART_ITEMS.items()];lines=[f"**{label}** — {price:,} {currency}" for _,label,price in items]
+        embed=discord.Embed(title="Poké Mart",description="\n".join(lines)+f"\n\nBalance: **{balance:,} {currency}**",color=discord.Color.gold());embed.set_footer(text="Buy one with a button below, or use poke buy <item> [quantity].")
+        try:image=await self.renderer.mart_card(items,balance,currency,scope);embed.description=None;embed.set_image(url="attachment://mart.png");files=[discord.File(image,filename="mart.png")]
+        except RenderError:files=[]
+        return embed,files,MartView(self,user.id,[(key,label) for key,label,_ in items])
+
+    async def purchase_mart_item(self,user,guild,key,quantity):
+        if key not in MART_ITEMS:return False,"Choose an item shown in the Poké Mart."
+        if not 1<=quantity<=100:return False,"Choose a quantity from 1 to 100."
+        prices=mart_prices(await self.config.mart_prices());cost=prices[key]*quantity;currency=await bank.get_currency_name(guild);label=MART_ITEMS[key][0]
+        async with self.lock(("user",user.id)):
+            if not await bank.can_spend(user,cost):
+                balance=await bank.get_balance(user);return False,f"You need **{cost:,} {currency}** but only have **{balance:,} {currency}**."
+            charged=False
+            try:
+                await bank.withdraw_credits(user,cost);charged=True;conf=await self.config.user(user).all();grant_mart_item(conf,key,quantity);await self.config.user(user).set(conf)
+            except Exception:
+                if charged:
+                    try:await bank.deposit_credits(user,cost)
+                    except Exception:log.critical("Could not refund failed Poké Mart purchase for user %s",user.id,exc_info=True);return False,"The purchase failed and its refund also failed. Please contact the bot owner."
+                log.exception("Poké Mart purchase failed for user %s",user.id);return False,"The purchase failed. Your payment was returned."
+        balance=await bank.get_balance(user);plural="" if quantity==1 else "s";return True,f"Purchased **{quantity} {label}{plural}** for **{cost:,} {currency}**. Balance: **{balance:,} {currency}**."
+
+    async def mart_button_purchase(self,interaction,key):
+        success,message=await self.purchase_mart_item(interaction.user,interaction.guild,key,1)
+        if not success:await interaction.response.send_message(message,ephemeral=True);return
+        embed,files,view=await self.rendered_mart(interaction.user,interaction.guild);await interaction.response.edit_message(content=message,embed=embed,attachments=files,view=view)
+
+    @pokemon.command(name="mart",aliases=["market"])
     @commands.guild_only()
     async def pokemon_mart(self,ctx):
-        """View supplies sold for Red bank credits."""
-        prices=mart_prices(await self.config.mart_prices());currency=await bank.get_currency_name(ctx.guild);balance=await bank.get_balance(ctx.author)
-        lines=[f"**{label}** — {prices[key]:,} {currency}" for key,(label,_,_) in MART_ITEMS.items()]
-        scope="global" if await bank.is_global() else "server-local"
-        await ctx.send("**Poké Mart**\n"+"\n".join(lines)+f"\n\nYour balance: **{balance:,} {currency}** ({scope})\nBuy with `{ctx.clean_prefix}poke buy <item> [quantity]`.")
+        """Browse the interactive Poké Mart."""
+        embed,files,view=await self.rendered_mart(ctx.author,ctx.guild);await ctx.send(embed=embed,files=files,view=view)
 
     @pokemon.command(name="buy")
     @commands.guild_only()
-    async def pokemon_buy(self,ctx,item:str,quantity:int=1):
-        """Buy Poké Mart supplies with Red bank credits."""
-        key=mart_item_key(item)
-        if not key:await ctx.send("Choose a ball, medicine, or Kanto evolution stone shown in the Poké Mart.");return
-        if not 1<=quantity<=100:await ctx.send("Choose a quantity from 1 to 100.");return
-        prices=mart_prices(await self.config.mart_prices());cost=prices[key]*quantity;currency=await bank.get_currency_name(ctx.guild);label=MART_ITEMS[key][0]
-        async with self.lock(("user",ctx.author.id)):
-            if not await bank.can_spend(ctx.author,cost):
-                balance=await bank.get_balance(ctx.author);await ctx.send(f"You need **{cost:,} {currency}** but only have **{balance:,}**.");return
-            charged=False
-            try:
-                await bank.withdraw_credits(ctx.author,cost);charged=True
-                conf=await self.config.user(ctx.author).all();grant_mart_item(conf,key,quantity);await self.config.user(ctx.author).set(conf)
-            except Exception:
-                if charged:
-                    try:await bank.deposit_credits(ctx.author,cost)
-                    except Exception:
-                        log.critical("Could not refund failed Poké Mart purchase for user %s",ctx.author.id,exc_info=True)
-                        await ctx.send("The purchase failed and its refund also failed. Please contact the bot owner.");return
-                log.exception("Poké Mart purchase failed for user %s",ctx.author.id)
-                await ctx.send("The purchase failed. Your payment was returned.");return
-        balance=await bank.get_balance(ctx.author);plural="" if quantity==1 else "s"
-        await ctx.send(f"Purchased **{quantity} {label}{plural}** for **{cost:,} {currency}**. Balance: **{balance:,}**.")
+    async def pokemon_buy(self,ctx,*,purchase:str):
+        """Buy an item; spaces and an optional ending quantity are accepted."""
+        key,quantity=mart_purchase(purchase);success,message=await self.purchase_mart_item(ctx.author,ctx.guild,key,quantity);await ctx.send(message)
 
     @pokemon.group(name="use",invoke_without_command=True)
     async def pokemon_use(self,ctx):

@@ -132,6 +132,21 @@ class TradeView(discord.ui.View):
     async def decline(self,interaction,button):await self.cog.cancel_trade(interaction,self.trade_id)
 
 
+class MartItemButton(discord.ui.Button):
+    def __init__(self,cog,user_id,key,label,row):
+        super().__init__(label=label,style=discord.ButtonStyle.primary,row=row)
+        self.cog=cog;self.user_id=user_id;self.key=key
+    async def callback(self,interaction):
+        await self.cog.mart_button_purchase(interaction,self.key)
+
+class MartView(discord.ui.View):
+    def __init__(self,cog,user_id,items):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id
+        for index,(key,label) in enumerate(items):self.add_item(MartItemButton(cog,user_id,key,label,index//5))
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This Poké Mart belongs to another trainer.",ephemeral=True);return False
+
 class CollectionPokemonSelect(discord.ui.Select):
     def __init__(self,cog,user_id,items):
         options=[]

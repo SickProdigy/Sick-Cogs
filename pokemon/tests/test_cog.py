@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import COMPLETED_GYMS,KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
-from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
+from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeCollectionView, GymChallengeView
@@ -634,7 +634,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_mart_defaults_and_aliases_match_payday_scale(self):
         self.assertEqual({key:mart_prices()[key] for key in ("poke_ball","great_ball","ultra_ball","potion","revive")},{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400})
         self.assertTrue(all(mart_prices()[key]==5000 for key in STONE_EVOLUTIONS if key!="moon_stone"));self.assertEqual(mart_prices()["moon_stone"],25000)
-        self.assertEqual((mart_item_key("pokeball"),mart_item_key("great-ball"),mart_item_key("thunder"),mart_item_key("missing")),("poke_ball","great_ball","thunder_stone",None))
+        self.assertEqual((mart_item_key("pokeball"),mart_item_key("great-ball"),mart_item_key("thunder"),mart_item_key("missing")),("poke_ball","great_ball","thunder_stone",None));self.assertEqual(mart_purchase("Fire Stone 2"),("fire_stone",2));self.assertEqual(mart_purchase("Moon Stone"),("moon_stone",1))
         conf={"balls":1,"items":{"potion":2}};grant_mart_item(conf,"poke_ball",3);grant_mart_item(conf,"potion",2)
         self.assertEqual((conf["balls"],conf["items"]["potion"]),(4,4))
 
@@ -643,7 +643,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(mart_prices=prices,user=lambda user:section)
         ctx=SimpleNamespace(author=SimpleNamespace(id=7),guild=SimpleNamespace(id=42),send=AsyncMock())
         with patch("pokemon.pokemon.bank.get_currency_name",AsyncMock(return_value="credits")),patch("pokemon.pokemon.bank.can_spend",AsyncMock(return_value=True)),patch("pokemon.pokemon.bank.withdraw_credits",AsyncMock()) as withdraw,patch("pokemon.pokemon.bank.get_balance",AsyncMock(return_value=700)):
-            await Pokemon.pokemon_buy.callback(cog,ctx,"greatball",2)
+            await Pokemon.pokemon_buy.callback(cog,ctx,purchase="great ball 2")
         withdraw.assert_awaited_once_with(ctx.author,300)
         self.assertEqual(section.value["items"]["great_ball"],5)
         self.assertIn("2 Great Balls",ctx.send.await_args.args[0])
@@ -660,7 +660,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(mart_prices=prices,user=lambda user:section)
         ctx=SimpleNamespace(author=SimpleNamespace(id=7),guild=SimpleNamespace(id=42),send=AsyncMock())
         with patch("pokemon.pokemon.bank.get_currency_name",AsyncMock(return_value="credits")),patch("pokemon.pokemon.bank.can_spend",AsyncMock(return_value=True)),patch("pokemon.pokemon.bank.withdraw_credits",AsyncMock()),patch("pokemon.pokemon.bank.deposit_credits",AsyncMock()) as refund:
-            await Pokemon.pokemon_buy.callback(cog,ctx,"pokeball",2)
+            await Pokemon.pokemon_buy.callback(cog,ctx,purchase="poke ball 2")
         refund.assert_awaited_once_with(ctx.author,100)
         ctx.send.assert_awaited_once_with("The purchase failed. Your payment was returned.")
 
