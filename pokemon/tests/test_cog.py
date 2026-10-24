@@ -226,7 +226,7 @@ class CogPolicyTests(unittest.TestCase):
             self.assertEqual(SPECIES[25], item)
 
     def test_terminal_battle_embed_hides_active_controls(self):
-        current=battle();current.trainer_name="SickProdigy";current.state="won";current.result="The wild Pokémon fainted. Gained 80 XP."
+        current=battle();current.trainer_name="SickProdigy";current.state="won";current.result="The wild Pokemon fainted. Gained 80 XP."
         embed=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
         self.assertIn("SickProdigy defeated",embed.title)
         self.assertNotIn("Moves",[field.name for field in embed.fields])
@@ -239,10 +239,10 @@ class CogPolicyTests(unittest.TestCase):
         current.state="ran"
         self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"{wild.name} escaped from SickProdigy!")
         current.state="lost"
-        current.result=f"{wild.name} escaped! Your party has no conscious Pokémon. Go to a Pokémon Center to heal."
+        current.result=f"{wild.name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
         embed=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
         self.assertEqual(embed.title,f"{wild.name} escaped from SickProdigy!")
-        self.assertIn("Pokémon Center",embed.description)
+        self.assertIn("Pokemon Center",embed.description)
 
     def test_install_message_uses_registered_admin_group(self):
         metadata=json.loads((Path(__file__).parents[1] / "info.json").read_text(encoding="utf-8"))
@@ -420,7 +420,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         pokemon=OwnedPokemon.create("registration",39,3,seed=2)
         cog=Pokemon.__new__(Pokemon);cog.renderer=SimpleNamespace(pokedex_registration=AsyncMock(return_value=io.BytesIO(b"png")))
         embed,files=await cog.rendered_pokedex_registration(pokemon,"  SickProdigy  ")
-        self.assertEqual(embed.description,"New Pokémon data was added to SickProdigy's Pokédex.")
+        self.assertEqual(embed.description,"New Pokemon data was added to SickProdigy's Pokedex.")
         cog.renderer.pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy")
         self.assertEqual(len(files),1)
 
@@ -476,10 +476,10 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(charmander.title,"Choose Charmander?")
         self.assertTrue(charmander.image.url.endswith("/4.png"))
         ctx.send.reset_mock();section.value={"collection":[{"instance_id":"owned"}],"starter_chosen":True,"menu_style":"retro"}
-        cog.rendered_main_menu=AsyncMock(return_value=(discord.Embed(title="Trainer’s Pokémon Menu"),[]))
+        cog.rendered_main_menu=AsyncMock(return_value=(discord.Embed(title="Trainer’s Pokemon Menu"),[]))
         await Pokemon.pokemon.callback(cog,ctx)
         returning=ctx.send.await_args.kwargs
-        self.assertEqual(returning["embed"].title,"Trainer’s Pokémon Menu")
+        self.assertEqual(returning["embed"].title,"Trainer’s Pokemon Menu")
         self.assertIsInstance(returning["view"],MainMenuView)
         self.assertEqual(len(returning["view"].children),11)
         self.assertIn("Trade",[item.label for item in returning["view"].children])
@@ -634,7 +634,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_mart_defaults_and_aliases_match_payday_scale(self):
         self.assertEqual({key:mart_prices()[key] for key in ("poke_ball","great_ball","ultra_ball","potion","revive")},{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400})
         self.assertTrue(all(mart_prices()[key]==5000 for key in STONE_EVOLUTIONS if key!="moon_stone"));self.assertEqual(mart_prices()["moon_stone"],25000)
-        self.assertEqual((mart_item_key("pokeball"),mart_item_key("Poké Ball"),mart_item_key("great-ball"),mart_item_key("thunder"),mart_item_key("missing")),("poke_ball","poke_ball","great_ball","thunder_stone",None));self.assertEqual(mart_purchase("Fire Stone 2"),("fire_stone",2));self.assertEqual(mart_purchase("Moon Stone"),("moon_stone",1))
+        self.assertEqual((mart_item_key("pokeball"),mart_item_key("Poke Ball"),mart_item_key("great-ball"),mart_item_key("thunder"),mart_item_key("missing")),("poke_ball","poke_ball","great_ball","thunder_stone",None));self.assertEqual(mart_purchase("Fire Stone 2"),("fire_stone",2));self.assertEqual(mart_purchase("Moon Stone"),("moon_stone",1))
         conf={"balls":1,"items":{"potion":2}};grant_mart_item(conf,"poke_ball",3);grant_mart_item(conf,"potion",2)
         self.assertEqual((conf["balls"],conf["items"]["potion"]),(4,4))
 
@@ -668,7 +668,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         prices=StoredValue({key:value[2] for key,value in MART_ITEMS.items()});cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(mart_prices=prices);ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.mart_price.callback(cog,ctx,"ultraball",450)
         self.assertEqual(prices.value["ultra_ball"],450)
-        self.assertIn("Bot-wide Poké Mart price",ctx.send.await_args.args[0]);self.assertIn("from **300** to **450 credits**",ctx.send.await_args.args[0])
+        self.assertIn("Bot-wide Poke Mart price",ctx.send.await_args.args[0]);self.assertIn("from **300** to **450 credits**",ctx.send.await_args.args[0])
 
     async def test_pokedex_goals_award_once_at_collection_and_victory_milestones(self):
         current=battle();current.state="won"
@@ -824,7 +824,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await Pokemon.trade.callback(cog,ctx,member,1,1);record=trades.value["1"]
         self.assertEqual((record["offered_id"],record["requested_id"],record["message_id"]),("offered","requested",99));self.assertIsInstance(ctx.send.await_args.kwargs["view"],TradeView)
         edited=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=edited));cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel)
-        await cog.expire_trades(datetime.fromisoformat(record["expires_at"])+timedelta(seconds=1));self.assertEqual(trades.value["1"]["state"],"expired");edited.edit.assert_awaited_once_with(content="This Pokémon trade offer expired.",view=None)
+        await cog.expire_trades(datetime.fromisoformat(record["expires_at"])+timedelta(seconds=1));self.assertEqual(trades.value["1"]["state"],"expired");edited.edit.assert_awaited_once_with(content="This Pokemon trade offer expired.",view=None)
 
     async def test_trade_delivery_failure_releases_reservations(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
@@ -844,7 +844,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_player_deletion_cancels_pending_trades(self):
         record={"state":"offered","offerer_id":10,"recipient_id":20,"channel_id":2,"message_id":99};trades=StoredValue({"1":record});section=StoredSection({"collection":[]});encounters=StoredValue({});edited=SimpleNamespace(edit=AsyncMock());channel=SimpleNamespace(fetch_message=AsyncMock(return_value=edited));cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel);cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:section,encounters=encounters)
-        await cog.reset_player_data(10);self.assertEqual(trades.value["1"]["state"],"cancelled_deleted_user");self.assertEqual(section.value,{});edited.edit.assert_awaited_once_with(content="This Pokémon trade was cancelled because a trainer's data was deleted.",view=None)
+        await cog.reset_player_data(10);self.assertEqual(trades.value["1"]["state"],"cancelled_deleted_user");self.assertEqual(section.value,{});edited.edit.assert_awaited_once_with(content="This Pokemon trade was cancelled because a trainer's data was deleted.",view=None)
 
     async def test_player_deletion_terminally_cancels_unrecovered_settlement(self):
         settling={"state":"settling","offerer_id":10,"recipient_id":20,"offered_id":"a","requested_id":"b","offered_pokemon":{"instance_id":"a"},"requested_pokemon":{"instance_id":"b"}};trades=StoredValue({"2":settling});section=StoredSection({"collection":[{"instance_id":"a"}]});encounters=StoredValue({});cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.bot=SimpleNamespace(get_channel=lambda channel_id:None);cog.config=SimpleNamespace(trades=trades,user_from_id=lambda uid:section,encounters=encounters);cog.recover_trades=AsyncMock()
@@ -890,7 +890,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cooldown=StoredValue(1800);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(center_cooldown=cooldown);ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.center_cooldown.callback(cog,ctx,45)
         self.assertEqual(cooldown.value,2700)
-        self.assertIn("Bot-wide Pokémon Center cooldown",ctx.send.await_args.args[0]);self.assertIn("from **30m** to **45m**",ctx.send.await_args.args[0])
+        self.assertIn("Bot-wide Pokemon Center cooldown",ctx.send.await_args.args[0]);self.assertIn("from **30m** to **45m**",ctx.send.await_args.args[0])
 
     async def test_finished_battle_persists_hp_and_status(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
@@ -980,10 +980,10 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         current=battle();current.battle_kind="gym";current.gym_key="boulder"
         cog=Pokemon.__new__(Pokemon);cog.battles={1:current};cog.locks={}
         view=BattleView(cog,1)
-        self.assertEqual([item.label for item in view.children],["Fight","Pokémon","Run"])
+        self.assertEqual([item.label for item in view.children],["Fight","Pokemon","Run"])
         interaction=SimpleNamespace(user=SimpleNamespace(id=current.user_id),response=SimpleNamespace(send_message=AsyncMock()))
         await cog.throw_ball(interaction,1)
-        interaction.response.send_message.assert_awaited_once_with("Poké Balls cannot be used in a Gym battle.",ephemeral=True)
+        interaction.response.send_message.assert_awaited_once_with("Poke Balls cannot be used in a Gym battle.",ephemeral=True)
 
     async def test_server_settings_lists_channels_and_spawn_progress(self):
         conf={"enabled":True,"channels":[10,20],"center_channel":30,"max_active_encounters":4,"concurrency_owner_override":False,"threshold_min":8,"threshold_max":15,"threshold":12,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"active_encounter":None,"activity":0,"pace":"normal","battle_timeout":1800,"spawn_mode":"activity"}
@@ -1102,7 +1102,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         policy={"encounter_timeout":120,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"center_cooldown":1800,"minimum_threshold":8,"minimum_cooldown":120,"maximum_concurrency":3,"minimum_timer":30,"allowed_generations":[1],"rarity_profile":"friendly","allow_special_species":False,"pokedex_default_style":"retro","mart_prices":{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400}}
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(all=AsyncMock(return_value=policy));ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.global_status.callback(cog,ctx);text=ctx.send.await_args.args[0]
-        for expected in ("Pokémon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Encounter lifetime: bot-wide default **2m** · server range **1–15m**","Global free-Center cooldown: current **30m**","VIP benefits: guild **not set** · role **not set** · storage **240/480** + **6** party","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokédex style: **Retro**","Poké Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
+        for expected in ("Pokemon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Encounter lifetime: bot-wide default **2m** · server range **1–15m**","Global free-Center cooldown: current **30m**","VIP benefits: guild **not set** · role **not set** · storage **240/480** + **6** party","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokedex style: **Retro**","Poke Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
         self.assertNotIn("current server",text.casefold());self.assertNotIn("spawn channels",text.casefold())
 
     async def test_sub_hour_timer_uses_owner_command_group(self):
@@ -1282,16 +1282,16 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ids = {item.custom_id for item in view.children}
         self.assertEqual(len(ids), len(view.children))
         self.assertTrue(all(item.custom_id.startswith("pokemon:1:") for item in view.children))
-        self.assertEqual([item.label for item in view.children],["Fight","Pokémon","Bag","Run"])
+        self.assertEqual([item.label for item in view.children],["Fight","Pokemon","Bag","Run"])
         second=OwnedPokemon.create("backup",7,5,seed=2);current.initialize_party([current.player,second]);current.player_hp=0;current.party_hp[current.player.instance_id]=0
         forced=BattleView(cog,1);controls={item.label:item for item in forced.children}
-        self.assertTrue(controls["Fight"].disabled);self.assertFalse(controls["Pokémon"].disabled)
+        self.assertTrue(controls["Fight"].disabled);self.assertFalse(controls["Pokemon"].disabled)
         fight=FightView(cog,1);party=PartyView(cog,1);bag=BagView(cog,1,{"balls":10,"great_ball":3,"ultra_ball":0,"potion":5,"revive":2})
         self.assertTrue(any("PP" in item.label for item in fight.children))
         self.assertTrue(any(item.label=="Back" for item in fight.children))
         self.assertTrue(any(item.label=="Back" for item in party.children))
         self.assertTrue(all(f"Lv. {pokemon.level}" in item.label for pokemon,item in zip(current.party,[child for child in party.children if child.label!="Back"])))
-        self.assertEqual([item.label for item in bag.children],["Poké Ball x10","Great Ball x3","Ultra Ball x0","Potion x5","Revive x2","Back"])
+        self.assertEqual([item.label for item in bag.children],["Poke Ball x10","Great Ball x3","Ultra Ball x0","Potion x5","Revive x2","Back"])
         self.assertTrue(next(item for item in bag.children if item.label=="Ultra Ball x0").disabled)
         allowed = SimpleNamespace(
             user=SimpleNamespace(id=current.user_id),

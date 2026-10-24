@@ -241,9 +241,9 @@ class Battle:
             raise BattleError("That party slot is unavailable.")
         candidate=self.party[index]
         if candidate.instance_id==self.player.instance_id:
-            raise BattleError("That Pokémon is already active.")
+            raise BattleError("That Pokemon is already active.")
         if self.party_hp.get(candidate.instance_id,0)<=0:
-            raise BattleError("That Pokémon has fainted.")
+            raise BattleError("That Pokemon has fainted.")
         self.party_hp[self.player.instance_id]=self.player_hp
         self.party_status[self.player.instance_id]=self.player_status
         self.party_status_turns[self.player.instance_id]=self.player_status_turns
@@ -264,7 +264,7 @@ class Battle:
         self.party_status[self.player.instance_id] = self.player_status
         self.party_status_turns[self.player.instance_id] = self.player_status_turns
         if not self.party:
-            raise BattleError("No party Pokémon are available.")
+            raise BattleError("No party Pokemon are available.")
         start = next(
             (index for index,item in enumerate(self.party) if item.instance_id==self.player.instance_id),
             0,
@@ -274,7 +274,7 @@ class Battle:
             if self.party_hp.get(candidate.instance_id, 0) > 0:
                 self.switch_to((start + offset) % len(self.party))
                 return
-        raise BattleError("No conscious party Pokémon remain.")
+        raise BattleError("No conscious party Pokemon remain.")
 
     def rng(self):
         self.rolls += 1
@@ -334,7 +334,7 @@ class Battle:
         if self.state != "active":
             raise BattleError("This encounter is over.")
         if self.needs_switch:
-            raise BattleError("Switch to another party Pokémon first.")
+            raise BattleError("Switch to another party Pokemon first.")
         self.result=None
         move_keys = self.player.moves or SPECIES[self.player.species_id].moves
         if not 0 <= index < len(move_keys):
@@ -597,10 +597,10 @@ class Battle:
         elif self.player_hp == 0:
             self.party_hp[self.player.instance_id]=0
             if self.needs_switch:
-                self.result = f"{SPECIES[self.player.species_id].name} fainted. Switch Pokémon."
+                self.result = f"{SPECIES[self.player.species_id].name} fainted. Switch Pokemon."
             else:
                 self.state = "lost"
-                self.result = "Gym challenge lost! Your party has no conscious Pokémon. Go to a Pokémon Center to heal." if self.battle_kind=="gym" else f"{SPECIES[self.wild_species_id].name} escaped! Your party has no conscious Pokémon. Go to a Pokémon Center to heal."
+                self.result = "Gym challenge lost! Your party has no conscious Pokemon. Go to a Pokemon Center to heal." if self.battle_kind=="gym" else f"{SPECIES[self.wild_species_id].name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
 
     def _damage(self, attack, target_id, level, move, rng, critical=False, target_hp=None, attacker_types=(), defense=None):
         if move.effect.startswith("fixed-"):return int(move.effect.split("-",1)[1])
@@ -634,8 +634,8 @@ class Battle:
 
     def throw_ball(self,ball_key="poke_ball"):
         if self.state!="active":raise BattleError("This encounter is over.")
-        if self.needs_switch:raise BattleError("Switch to another party Pokémon first.")
-        if ball_key not in BALLS:raise BattleError("That Poké Ball is unavailable.")
+        if self.needs_switch:raise BattleError("Switch to another party Pokemon first.")
+        if ball_key not in BALLS:raise BattleError("That Poke Ball is unavailable.")
         ball=BALLS[ball_key];result=attempt_catch(SPECIES[self.wild_species_id],self.wild_max_hp,self.wild_hp,self.wild_status,ball_key,self.rules(),self.rng())
         self.last_ball=ball_key;self.catch_shakes=result.shakes
         if result.caught:
@@ -656,7 +656,7 @@ class Battle:
 
     def caught(self, instance_id=None):
         if self.state != "caught":
-            raise BattleError("The Pokémon was not caught.")
+            raise BattleError("The Pokemon was not caught.")
         identity = instance_id or uuid.uuid4().hex
         pokemon=OwnedPokemon.create(
             identity,self.wild_species_id,self.wild_level,seed=self.seed+991,

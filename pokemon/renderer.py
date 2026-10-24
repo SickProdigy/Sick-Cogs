@@ -1,4 +1,4 @@
-"""Bounded Pokémon encounter and retro battle rendering."""
+"""Bounded Pokemon encounter and retro battle rendering."""
 
 import asyncio
 import io
@@ -180,12 +180,12 @@ class BattleRenderer:
 
     async def mart_card(self,items,balance,currency,scope):
         try:return await self._render(self._mart_card_sync,items,balance,currency,scope)
-        except (OSError,ValueError) as exc:raise RenderError("Poké Mart card rendering failed.") from exc
+        except (OSError,ValueError) as exc:raise RenderError("Poke Mart card rendering failed.") from exc
 
     async def pokedex_registration(self,pokemon,trainer_name):
         data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
         try:return await self._render(self._pokedex_registration_sync,pokemon,data,trainer_name)
-        except (OSError,ValueError) as exc:raise RenderError("Pokédex registration rendering failed.") from exc
+        except (OSError,ValueError) as exc:raise RenderError("Pokedex registration rendering failed.") from exc
 
     @staticmethod
     def trainer_party(conf):
@@ -215,7 +215,7 @@ class BattleRenderer:
     async def pokemon_center(self,party,trainer_name,complete=False):
         party=list(party)[:6];data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in party))
         try:return await self._render(self._pokemon_center_sync,party,data,trainer_name,complete)
-        except (OSError,ValueError) as exc:raise RenderError("Pokémon Center rendering failed.") from exc
+        except (OSError,ValueError) as exc:raise RenderError("Pokemon Center rendering failed.") from exc
 
     async def progression(self,pokemon,evolved_from=None,move_key=None,pending=False):
         current=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)

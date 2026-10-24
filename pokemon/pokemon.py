@@ -24,7 +24,7 @@ CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"encounter_owner_override":False,"battle_timeout":900,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","spawn_profile":"balanced","timer_minutes":30,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":2,"concurrency_owner_override":False,"timer_owner_override":False,"notification_mode":"silent","notification_role_id":None,"quiet_timezone":None,"quiet_start":None,"quiet_end":None}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{},"menu_style":"retro","vip_reward_month":None}
 MART_ITEMS={
-    "poke_ball":("Poké Ball","balls",50),
+    "poke_ball":("Poke Ball","balls",50),
     "great_ball":("Great Ball","great_ball",150),
     "ultra_ball":("Ultra Ball","ultra_ball",300),
     "potion":("Potion","potion",75),
@@ -73,8 +73,8 @@ ENCOUNTER_REWARDS={10:{"balls":3},25:{"balls":5},50:{"great_ball":3},100:{"great
 TYPE_REWARDS={3:{"balls":2},5:{"great_ball":1},10:{"ultra_ball":1}}
 DAILY_RESEARCH_TASKS=(
     ("encounters",3,{"balls":2},"Complete 3 encounters"),
-    ("victories",2,{"potion":2},"Defeat 2 Pokémon"),
-    ("catches",1,{"great_ball":1},"Catch 1 Pokémon"),
+    ("victories",2,{"potion":2},"Defeat 2 Pokemon"),
+    ("catches",1,{"great_ball":1},"Catch 1 Pokemon"),
 )
 RARITY_PROFILES={
     "friendly":{"common":100,"uncommon":65,"rare":35,"very_rare":15},
@@ -237,7 +237,7 @@ def achievement_totals(conf):
 def grant_supply_items(conf,reward):
     items=conf.setdefault("items",{});parts=[]
     for item,amount in reward.items():
-        if item=="balls":conf["balls"]=int(conf.get("balls",0))+amount;label="Poké Balls"
+        if item=="balls":conf["balls"]=int(conf.get("balls",0))+amount;label="Poke Balls"
         else:items[item]=int(items.get(item,0))+amount;label=item.replace("_"," ").title()+("s" if amount!=1 else "")
         parts.append(f"{amount} {label}")
     conf["items"]=items
@@ -248,7 +248,7 @@ def vip_pack_values(configured=None):
     return {key:max(0,int(configured.get(key,GLOBAL["vip_monthly_pack"][key]))) for key in GLOBAL["vip_monthly_pack"]}
 
 def reward_summary(reward):
-    labels={"balls":"Poké Balls","great_ball":"Great Balls","ultra_ball":"Ultra Balls","potion":"Potions","revive":"Revives"}
+    labels={"balls":"Poke Balls","great_ball":"Great Balls","ultra_ball":"Ultra Balls","potion":"Potions","revive":"Revives"}
     return ", ".join(f"{amount} {labels.get(item,item.replace(chr(95),chr(32)).title())}" for item,amount in reward.items())
 
 def spawn_weight(species,profile="friendly"):
@@ -314,7 +314,7 @@ def repair_underleveled_evolution_moves(raw):
     return pokemon.raw()
 
 class Pokemon(commands.Cog):
-    """Catch globally owned Pokémon in opt-in guild channels."""
+    """Catch globally owned Pokemon in opt-in guild channels."""
     __version__="1.1.7";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
@@ -322,7 +322,7 @@ class Pokemon(commands.Cog):
         self.battles={};self.locks={};self.activity={};self.recent_users={};self.recent_trainers={};self.recent_content={};self.vip_cache={};self.catalog=PokemonCatalog(cog_data_path(self)/"catalog.json",Path(__file__).with_name("gen1.json"));self.renderer=BattleRenderer(cog_data_path(self)/"sprites");self.cleanup_loop.start()
     async def cog_load(self):
         try:self.catalog.load()
-        except CatalogError:log.exception("Pokémon catalog cache could not be loaded")
+        except CatalogError:log.exception("Pokemon catalog cache could not be loaded")
         await self._migrate()
         await self.recover_trades()
         for key,raw in (await self.config.encounters()).items():
@@ -452,7 +452,7 @@ class Pokemon(commands.Cog):
                 channel=random.SystemRandom().choice(channels)
                 try:await self.spawn(channel)
                 except (discord.Forbidden,discord.HTTPException):
-                    log.exception("Timed Pokémon encounter could not be posted")
+                    log.exception("Timed Pokemon encounter could not be posted")
                     await section.next_spawn_at.set(jittered_spawn_due(now,minutes).isoformat())
 
     @cleanup_loop.before_loop
@@ -595,7 +595,7 @@ class Pokemon(commands.Cog):
         async with self.lock(("user",ctx.author.id)):
             section=self.config.user(ctx.author);conf=await section.all();awarded=self.apply_vip_monthly(conf,True,vip_pack_values(policy.get("vip_monthly_pack")))
             if awarded:await section.set(conf)
-        if awarded:await ctx.send("Your monthly SickGaming VIP Pokémon supplies have arrived: "+reward_summary(vip_pack_values(policy.get("vip_monthly_pack")))+".")
+        if awarded:await ctx.send("Your monthly SickGaming VIP Pokemon supplies have arrived: "+reward_summary(vip_pack_values(policy.get("vip_monthly_pack")))+".")
     @staticmethod
     def gift_collections_after(offerer,recipient,offered_raw):
         identities={raw["instance_id"] for raw in offered_raw};updated_offer=dict(offerer);updated_recipient=dict(recipient)
@@ -633,7 +633,7 @@ class Pokemon(commands.Cog):
         for key,raw in list(trades.items()):
             if raw.get("state")!="settling":continue
             try:await self.settle_trade(int(key),recovering=True)
-            except Exception:log.exception("Pokémon trade recovery remains pending",extra={"trade_id":key})
+            except Exception:log.exception("Pokemon trade recovery remains pending",extra={"trade_id":key})
 
     async def settle_trade(self,trade_id,recovering=False):
         async with self.lock("trades"):
@@ -688,7 +688,7 @@ class Pokemon(commands.Cog):
                 except (KeyError,TypeError,ValueError):due=now
                 if due<=now:raw["state"]="expired";expired.append(dict(raw))
             if expired:await self.config.trades.set(trades)
-        for raw in expired:await self.close_trade_message(raw,"This Pokémon trade offer expired.")
+        for raw in expired:await self.close_trade_message(raw,"This Pokemon trade offer expired.")
 
     async def guild_encounters(self,guild_id,conf=None):
         try:return active_guild_encounters(await self.config.encounters(),guild_id)
@@ -764,7 +764,7 @@ class Pokemon(commands.Cog):
         conf=await self.config.guild(channel.guild).all();policy=await self.config.all()
         generations=effective_generations(conf["generations"],policy["allowed_generations"])
         level=await self.spawn_level(channel.guild.id);pool=available_species(generations,policy["allow_special_species"],level)
-        if not pool:raise RuntimeError("No Pokémon are available under the bot-wide encounter policy.")
+        if not pool:raise RuntimeError("No Pokemon are available under the bot-wide encounter policy.")
         rng=random.SystemRandom()
         chosen=rng.choices(pool,weights=[spawn_weight(item,policy["rarity_profile"]) for item in pool],k=1)[0]
         sid=chosen.id;gender=encounter_gender(chosen,rng);shiny=True if force_shiny else encounter_shiny(rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
@@ -801,7 +801,7 @@ class Pokemon(commands.Cog):
                 await i.response.send_message("Your active party needs repair.",ephemeral=True);return
             owned=OwnedPokemon.from_raw(owned_raw)
             if owned.pending_moves:
-                await i.response.send_message("Your active Pokémon has an unfinished move choice. Use `pokemon moves` first.",ephemeral=True);return
+                await i.response.send_message("Your active Pokemon has an unfinished move choice. Use `pokemon moves` first.",ephemeral=True);return
             if encounter_needs_level_migration(raw):
                 raw["level"]=scaled_wild_level(owned.level,random.SystemRandom().randrange(-2,3))
                 raw["gender"]=encounter_gender(SPECIES[int(raw["species_id"])],random.SystemRandom())
@@ -812,7 +812,7 @@ class Pokemon(commands.Cog):
             collection={item["instance_id"]:item for item in user["collection"]}
             party=[OwnedPokemon.from_raw(collection[identity]) for identity in user["party"] if identity in collection]
             if not any((item.current_hp if item.current_hp is not None else pokemon_max_hp(item))>0 for item in party):
-                await i.response.send_message("Your party has fainted. Visit a Pokémon Center or use a Revive.",ephemeral=True);return
+                await i.response.send_message("Your party has fainted. Visit a Pokemon Center or use a Revive.",ephemeral=True);return
             wild=SPECIES[raw["species_id"]];content_generation=generation_for(int(raw["species_id"]));catalog_version=CATALOG_VERSIONS.for_generation(content_generation,bundled=content_generation==1).key;battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31),wild_gender=raw.get("gender","unknown"),content_generation=content_generation,catalog_version=catalog_version,wild_shiny=bool(raw.get("shiny",False)),trainer_name=str(getattr(i.user,"display_name",getattr(i.user,"name","Trainer")))[:24]);battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
             battle_seconds=await self.config.guild_from_id(int(raw["guild_id"])).battle_timeout()
             raw["state"]="battle";raw["expires_at"]=(datetime.now(timezone.utc)+timedelta(seconds=battle_seconds)).isoformat();raw["battle"]=battle.raw();raw["message_sync_pending"]=True;raw.pop("message_sync_attempts",None);raw.pop("message_sync_retry_at",None);encounters[str(eid)]=raw;await self.config.encounters.set(encounters);self.battles[eid]=battle
@@ -871,12 +871,12 @@ class Pokemon(commands.Cog):
 
     async def rendered_pokedex_registration(self,pokemon,trainer_name):
         species=SPECIES[pokemon.species_id];trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer"
-        embed=discord.Embed(title=f"{species.name} was registered!",description=f"New Pokémon data was added to {trainer}'s Pokédex.",color=discord.Color.red())
+        embed=discord.Embed(title=f"{species.name} was registered!",description=f"New Pokemon data was added to {trainer}'s Pokedex.",color=discord.Color.red())
         try:
             image=await self.renderer.pokedex_registration(pokemon,trainer);embed.set_image(url="attachment://pokedex-registration.png")
             return embed,[discord.File(image,filename="pokedex-registration.png")]
         except RenderError:
-            log.exception("Pokédex registration rendering failed");return embed,[]
+            log.exception("Pokedex registration rendering failed");return embed,[]
 
     async def rendered_trainer_card(self,user,conf):
         style=conf.get("trainer_card_style","retro")
@@ -889,19 +889,19 @@ class Pokemon(commands.Cog):
             log.exception("Trainer card rendering failed");return embed,[]
 
     async def rendered_center(self,user,party,complete=False):
-        trainer=getattr(user,"display_name",getattr(user,"name","Trainer"));title="Your party is fully restored!" if complete else "Healing your Pokémon…"
-        description="Your Pokémon are back to perfect health." if complete else f"The restoration cycle takes about {CENTER_TREATMENT_SECONDS} seconds."
+        trainer=getattr(user,"display_name",getattr(user,"name","Trainer"));title="Your party is fully restored!" if complete else "Healing your Pokemon…"
+        description="Your Pokemon are back to perfect health." if complete else f"The restoration cycle takes about {CENTER_TREATMENT_SECONDS} seconds."
         embed=discord.Embed(title=title,description=description,color=discord.Color.green() if complete else discord.Color.gold())
         try:
             image=await self.renderer.pokemon_center(party,trainer,complete);embed.set_image(url="attachment://pokemon-center.png");return embed,[discord.File(image,filename="pokemon-center.png")]
         except RenderError:
-            log.exception("Pokémon Center rendering failed");return embed,[]
+            log.exception("Pokemon Center rendering failed");return embed,[]
 
     async def rendered_main_menu(self,user,conf):
         style=conf.get("menu_style","retro")
         if style not in {"retro","modern"}:style="retro"
         trainer=getattr(user,"display_name",getattr(user,"name","Trainer"))
-        embed=discord.Embed(title=f"{trainer}’s Pokémon Menu",description=f"**{style.title()} style** · Choose an option below.",color=discord.Color.green() if style=="retro" else discord.Color.blurple())
+        embed=discord.Embed(title=f"{trainer}’s Pokemon Menu",description=f"**{style.title()} style** · Choose an option below.",color=discord.Color.green() if style=="retro" else discord.Color.blurple())
         avatar_data=None
         avatar=getattr(user,"display_avatar",None)
         if avatar:
@@ -911,7 +911,7 @@ class Pokemon(commands.Cog):
             image=await self.renderer.main_menu(trainer,conf,style,avatar_data=avatar_data);embed.set_image(url="attachment://pokemon-menu.png")
             return embed,[discord.File(image,filename="pokemon-menu.png")]
         except RenderError:
-            log.exception("Pokémon main-menu rendering failed");return embed,[]
+            log.exception("Pokemon main-menu rendering failed");return embed,[]
 
     @staticmethod
     def accomplishments_embed(user,conf):
@@ -925,7 +925,7 @@ class Pokemon(commands.Cog):
         for pokemon_type,total in sorted(totals["types"].items(),key=lambda item:(-item[1],item[0])):
             next_goal=next(((target,reward) for target,reward in TYPE_REWARDS.items() if total<target),None)
             lines.append(f"**{pokemon_type.title()}** {total}/{next_goal[0]} · {reward_summary(next_goal[1])}" if next_goal else f"**{pokemon_type.title()}** complete")
-        embed.add_field(name="Type specialists",value="\n".join(lines) or "Catch Pokémon to begin type-specialist goals.",inline=False);embed.set_footer(text="Rewards are granted automatically when a battle settles.")
+        embed.add_field(name="Type specialists",value="\n".join(lines) or "Catch Pokemon to begin type-specialist goals.",inline=False);embed.set_footer(text="Rewards are granted automatically when a battle settles.")
         return embed
 
     @staticmethod
@@ -958,7 +958,7 @@ class Pokemon(commands.Cog):
             await interaction.response.send_message(embed=render_pokedex(session),view=view,ephemeral=True);view.message=await interaction.original_response();return
         if section=="bag":
             items=conf.get("items",{});counts=(int(conf.get("balls",0)),int(items.get("great_ball",0)),int(items.get("ultra_ball",0)),int(items.get("potion",0)),int(items.get("revive",0)))
-            items=conf.get("items",{});stones=(int(items.get("fire_stone",0)),int(items.get("water_stone",0)),int(items.get("thunder_stone",0)),int(items.get("leaf_stone",0)),int(items.get("moon_stone",0)));trainer=getattr(user,"display_name",getattr(user,"name","Trainer"));text=f"**{trainer}’s Poke Bag**\n**Poké Balls**\nPoké Ball: **{{}}** · Great Ball: **{{}}** · Ultra Ball: **{{}}**\n**Medicine**\nPotion: **{{}}** · Revive: **{{}}**".format(*counts)+"\n**Evolution Stones**\nFire: **{}** · Water: **{}** · Thunder: **{}** · Leaf: **{}** · Moon: **{}**".format(*stones);await interaction.response.send_message(text,ephemeral=True);return
+            items=conf.get("items",{});stones=(int(items.get("fire_stone",0)),int(items.get("water_stone",0)),int(items.get("thunder_stone",0)),int(items.get("leaf_stone",0)),int(items.get("moon_stone",0)));trainer=getattr(user,"display_name",getattr(user,"name","Trainer"));text=f"**{trainer}’s Poke Bag**\n**Poke Balls**\nPoke Ball: **{{}}** · Great Ball: **{{}}** · Ultra Ball: **{{}}**\n**Medicine**\nPotion: **{{}}** · Revive: **{{}}**".format(*counts)+"\n**Evolution Stones**\nFire: **{}** · Water: **{}** · Thunder: **{}** · Leaf: **{}** · Moon: **{}**".format(*stones);await interaction.response.send_message(text,ephemeral=True);return
         if section=="research":
             async with self.lock(("user",user.id)):
                 conf=await self.config.user(user).all();self.ensure_daily_research(conf);await self.config.user(user).set(conf)
@@ -972,7 +972,7 @@ class Pokemon(commands.Cog):
         if section=="trade":
             await interaction.response.send_message("Start an exact trade with `poke trade  <your collection number> <their collection number>`. The other trainer must confirm before anything moves.",ephemeral=True);return
         if section=="mart":
-            if interaction.guild is None:await interaction.response.send_message("The Poké Mart is available inside a server.",ephemeral=True);return
+            if interaction.guild is None:await interaction.response.send_message("The Poke Mart is available inside a server.",ephemeral=True);return
             embed,files,view=await self.rendered_mart(user,interaction.guild)
             await interaction.response.send_message(embed=embed,files=files,view=view,ephemeral=True);return
         await interaction.response.send_message("That menu option is unavailable.",ephemeral=True)
@@ -998,7 +998,7 @@ class Pokemon(commands.Cog):
         async with self.lock(("user",interaction.user.id)):
             conf=await self.config.user(interaction.user).all();raw=next((item for item in conf.get("collection",[]) if item.get("instance_id")==identity),None)
             if not raw:
-                await interaction.response.send_message("That Pokémon is no longer in your collection.",ephemeral=True);return
+                await interaction.response.send_message("That Pokemon is no longer in your collection.",ephemeral=True);return
             pokemon=OwnedPokemon.from_raw(raw)
             if new_move not in pokemon.pending_moves:
                 await interaction.response.send_message("That move choice is no longer pending.",ephemeral=True);return
@@ -1032,7 +1032,7 @@ class Pokemon(commands.Cog):
             else:title=f"{wild_name} escaped from {trainer}!"
             e=discord.Embed(title=title,description=b.result or b.last_action,color=discord.Color.gold())
             e.set_thumbnail(url=sprite(wild.id,shiny=b.wild_shiny))
-            if b.state=="caught":e.add_field(name="Caught Pokémon",value=f"{wild_name} · Lv. {b.wild_level}",inline=True)
+            if b.state=="caught":e.add_field(name="Caught Pokemon",value=f"{wild_name} · Lv. {b.wild_level}",inline=True)
             e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
             needed=experience_to_next(b.player.species_id,b.player.level)
             e.add_field(name="Experience",value="MAX" if not needed else f"{b.player.experience}/{needed} XP",inline=True)
@@ -1045,7 +1045,7 @@ class Pokemon(commands.Cog):
         e.add_field(name="Moves",value=" · ".join(f"{n+1}. {MOVES[k].name} ({b.player.move_pp.get(k,MOVES[k].pp)} PP)" for n,k in enumerate(b.player.moves)),inline=False)
         needed=experience_to_next(b.player.species_id,b.player.level)
         e.add_field(name="Experience",value="MAX" if not needed else f"{b.player.experience}/{needed} XP",inline=True)
-        e.set_footer(text="Defeat the Gym Leader to earn the badge; switch Pokémon or forfeit." if gym else "Defeat it for XP, catch it from Bag, switch Pokémon, or run.")
+        e.set_footer(text="Defeat the Gym Leader to earn the badge; switch Pokemon or forfeit." if gym else "Defeat it for XP, catch it from Bag, switch Pokemon, or run.")
         return e
     async def battle_action(self,i,eid,action):
         battle=self.battles.get(eid)
@@ -1227,13 +1227,13 @@ class Pokemon(commands.Cog):
             if not battle:
                 await i.response.send_message("This battle is unavailable.",ephemeral=True);return
             if battle.state!="active" or battle.needs_switch:
-                await i.response.send_message("Switch Pokémon first." if battle.needs_switch else "This encounter is over.",ephemeral=True);return
+                await i.response.send_message("Switch Pokemon first." if battle.needs_switch else "This encounter is over.",ephemeral=True);return
             if battle.battle_kind=="gym":
-                await i.response.send_message("Poké Balls cannot be used in a Gym battle.",ephemeral=True);return
+                await i.response.send_message("Poke Balls cannot be used in a Gym battle.",ephemeral=True);return
             policy=await self.config.all();eligible=await self.is_vip(i.user.id,policy);capacity=VIP_MAX_COLLECTION if eligible else MAX_COLLECTION
             conf=await self.config.user(i.user).all();self.apply_vip_monthly(conf,eligible,vip_pack_values(policy.get("vip_monthly_pack")));tx_key=f"{eid}:{battle.rolls}";tx=conf["transactions"].get(tx_key,{})
-            ball_names={"poke_ball":"Poké Balls","great_ball":"Great Balls","ultra_ball":"Ultra Balls"}
-            if ball_key not in ball_names:await i.response.send_message("That Poké Ball is unavailable.",ephemeral=True);return
+            ball_names={"poke_ball":"Poke Balls","great_ball":"Great Balls","ultra_ball":"Ultra Balls"}
+            if ball_key not in ball_names:await i.response.send_message("That Poke Ball is unavailable.",ephemeral=True);return
             if self.ball_inventory(conf,ball_key)<1 and not tx.get("ball_charged"):await i.response.send_message(f"You have no {ball_names[ball_key]}.",ephemeral=True);return
             if not tx.get("ball_charged"):
                 self.consume_ball(conf,ball_key);tx["ball_charged"]=True;tx["ball_key"]=ball_key;conf["transactions"][tx_key]=tx
@@ -1252,7 +1252,7 @@ class Pokemon(commands.Cog):
                 rewards=self.record_battle_result(conf,battle)
                 if rewards:battle.result=(battle.result or "")+" Reward: "+"; ".join(rewards)+"."
                 if stored and len(conf["party"])<6 and identity not in conf["party"]:conf["party"].append(identity)
-                if not stored:battle.result=(battle.result or "")+f" Collection full at {capacity}; the catch counted toward your records, but the Pokémon was not stored."
+                if not stored:battle.result=(battle.result or "")+f" Collection full at {capacity}; the catch counted toward your records, but the Pokemon was not stored."
                 tx["settled"]=True;tx["caught_id"]=identity if stored else None;conf["transactions"][tx_key]=tx
             if battle.state!="active" and not caught:
                 rewards=self.record_battle_result(conf,battle)
@@ -1285,14 +1285,14 @@ class Pokemon(commands.Cog):
         if await conf.active_encounter()==eid:await conf.active_encounter.set(None)
     @commands.group(name="pokemon",aliases=["pkmn","poke"],invoke_without_command=True)
     async def pokemon(self,ctx):
-        """Play the global Pokémon catching and battle game.
+        """Play the global Pokemon catching and battle game.
 
         New trainers can choose a first partner here. Server administration is kept separately under `[p]pokemonset`.
         """
         conf=await self.config.user(ctx.author).all()
         if not conf["starter_chosen"] and not conf["collection"]:
             setup_hint=f"{ctx.clean_prefix}pokemonset";embed,files=await self.rendered_starter_choice(ctx.author,setup_hint=setup_hint)
-            embed.add_field(name="How to begin",value="Choose a partner, find a wild encounter, battle it, then use a Poké Ball to catch it.",inline=False)
+            embed.add_field(name="How to begin",value="Choose a partner, find a wild encounter, battle it, then use a Poke Ball to catch it.",inline=False)
             await ctx.send(embed=embed,files=files,view=StarterView(self,ctx.author.id,setup_hint=setup_hint))
             return
         embed,files=await self.rendered_main_menu(ctx.author,conf)
@@ -1331,7 +1331,7 @@ class Pokemon(commands.Cog):
 
     async def rendered_starter(self,pokemon,trainer_name,encounter_id=None):
         species=SPECIES[pokemon.species_id];symbol={"female":"♀","male":"♂","genderless":"—"}.get(pokemon.gender,"?")
-        description="Professor Oak entrusted this Pokémon to you. Your journey begins now."
+        description="Professor Oak entrusted this Pokemon to you. Your journey begins now."
         if encounter_id is not None:description+=" Press **Encounter** again when you are ready to battle."
         embed=discord.Embed(title=f"{trainer_name} received {species.name}!",description=description,color=discord.Color.green())
         embed.add_field(name="Partner",value=f"{species.name} · {symbol} · Lv. {pokemon.level}",inline=False)
@@ -1352,7 +1352,7 @@ class Pokemon(commands.Cog):
 
     @pokemon.command(name="starter")
     async def starter(self,ctx,choice:str=None):
-        """Choose or view your first partner Pokémon."""
+        """Choose or view your first partner Pokemon."""
         choices={"bulbasaur":1,"charmander":4,"squirtle":7}
         if choice is None:
             embed,files=await self.rendered_starter_choice(ctx.author)
@@ -1385,7 +1385,7 @@ class Pokemon(commands.Cog):
             lines.append(f"{number}. {party}{marker}{raw.get('nickname') or species.name} · Lv. {raw['level']}")
         trainer=getattr(user,"display_name",getattr(user,"name",str(user)))
         embed=discord.Embed(title=f"{trainer}'s Collection · {page}/{pages}",description="\n".join(lines) or "Empty",color=discord.Color.gold())
-        embed.set_footer(text=f"{total}/{capacity} Pokémon" + (" · Select one below to manage your Pokémon" if manage else " · Use these numbers when proposing a trade"))
+        embed.set_footer(text=f"{total}/{capacity} Pokemon" + (" · Select one below to manage your Pokemon" if manage else " · Use these numbers when proposing a trade"))
         try:
             image=await self.renderer.collection_card(items,page,pages,total,trainer,[raw.get("party_slot") for raw in raw_items]);embed.set_image(url="attachment://collection.png")
             embed.description=None
@@ -1396,7 +1396,7 @@ class Pokemon(commands.Cog):
 
     @pokemon.group(name="collection",aliases=["box"],invoke_without_command=True)
     async def collection(self,ctx,page:int=1):
-        """Browse and manage Pokémon in your global collection."""
+        """Browse and manage Pokemon in your global collection."""
         conf=await self.config.user(ctx.author).all()
         if not conf["collection"]:await ctx.send("Choose a starter first.");return
         embed,files,page,pages,items=await self.rendered_collection(ctx.author,page)
@@ -1404,34 +1404,34 @@ class Pokemon(commands.Cog):
 
     @collection.command(name="release")
     async def collection_release(self,ctx,number:int):
-        """Permanently release one boxed Pokémon after confirmation."""
+        """Permanently release one boxed Pokemon after confirmation."""
         conf=await self.config.user(ctx.author).all();ordered=self.sorted_collection(conf)
         if not 1<=number<=len(ordered):await ctx.send("That collection number is unavailable. Check `pokemon collection`.");return
         raw=ordered[number-1];identity=raw["instance_id"];name=raw.get("nickname") or SPECIES[raw["species_id"]].name
-        if len(conf.get("collection",[]))<=1:await ctx.send("You must keep at least one Pokémon.");return
+        if len(conf.get("collection",[]))<=1:await ctx.send("You must keep at least one Pokemon.");return
         if identity in conf.get("party",[]):await ctx.send(f"Remove **{name}** from your party before releasing it.");return
         trades=await self.config.trades()
         if self.trade_reserved(trades,identity):await ctx.send(f"**{name}** is reserved in a pending trade or gift.");return
-        if self.trainer_in_active_battle(ctx.author.id):await ctx.send("Finish your active battle before releasing a Pokémon.");return
+        if self.trainer_in_active_battle(ctx.author.id):await ctx.send("Finish your active battle before releasing a Pokemon.");return
         await ctx.send(f"Release **{name} · Lv.{raw['level']}** permanently? This cannot be undone.",view=ReleasePokemonView(self,ctx.author.id,identity,name))
 
     async def begin_collection_release(self,interaction,identity,source_message=None):
         conf=await self.config.user(interaction.user).all();owned={raw.get("instance_id"):raw for raw in conf.get("collection",[])};raw=owned.get(identity)
-        if raw is None:await interaction.response.edit_message(content="That Pokémon is no longer available.",view=None);return
+        if raw is None:await interaction.response.edit_message(content="That Pokemon is no longer available.",view=None);return
         name=raw.get("nickname") or SPECIES[raw["species_id"]].name
-        if len(conf.get("collection",[]))<=1:await interaction.response.edit_message(content="You must keep at least one Pokémon.",view=None);return
+        if len(conf.get("collection",[]))<=1:await interaction.response.edit_message(content="You must keep at least one Pokemon.",view=None);return
         if identity in conf.get("party",[]):await interaction.response.edit_message(content=f"Remove **{name}** from your party before releasing it.",view=None);return
         if self.trade_reserved(await self.config.trades(),identity):await interaction.response.edit_message(content=f"**{name}** is reserved in a pending trade or gift.",view=None);return
-        if self.trainer_in_active_battle(interaction.user.id):await interaction.response.edit_message(content="Finish your active battle before releasing a Pokémon.",view=None);return
+        if self.trainer_in_active_battle(interaction.user.id):await interaction.response.edit_message(content="Finish your active battle before releasing a Pokemon.",view=None);return
         await interaction.response.edit_message(content=f"Release **{name} · Lv.{raw['level']}** permanently? This cannot be undone.",view=ReleasePokemonView(self,interaction.user.id,identity,name,source_message))
 
     async def release_collection_pokemon(self,interaction,identity,name,source_message=None):
         async with self.lock(("user",interaction.user.id)):
             conf=await self.config.user(interaction.user).all();owned={raw.get("instance_id"):raw for raw in conf.get("collection",[])}
-            if identity not in owned:await interaction.response.edit_message(content="That Pokémon is no longer available.",view=None);return
-            if len(conf.get("collection",[]))<=1 or identity in conf.get("party",[]):await interaction.response.edit_message(content="That Pokémon can no longer be released safely.",view=None);return
+            if identity not in owned:await interaction.response.edit_message(content="That Pokemon is no longer available.",view=None);return
+            if len(conf.get("collection",[]))<=1 or identity in conf.get("party",[]):await interaction.response.edit_message(content="That Pokemon can no longer be released safely.",view=None);return
             if self.trainer_in_active_battle(interaction.user.id):await interaction.response.send_message("Finish your active battle first.",ephemeral=True);return
-            if self.trade_reserved(await self.config.trades(),identity):await interaction.response.send_message("That Pokémon is reserved in a pending trade or gift.",ephemeral=True);return
+            if self.trade_reserved(await self.config.trades(),identity):await interaction.response.send_message("That Pokemon is reserved in a pending trade or gift.",ephemeral=True);return
             conf["collection"]=[raw for raw in conf["collection"] if raw.get("instance_id")!=identity];await self.config.user(interaction.user).set(conf)
         await interaction.response.edit_message(content=f"**{name}** was released. The collection slot is now free.",view=None)
         if source_message is not None:
@@ -1440,14 +1440,14 @@ class Pokemon(commands.Cog):
 
     async def collection_party_choice(self,interaction,identity):
         conf=await self.config.user(interaction.user).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};raw=owned.get(identity)
-        if not raw:await interaction.response.send_message("That Pokémon is no longer in your collection.",ephemeral=True);return
+        if not raw:await interaction.response.send_message("That Pokemon is no longer in your collection.",ephemeral=True);return
         name=raw.get("nickname") or SPECIES[raw["species_id"]].name
         await interaction.response.send_message(f"Manage **{name} · Lv.{raw['level']}**. Choose a party position or release it.",view=PartyPlacementView(self,interaction.user.id,identity,list(conf.get("party",[])),owned,getattr(interaction,"message",None)),ephemeral=True)
 
     async def place_collection_pokemon(self,interaction,identity,target=None,source_message=None):
         async with self.lock(("user",interaction.user.id)):
             conf=await self.config.user(interaction.user).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])}
-            if identity not in owned:await interaction.response.edit_message(content="That Pokémon is no longer in your collection.",view=None);return
+            if identity not in owned:await interaction.response.edit_message(content="That Pokemon is no longer in your collection.",view=None);return
             party=[value for value in conf.get("party",[]) if value in owned];name=owned[identity].get("nickname") or SPECIES[owned[identity]["species_id"]].name
             if target==identity:await interaction.response.edit_message(content=f"**{name}** already occupies that slot.",view=None);return
             source=party.index(identity) if identity in party else None
@@ -1475,14 +1475,14 @@ class Pokemon(commands.Cog):
     @staticmethod
     def trade_embed(record,final=False):
         if record.get("kind")=="gift":
-            title="Pokémon gift delivered!" if final else "Pokémon Gift Offer";symbols={"male":"♂","female":"♀","genderless":"—"};lines=[]
+            title="Pokemon gift delivered!" if final else "Pokemon Gift Offer";symbols={"male":"♂","female":"♀","genderless":"—"};lines=[]
             for item in record.get("offered_details",[]):lines.append(f"• **{'Shiny ' if item.get('shiny') else ''}{item['name']} · {symbols.get(item.get('gender'),'?')} · Lv.{item['level']}**")
-            description=f"**{record['offerer_name']}** is giving {len(lines)} Pokémon to **{record['recipient_name']}**:\n"+"\n".join(lines)
+            description=f"**{record['offerer_name']}** is giving {len(lines)} Pokemon to **{record['recipient_name']}**:\n"+"\n".join(lines)
             if not final:description+="\n\nOnly the receiving trainer can accept. Either trainer can cancel. This gift expires in 15 minutes."
             embed=discord.Embed(title=title,description=description,color=discord.Color.green() if final else discord.Color.gold())
             if final and record.get("evolutions"):embed.add_field(name="Trade Evolution",value="\n".join(evolution_lines(record["evolutions"])),inline=False)
             embed.set_footer(text=f"Gift #{record['trade_id']}");return embed
-        title="Trade completed!" if final else "Pokémon Trade Offer"
+        title="Trade completed!" if final else "Pokemon Trade Offer"
         symbols={"male":"♂","female":"♀","genderless":"—"};offered=("Shiny " if record.get("offered_shiny") else "")+record["offered_name"];requested=("Shiny " if record.get("requested_shiny") else "")+record["requested_name"]
         description=(f"**{record['offerer_name']}** offers **{offered} · {symbols.get(record.get('offered_gender'),'?')} · Lv.{record['offered_level']}**\n" f"for **{record['recipient_name']}’s {requested} · {symbols.get(record.get('requested_gender'),'?')} · Lv.{record['requested_level']}**")
         if not final:description+="\n\nOnly the receiving trainer can accept. Either trainer can cancel. This offer expires in 15 minutes."
@@ -1493,11 +1493,11 @@ class Pokemon(commands.Cog):
     @pokemon.group(name="trade",invoke_without_command=True)
     @commands.guild_only()
     async def trade(self,ctx,member:discord.Member=None,your_slot:int=None,their_slot:int=None):
-        """Offer an exact Pokémon-for-Pokémon trade."""
+        """Offer an exact Pokemon-for-Pokemon trade."""
         if member is None or your_slot is None or their_slot is None:
-            await ctx.send("Use `pokemon trade @trainer <your collection number> <their collection number>`. View another trainer’s numbered choices with `pokemon trade collection @trainer`. Both Pokémon are shown for confirmation.");return
+            await ctx.send("Use `pokemon trade @trainer <your collection number> <their collection number>`. View another trainer’s numbered choices with `pokemon trade collection @trainer`. Both Pokemon are shown for confirmation.");return
         if member.id==ctx.author.id:await ctx.send("Choose another trainer to trade with.");return
-        if member.bot:await ctx.send("Bots cannot own or trade Pokémon.");return
+        if member.bot:await ctx.send("Bots cannot own or trade Pokemon.");return
         first=min(ctx.author.id,member.id);second=max(ctx.author.id,member.id)
         async with self.lock("trades"),self.lock(("user",first)),self.lock(("user",second)):
             if self.trainer_in_active_battle(ctx.author.id) or self.trainer_in_active_battle(member.id):await ctx.send("Finish both trainers’ active battles before creating a trade.");return
@@ -1505,8 +1505,8 @@ class Pokemon(commands.Cog):
             if not 1<=your_slot<=len(offered_list):await ctx.send("Your collection number is unavailable. Check `pokemon collection`.");return
             if not 1<=their_slot<=len(requested_list):await ctx.send(f"{member.display_name}’s collection number is unavailable.");return
             offered=offered_list[your_slot-1];requested=requested_list[their_slot-1];trades=await self.config.trades()
-            if self.trade_reserved(trades,offered["instance_id"]):await ctx.send("Your selected Pokémon is already reserved in another trade.");return
-            if self.trade_reserved(trades,requested["instance_id"]):await ctx.send("Their selected Pokémon is already reserved in another trade.");return
+            if self.trade_reserved(trades,offered["instance_id"]):await ctx.send("Your selected Pokemon is already reserved in another trade.");return
+            if self.trade_reserved(trades,requested["instance_id"]):await ctx.send("Their selected Pokemon is already reserved in another trade.");return
             trade_id=int(await self.config.next_trade());await self.config.next_trade.set(trade_id+1);now=datetime.now(timezone.utc)
             record={"trade_id":trade_id,"state":"offered","offerer_id":ctx.author.id,"recipient_id":member.id,"offerer_name":ctx.author.display_name,"recipient_name":member.display_name,"offered_id":offered["instance_id"],"requested_id":requested["instance_id"],"offered_name":offered.get("nickname") or SPECIES[offered["species_id"]].name,"requested_name":requested.get("nickname") or SPECIES[requested["species_id"]].name,"offered_level":int(offered["level"]),"requested_level":int(requested["level"]),"offered_gender":offered.get("gender","unknown"),"requested_gender":requested.get("gender","unknown"),"offered_shiny":bool(offered.get("shiny",False)),"requested_shiny":bool(requested.get("shiny",False)),"created_at":now.isoformat(),"expires_at":(now+timedelta(seconds=TRADE_TIMEOUT_SECONDS)).isoformat(),"guild_id":ctx.guild.id,"channel_id":ctx.channel.id,"message_id":None}
             trades[str(trade_id)]=record;await self.config.trades.set(trades)
@@ -1523,18 +1523,18 @@ class Pokemon(commands.Cog):
 
     @trade.command(name="give",aliases=["gift"])
     async def trade_give(self,ctx,member:discord.Member,*slots:int):
-        """Offer one to three Pokémon as a confirmed gift."""
+        """Offer one to three Pokemon as a confirmed gift."""
         if member.id==ctx.author.id:await ctx.send("Choose another trainer.");return
-        if member.bot:await ctx.send("Bots cannot receive Pokémon.");return
+        if member.bot:await ctx.send("Bots cannot receive Pokemon.");return
         if not 1<=len(slots)<=3 or len(set(slots))!=len(slots):await ctx.send("Use `pokemon trade give @trainer <number> [number] [number]` with one to three different collection numbers.");return
         first=min(ctx.author.id,member.id);second=max(ctx.author.id,member.id)
         async with self.lock("trades"),self.lock(("user",first)),self.lock(("user",second)):
             if self.trainer_in_active_battle(ctx.author.id) or self.trainer_in_active_battle(member.id):await ctx.send("Finish both trainers’ active battles before creating a gift.");return
             offerer=await self.config.user(ctx.author).all();ordered=self.sorted_collection(offerer)
             if any(slot<1 or slot>len(ordered) for slot in slots):await ctx.send("One of those collection numbers is unavailable. Check `pokemon collection`.");return
-            if len(ordered)-len(slots)<1:await ctx.send("You must keep at least one Pokémon.");return
+            if len(ordered)-len(slots)<1:await ctx.send("You must keep at least one Pokemon.");return
             offered=[ordered[slot-1] for slot in slots];trades=await self.config.trades()
-            if any(self.trade_reserved(trades,raw["instance_id"]) for raw in offered):await ctx.send("One of those Pokémon is already reserved in another trade or gift.");return
+            if any(self.trade_reserved(trades,raw["instance_id"]) for raw in offered):await ctx.send("One of those Pokemon is already reserved in another trade or gift.");return
             trade_id=int(await self.config.next_trade());await self.config.next_trade.set(trade_id+1);now=datetime.now(timezone.utc);details=[{"name":raw.get("nickname") or SPECIES[raw["species_id"]].name,"level":int(raw["level"]),"gender":raw.get("gender","unknown"),"shiny":bool(raw.get("shiny",False))} for raw in offered]
             record={"trade_id":trade_id,"kind":"gift","state":"offered","offerer_id":ctx.author.id,"recipient_id":member.id,"offerer_name":ctx.author.display_name,"recipient_name":member.display_name,"offered_ids":[raw["instance_id"] for raw in offered],"offered_details":details,"created_at":now.isoformat(),"expires_at":(now+timedelta(seconds=TRADE_TIMEOUT_SECONDS)).isoformat(),"guild_id":ctx.guild.id,"channel_id":ctx.channel.id,"message_id":None};trades[str(trade_id)]=record;await self.config.trades.set(trades)
         view=TradeView(self,trade_id,ctx.author.id,member.id)
@@ -1550,9 +1550,9 @@ class Pokemon(commands.Cog):
 
     @trade.command(name="collection")
     async def trade_collection(self,ctx,member:discord.Member,page:int=1):
-        """View another trainer’s numbered Pokémon for a trade."""
+        """View another trainer’s numbered Pokemon for a trade."""
         conf=await self.config.user(member).all()
-        if not conf.get("collection"):await ctx.send(f"{member.display_name} has no Pokémon to trade.");return
+        if not conf.get("collection"):await ctx.send(f"{member.display_name} has no Pokemon to trade.");return
         embed,files,page,pages,items=await self.rendered_collection(member,page,manage=False)
         await ctx.send(embed=embed,files=files,view=TradeCollectionView(self,ctx.author.id,member,page,pages))
 
@@ -1570,7 +1570,7 @@ class Pokemon(commands.Cog):
         try:record=await self.settle_trade(trade_id)
         except ValueError as exc:await interaction.response.send_message(str(exc),ephemeral=True);return
         except Exception:
-            log.exception("Pokémon trade settlement remains pending recovery",extra={"trade_id":trade_id});await interaction.response.send_message("The trade is safely recorded and will finish during recovery. No Pokémon will be rerolled.",ephemeral=True);return
+            log.exception("Pokemon trade settlement remains pending recovery",extra={"trade_id":trade_id});await interaction.response.send_message("The trade is safely recorded and will finish during recovery. No Pokemon will be rerolled.",ephemeral=True);return
         if not record or record.get("state")!="completed":await interaction.response.edit_message(content="This trade is no longer available.",view=None);return
         await interaction.response.edit_message(content=None,embed=self.trade_embed(record,True),view=None)
         await self.send_trade_evolution_cards(interaction,record)
@@ -1598,7 +1598,7 @@ class Pokemon(commands.Cog):
 
     @pokemon.group(name="party",invoke_without_command=True)
     async def party(self,ctx):
-        """View the Pokémon in your active party."""
+        """View the Pokemon in your active party."""
         conf=await self.config.user(ctx.author).all();owned={p["instance_id"]:p for p in conf.get("collection",[])};party=[OwnedPokemon.from_raw(owned[identity]) for identity in conf.get("party",[]) if identity in owned]
         lines=[]
         for slot,item in enumerate(party,1):
@@ -1614,14 +1614,14 @@ class Pokemon(commands.Cog):
 
     @party.command(name="add")
     async def party_add(self,ctx,identifier:str,slot:int=None):
-        """Add a caught Pokémon to your active party."""
+        """Add a caught Pokemon to your active party."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all()
             ordered=self.sorted_collection(conf);matches=[]
             if identifier.isdigit() and 1<=int(identifier)<=len(ordered):matches=[ordered[int(identifier)-1]["instance_id"]]
             else:
                 wanted=identifier.casefold();matches=[raw["instance_id"] for raw in ordered if (raw.get("nickname") or SPECIES[raw["species_id"]].name).casefold()==wanted]
-            if len(matches)!=1:await ctx.send("Use a collection number or unique Pokémon name.");return
+            if len(matches)!=1:await ctx.send("Use a collection number or unique Pokemon name.");return
             identity=matches[0];party=[value for value in conf["party"] if value!=identity]
             if slot is None:party.append(identity)
             elif 1<=slot<=6:
@@ -1631,7 +1631,7 @@ class Pokemon(commands.Cog):
         await ctx.send("Party updated.")
     @party.command(name="remove")
     async def party_remove(self,ctx,slot:int):
-        """Remove a Pokémon from your active party."""
+        """Remove a Pokemon from your active party."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all()
             if not 1<=slot<=len(conf["party"]):await ctx.send("That party slot is empty.");return
@@ -1651,7 +1651,7 @@ class Pokemon(commands.Cog):
         """Resume an unfinished move-learning choice."""
         conf=await self.config.user(ctx.author).all()
         pokemon=next((OwnedPokemon.from_raw(raw) for raw in conf.get("collection",[]) if raw.get("pending_moves")),None)
-        if not pokemon:await ctx.send("None of your Pokémon are waiting to learn a move.");return
+        if not pokemon:await ctx.send("None of your Pokemon are waiting to learn a move.");return
         move=pokemon.pending_moves[0];embed,files=await self.rendered_progression(pokemon,move_key=move,pending=True)
         await ctx.send(embed=embed,files=files,view=MoveLearnView(self,ctx.author.id,pokemon,move))
 
@@ -1660,7 +1660,7 @@ class Pokemon(commands.Cog):
         """View your available medicine and items."""
         conf=await self.config.user(ctx.author).all();items=conf.get("items",{})
         trainer=getattr(ctx.author,"display_name",getattr(ctx.author,"name","Trainer"))
-        await ctx.send(f"**{trainer}’s Poke Bag**\n**Poké Balls**\nPoké Ball: **{int(conf.get('balls',0))}** · Great Ball: **{int(items.get('great_ball',0))}** · Ultra Ball: **{int(items.get('ultra_ball',0))}**\n**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**\n**Evolution Stones**\nFire: **{int(items.get('fire_stone',0))}** · Water: **{int(items.get('water_stone',0))}** · Thunder: **{int(items.get('thunder_stone',0))}** · Leaf: **{int(items.get('leaf_stone',0))}** · Moon: **{int(items.get('moon_stone',0))}**")
+        await ctx.send(f"**{trainer}’s Poke Bag**\n**Poke Balls**\nPoke Ball: **{int(conf.get('balls',0))}** · Great Ball: **{int(items.get('great_ball',0))}** · Ultra Ball: **{int(items.get('ultra_ball',0))}**\n**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**\n**Evolution Stones**\nFire: **{int(items.get('fire_stone',0))}** · Water: **{int(items.get('water_stone',0))}** · Thunder: **{int(items.get('thunder_stone',0))}** · Leaf: **{int(items.get('leaf_stone',0))}** · Moon: **{int(items.get('moon_stone',0))}**")
 
     @pokemon.command(name="achievements",aliases=["goals"])
     async def achievements(self,ctx):
@@ -1677,13 +1677,13 @@ class Pokemon(commands.Cog):
     async def rendered_mart(self,user,guild):
         prices=mart_prices(await self.config.mart_prices());currency=await bank.get_currency_name(guild);balance=await bank.get_balance(user);scope="global" if await bank.is_global() else "server-local"
         items=[(key,label,prices[key]) for key,(label,_,_) in MART_ITEMS.items()];lines=[f"**{label}** — {price:,} {currency}" for _,label,price in items]
-        embed=discord.Embed(title="Poké Mart",description="\n".join(lines)+f"\n\nBalance: **{balance:,} {currency}**",color=discord.Color.gold());embed.set_footer(text="Buy one with a button below, or use poke buy <item> [quantity].")
+        embed=discord.Embed(title="Poke Mart",description="\n".join(lines)+f"\n\nBalance: **{balance:,} {currency}**",color=discord.Color.gold());embed.set_footer(text="Buy one with a button below, or use poke buy <item> [quantity].")
         try:image=await self.renderer.mart_card(items,balance,currency,scope);embed.description=None;embed.set_image(url="attachment://mart.png");files=[discord.File(image,filename="mart.png")]
         except RenderError:files=[]
         return embed,files,MartView(self,user.id,[(key,label) for key,label,_ in items])
 
     async def purchase_mart_item(self,user,guild,key,quantity):
-        if key not in MART_ITEMS:return False,"Choose an item shown in the Poké Mart."
+        if key not in MART_ITEMS:return False,"Choose an item shown in the Poke Mart."
         if not 1<=quantity<=100:return False,"Choose a quantity from 1 to 100."
         prices=mart_prices(await self.config.mart_prices());cost=prices[key]*quantity;currency=await bank.get_currency_name(guild);label=MART_ITEMS[key][0]
         async with self.lock(("user",user.id)):
@@ -1695,8 +1695,8 @@ class Pokemon(commands.Cog):
             except Exception:
                 if charged:
                     try:await bank.deposit_credits(user,cost)
-                    except Exception:log.critical("Could not refund failed Poké Mart purchase for user %s",user.id,exc_info=True);return False,"The purchase failed and its refund also failed. Please contact the bot owner."
-                log.exception("Poké Mart purchase failed for user %s",user.id);return False,"The purchase failed. Your payment was returned."
+                    except Exception:log.critical("Could not refund failed Poke Mart purchase for user %s",user.id,exc_info=True);return False,"The purchase failed and its refund also failed. Please contact the bot owner."
+                log.exception("Poke Mart purchase failed for user %s",user.id);return False,"The purchase failed. Your payment was returned."
         balance=await bank.get_balance(user);plural="" if quantity==1 else "s";return True,f"Purchased **{quantity} {label}{plural}** for **{cost:,} {currency}**. Balance: **{balance:,} {currency}**."
 
     async def mart_button_purchase(self,interaction,key):
@@ -1707,7 +1707,7 @@ class Pokemon(commands.Cog):
     @pokemon.command(name="mart",aliases=["market"])
     @commands.guild_only()
     async def pokemon_mart(self,ctx):
-        """Browse the interactive Poké Mart."""
+        """Browse the interactive Poke Mart."""
         embed,files,view=await self.rendered_mart(ctx.author,ctx.guild);await ctx.send(embed=embed,files=files,view=view)
 
     @pokemon.command(name="buy")
@@ -1718,21 +1718,21 @@ class Pokemon(commands.Cog):
 
     @pokemon.group(name="use",invoke_without_command=True)
     async def pokemon_use(self,ctx):
-        """Use an item on one of your Pokémon."""
+        """Use an item on one of your Pokemon."""
         await ctx.send_help()
 
     @pokemon_use.command(name="stone")
     async def use_stone(self,ctx,stone:str,identifier:str):
-        """Use a Kanto evolution stone on an eligible Pokémon."""
+        """Use a Kanto evolution stone on an eligible Pokemon."""
         key=mart_item_key(stone)
         if key not in STONE_EVOLUTIONS:await ctx.send("Choose fire, water, thunder, leaf, or moon stone.");return
-        if self.trainer_in_active_battle(ctx.author.id):await ctx.send("Finish your active battle before evolving a Pokémon.");return
+        if self.trainer_in_active_battle(ctx.author.id):await ctx.send("Finish your active battle before evolving a Pokemon.");return
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique Pokémon name.");return
+            if not raw:await ctx.send("Choose a party slot or unique Pokemon name.");return
             target=STONE_EVOLUTIONS[key].get(int(raw.get("species_id",0)));name=raw.get("nickname") or SPECIES[raw["species_id"]].name
             if not target:await ctx.send(f"{name} cannot evolve with a {MART_ITEMS[key][0]}.");return
-            if self.trade_reserved(await self.config.trades(),raw["instance_id"]):await ctx.send("That Pokémon is reserved in a pending trade or gift.");return
+            if self.trade_reserved(await self.config.trades(),raw["instance_id"]):await ctx.send("That Pokemon is reserved in a pending trade or gift.");return
             items=conf.setdefault("items",{})
             if int(items.get(key,0))<1:await ctx.send(f"You have no {MART_ITEMS[key][0]}s.");return
             items[key]=int(items.get(key,0))-1;evolved,event=evolve_owned_raw(raw,target);raw.update(evolved);register_owned_species(conf,evolved);conf["items"]=items;await self.config.user(ctx.author).set(conf)
@@ -1740,14 +1740,14 @@ class Pokemon(commands.Cog):
 
     @pokemon_use.command(name="potion")
     async def use_potion(self,ctx,identifier:str):
-        """Use a Potion to restore a Pokémon’s HP."""
+        """Use a Potion to restore a Pokemon’s HP."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique Pokémon name.");return
+            if not raw:await ctx.send("Choose a party slot or unique Pokemon name.");return
             pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon)
             current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
-            if current<=0:await ctx.send("That Pokémon has fainted. Use a Revive first.");return
-            if current>=maximum:await ctx.send("That Pokémon already has full HP.");return
+            if current<=0:await ctx.send("That Pokemon has fainted. Use a Revive first.");return
+            if current>=maximum:await ctx.send("That Pokemon already has full HP.");return
             items=conf.get("items",{})
             if int(items.get("potion",0))<1:await ctx.send("You have no Potions.");return
             items["potion"]=int(items.get("potion",0))-1;conf["items"]=items
@@ -1757,13 +1757,13 @@ class Pokemon(commands.Cog):
 
     @pokemon_use.command(name="revive")
     async def use_revive(self,ctx,identifier:str):
-        """Use a Revive on a fainted Pokémon."""
+        """Use a Revive on a fainted Pokemon."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique Pokémon name.");return
+            if not raw:await ctx.send("Choose a party slot or unique Pokemon name.");return
             pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon)
             current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
-            if current>0:await ctx.send("That Pokémon has not fainted.");return
+            if current>0:await ctx.send("That Pokemon has not fainted.");return
             items=conf.get("items",{})
             if int(items.get("revive",0))<1:await ctx.send("You have no Revives.");return
             items["revive"]=int(items.get("revive",0))-1;conf["items"]=items
@@ -1774,10 +1774,10 @@ class Pokemon(commands.Cog):
     @pokemon.command(name="center")
     @commands.guild_only()
     async def pokemon_center(self,ctx):
-        """Heal your party at this server’s Pokémon Center."""
+        """Heal your party at this server’s Pokemon Center."""
         center=await self.config.guild(ctx.guild).center_channel()
-        if not center:await ctx.send("This server has not configured a Pokémon Center.");return
-        if ctx.channel.id!=int(center):await ctx.send(f"Visit <#{center}> to use this server’s Pokémon Center.");return
+        if not center:await ctx.send("This server has not configured a Pokemon Center.");return
+        if ctx.channel.id!=int(center):await ctx.send(f"Visit <#{center}> to use this server’s Pokemon Center.");return
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};before_party=[]
             for identity in conf.get("party",[])[:6]:
@@ -1790,7 +1790,7 @@ class Pokemon(commands.Cog):
                 try:remaining=max(60,int(await self.config.center_cooldown()))-(now-datetime.fromisoformat(last)).total_seconds()
                 except (TypeError,ValueError):remaining=0
                 if remaining>0:
-                    seconds=int(remaining)+1;minutes,seconds=divmod(seconds,60);wait=f"{minutes}m {seconds}s" if minutes else f"{seconds}s";await ctx.send(f"The Pokémon Center will be ready again in {wait}.");return
+                    seconds=int(remaining)+1;minutes,seconds=divmod(seconds,60);wait=f"{minutes}m {seconds}s" if minutes else f"{seconds}s";await ctx.send(f"The Pokemon Center will be ready again in {wait}.");return
             party=[]
             for pokemon in before_party:
                 raw=owned[pokemon.instance_id];healed=OwnedPokemon.from_raw(pokemon.raw());healed.current_hp=pokemon_max_hp(healed);healed.status="";healed.status_turns=0;healed.move_pp={key:MOVES[key].pp for key in healed.moves};raw.update(healed.raw());party.append(healed)
@@ -1809,12 +1809,12 @@ class Pokemon(commands.Cog):
 
     async def set_pokedex_style(self,user,style):
         if style not in POKEDEX_STYLES:
-            raise ValueError("Unknown Pokédex style")
+            raise ValueError("Unknown Pokedex style")
         await self.config.user(user).pokedex_style.set(style)
 
     @pokemon.command(name="pokedex",aliases=["dex"])
     async def pokedex(self,ctx,page:int=1):
-        """Browse the Pokémon you have seen and caught."""
+        """Browse the Pokemon you have seen and caught."""
         conf=await self.config.user(ctx.author).all()
         session=PokedexSession(
             user_id=ctx.author.id,
@@ -1829,24 +1829,24 @@ class Pokemon(commands.Cog):
 
     @pokemon.command(name="pokedexstyle",aliases=["dexstyle"])
     async def pokedex_style(self,ctx,style:str=None):
-        """Choose your Pokédex display style, or follow the bot default."""
+        """Choose your Pokedex display style, or follow the bot default."""
         preference=await self.config.user(ctx.author).pokedex_style()
         active=await self.selected_pokedex_style(ctx.author)
         if style is None:
             choices=", ".join(["default",*POKEDEX_STYLES])
-            await ctx.send(f"Pokédex style: **{preference}** (currently **{active}**). Choices: {choices}.")
+            await ctx.send(f"Pokedex style: **{preference}** (currently **{active}**). Choices: {choices}.")
             return
         style=style.casefold()
         if style=="default":
             await self.config.user(ctx.author).pokedex_style.set("default")
             active=await self.selected_pokedex_style(ctx.author)
-            await ctx.send(f"Pokédex style now follows the bot default (**{active}**).")
+            await ctx.send(f"Pokedex style now follows the bot default (**{active}**).")
             return
         if style not in POKEDEX_STYLES:
             await ctx.send("Unknown style. Choose: "+", ".join(POKEDEX_STYLES)+".")
             return
         await self.set_pokedex_style(ctx.author,style)
-        await ctx.send(f"Pokédex style set to **{POKEDEX_STYLES[style].label}**.")
+        await ctx.send(f"Pokedex style set to **{POKEDEX_STYLES[style].label}**.")
 
     @pokemon.group(name="gym",invoke_without_command=True)
     async def gym(self,ctx):
@@ -1893,7 +1893,7 @@ class Pokemon(commands.Cog):
             if not party:
                 await send("Your active party needs repair.");return
             if not any((item.current_hp if item.current_hp is not None else pokemon_max_hp(item))>0 for item in party):
-                await send("Your party has fainted. Visit a Pokémon Center or use a Revive.");return
+                await send("Your party has fainted. Visit a Pokemon Center or use a Revive.");return
             async with self.lock("encounters"):
                 eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
             lead=party[0];first_species,first_level=gym.team[0]
@@ -1928,12 +1928,12 @@ class Pokemon(commands.Cog):
 
     @pokemon.command(name="menustyle")
     async def menu_style(self,ctx,style:str=None):
-        """Choose the Retro or Modern Pokémon main-menu style."""
+        """Choose the Retro or Modern Pokemon main-menu style."""
         current=await self.config.user(ctx.author).menu_style()
-        if style is None:await ctx.send(f"Pokémon menu style: **{current}**. Choices: retro, modern.");return
+        if style is None:await ctx.send(f"Pokemon menu style: **{current}**. Choices: retro, modern.");return
         style=style.casefold()
         if style not in {"retro","modern"}:await ctx.send("Unknown style. Choose: retro or modern.");return
-        await self.config.user(ctx.author).menu_style.set(style);await ctx.send(f"Pokémon menu style set to **{style}**.")
+        await self.config.user(ctx.author).menu_style.set(style);await ctx.send(f"Pokemon menu style set to **{style}**.")
 
     @pokemon.command(name="profilestyle",aliases=["cardstyle"])
     async def profile_style(self,ctx,style:str=None):
@@ -1950,14 +1950,14 @@ class Pokemon(commands.Cog):
     @commands.guild_only()
     @commands.is_owner()
     async def pokemon_owner_set(self,ctx):
-        """Configure bot-wide Pokémon policy and owner overrides."""
+        """Configure bot-wide Pokemon policy and owner overrides."""
         await ctx.send_help()
 
     @commands.group(name="pokemonset",aliases=["pokeset","pkmnset"],invoke_without_command=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def pokemon_set(self,ctx):
-        """Configure Pokémon without cluttering player commands.
+        """Configure Pokemon without cluttering player commands.
 
         Server administrators control channels and slower local pacing. Bot-owner-only subcommands control global fairness and availability.
         """
@@ -1982,22 +1982,22 @@ class Pokemon(commands.Cog):
         action="removed from" if removed else "not present in";await section.channels.set(channels);await ctx.send(f"This server: {channel.mention} was {action} the spawn-channel list. Configured channels: **{previous} → {len(channels)}**.")
     @pokemon_set.command(name="center")
     async def set_center(self,ctx,channel:discord.TextChannel):
-        """Designate the server Pokémon Center."""
+        """Designate the server Pokemon Center."""
         section=self.config.guild(ctx.guild);previous=await section.center_channel();old=f"<#{previous}>" if previous else "not set";await section.center_channel.set(channel.id)
-        await ctx.send(f"This server: Pokémon Center changed from **{old}** to {channel.mention}.")
+        await ctx.send(f"This server: Pokemon Center changed from **{old}** to {channel.mention}.")
 
     @pokemon_set.command(name="removecenter")
     async def remove_center(self,ctx):
-        """Remove the server Pokémon Center."""
+        """Remove the server Pokemon Center."""
         section=self.config.guild(ctx.guild);previous=await section.center_channel();old=f"<#{previous}>" if previous else "not set";await section.center_channel.set(None)
-        await ctx.send(f"This server: Pokémon Center changed from **{old}** to **not set**.")
+        await ctx.send(f"This server: Pokemon Center changed from **{old}** to **not set**.")
 
     @pokemon_owner_set.command(name="centercooldown")
     async def center_cooldown(self,ctx,minutes:int):
-        """Set the bot-wide free Pokémon Center cooldown."""
+        """Set the bot-wide free Pokemon Center cooldown."""
         if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes.");return
         previous=max(60,int(await self.config.center_cooldown()))//60;await self.config.center_cooldown.set(minutes*60)
-        await ctx.send(f"Bot-wide Pokémon Center cooldown changed from **{previous}m** to **{minutes}m** per user. This affects every server.")
+        await ctx.send(f"Bot-wide Pokemon Center cooldown changed from **{previous}m** to **{minutes}m** per user. This affects every server.")
 
     @pokemon_set.command(name="status",aliases=["settings"])
     async def spawn_status(self,ctx):
@@ -2026,7 +2026,7 @@ class Pokemon(commands.Cog):
             quiet_state="active now" if quiet_hours_active(conf) else "inactive now";quiet_text=f"{format_quiet_clock(conf['quiet_start'])}–{format_quiet_clock(conf['quiet_end'])} {conf['quiet_timezone']} ({quiet_state})"
         else:quiet_text="disabled"
         await ctx.send(
-            f"**Pokémon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}** · Pace: **{selected_pace(conf)}**\nSpawn channels: {channels}\nPokémon Center: {center} · Free-heal cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m**\n"
+            f"**Pokemon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}** · Pace: **{selected_pace(conf)}**\nSpawn channels: {channels}\nPokemon Center: {center} · Free-heal cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m**\n"
             f"{progress}\nConcurrency limit: **{slot_limit}** ({concurrency_source}) · Active encounters: **{len(active)}/{slot_limit}** · Next spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** ({encounter_source}) · Battle lifetime: **{battle_minutes}m**\n"
             f"Notifications: **{notification_mode}** · Alert role: {notification_role} · Quiet hours: **{quiet_text}**\n"
             f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nExpired unattended cards: **{expired_cards}**\nCatalog species: **{len(SPECIES)}**"
@@ -2074,7 +2074,7 @@ class Pokemon(commands.Cog):
         section=self.config.guild(ctx.guild);conf=await section.all()
         if timezone_name.casefold() in {"off","clear","none","reset"}:
             previous="disabled" if not conf.get("quiet_timezone") else f"{format_quiet_clock(conf['quiet_start'])}–{format_quiet_clock(conf['quiet_end'])} {conf['quiet_timezone']}"
-            conf.update({"quiet_timezone":None,"quiet_start":None,"quiet_end":None});await section.set(conf);await ctx.send(f"This server: Pokémon quiet hours changed from **{previous}** to **disabled**.");return
+            conf.update({"quiet_timezone":None,"quiet_start":None,"quiet_end":None});await section.set(conf);await ctx.send(f"This server: Pokemon quiet hours changed from **{previous}** to **disabled**.");return
         if start is None or end is None:await ctx.send("Use `pokemonset quiethours <timezone> <HH:MM> <HH:MM>`, or `off`.");return
         try:ZoneInfo(timezone_name);start_minute=parse_quiet_clock(start);end_minute=parse_quiet_clock(end)
         except ZoneInfoNotFoundError:await ctx.send("That IANA timezone was not found. Example: `America/New_York`.");return
@@ -2082,7 +2082,7 @@ class Pokemon(commands.Cog):
         if start_minute==end_minute:await ctx.send("Quiet-hour start and end times must differ.");return
         previous="disabled" if not conf.get("quiet_timezone") else f"{format_quiet_clock(conf['quiet_start'])}–{format_quiet_clock(conf['quiet_end'])} {conf['quiet_timezone']}"
         conf.update({"quiet_timezone":timezone_name,"quiet_start":start_minute,"quiet_end":end_minute});await section.set(conf)
-        await ctx.send(f"This server: Pokémon quiet hours changed from **{previous}** to **{format_quiet_clock(start_minute)}–{format_quiet_clock(end_minute)} {timezone_name}**. Encounters remain visible but send silently with no alert-role mention during that window.")
+        await ctx.send(f"This server: Pokemon quiet hours changed from **{previous}** to **{format_quiet_clock(start_minute)}–{format_quiet_clock(end_minute)} {timezone_name}**. Encounters remain visible but send silently with no alert-role mention during that window.")
 
     @pokemon_set.command(name="expiredcards",aliases=["missedcards"])
     async def expired_cards(self,ctx,mode:str):
@@ -2325,7 +2325,7 @@ class Pokemon(commands.Cog):
 
     @pokemon_owner_set.command(name="vipclear")
     async def vip_clear(self,ctx):
-        """Disable the trusted VIP role without removing prior rewards or Pokémon."""
+        """Disable the trusted VIP role without removing prior rewards or Pokemon."""
         previous_guild=await self.config.vip_guild_id();previous_role=await self.config.vip_role_id();old_guild=previous_guild or "not set";old_role=previous_role or "not set";await self.config.vip_guild_id.set(None);await self.config.vip_role_id.set(None);self.vip_cache.clear();await ctx.send(f"Bot-wide VIP source changed from guild **{old_guild}** / role **{old_role}** to **disabled**. Existing collections and delivered supplies were not removed.")
 
     @pokemon_owner_set.command(name="vippack")
@@ -2337,34 +2337,34 @@ class Pokemon(commands.Cog):
 
     @pokemon_owner_set.command(name="martprice")
     async def mart_price(self,ctx,item:str,price:int):
-        """Set a bot-wide Poké Mart item price."""
+        """Set a bot-wide Poke Mart item price."""
         key=mart_item_key(item)
         if not key:await ctx.send("Choose pokeball, greatball, ultraball, potion, or revive.");return
         if not 1<=price<=1_000_000_000:await ctx.send("Use a price from 1 to 1,000,000,000 credits.");return
         prices=mart_prices(await self.config.mart_prices());previous=prices[key];prices[key]=price;await self.config.mart_prices.set(prices)
-        await ctx.send(f"Bot-wide Poké Mart price for {MART_ITEMS[key][0]} changed from **{previous:,}** to **{price:,} credits**. This affects every server using this bot.")
+        await ctx.send(f"Bot-wide Poke Mart price for {MART_ITEMS[key][0]} changed from **{previous:,}** to **{price:,} credits**. This affects every server using this bot.")
 
     @pokemon_owner_set.command(name="pokedexstyle")
     async def default_pokedex_style(self,ctx,style:str=None):
-        """Choose the default Pokédex style for users following the default."""
+        """Choose the default Pokedex style for users following the default."""
         current=resolve_style(await self.config.pokedex_default_style()).key
         if style is None:
-            await ctx.send(f"Default Pokédex style: **{current}**. Choices: "+", ".join(POKEDEX_STYLES)+".")
+            await ctx.send(f"Default Pokedex style: **{current}**. Choices: "+", ".join(POKEDEX_STYLES)+".")
             return
         style=style.casefold()
         if style not in POKEDEX_STYLES:
             await ctx.send("Unknown style. Choose: "+", ".join(POKEDEX_STYLES)+".")
             return
         await self.config.pokedex_default_style.set(style)
-        await ctx.send(f"Bot-wide default Pokédex style changed from **{POKEDEX_STYLES[current].label}** to **{POKEDEX_STYLES[style].label}**. Existing personal choices are unchanged.")
+        await ctx.send(f"Bot-wide default Pokedex style changed from **{POKEDEX_STYLES[current].label}** to **{POKEDEX_STYLES[style].label}**. Existing personal choices are unchanged.")
 
     @pokemon_owner_set.command(name="globalstatus",aliases=["settings","status"])
     async def global_status(self,ctx):
-        """Show all bot-wide Pokémon policies and owner limits."""
+        """Show all bot-wide Pokemon policies and owner limits."""
         policy=await self.config.all();minimum_timer=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(policy.get("minimum_timer",GLOBAL["minimum_timer"]))));prices=mart_prices(policy.get("mart_prices",{}));generations=", ".join(map(str,policy.get("allowed_generations",[1])))
         price_text=" · ".join(f"{MART_ITEMS[key][0]}: **{prices[key]:,}**" for key in MART_ITEMS)
         await ctx.send(
-            f"**Pokémon bot-wide policy**\n"
+            f"**Pokemon bot-wide policy**\n"
             f"Fresh-install defaults: admin timer floor **{GLOBAL['minimum_timer']}m** · wild lifetime **{GLOBAL['encounter_timeout']//60}m** · Center cooldown **{GLOBAL['center_cooldown']//60}m** · admin concurrency ceiling **{GLOBAL['maximum_concurrency']}**\n"
             f"Timer limits: server administrators **{minimum_timer}–{SERVER_TIMER_MINUTES[1]:,}m** · bot-owner override **{OWNER_TIMER_MINUTES[0]}–{OWNER_TIMER_MINUTES[1]:,}m**\n"
             f"Encounter lifetime: bot-wide default **{effective_encounter_timeout({'encounter_timeout':None},policy)//60}m** · server range **{max(60,min(900,int(policy.get('minimum_encounter_timeout',60))))//60}–{max(60,min(900,int(policy.get('maximum_encounter_timeout',900))))//60}m** (owner-configured; hard range **1–15m**)\n"
@@ -2373,8 +2373,8 @@ class Pokemon(commands.Cog):
             f"Concurrency limits: server-admin ceiling **{max(1,min(5,int(policy.get('maximum_concurrency',5))))}** (owner-set range **1–5**) · per-server owner override **1–5**\n"
             f"Allowed generations: **{generations}** · Rarity: **{policy.get('rarity_profile','friendly')}** · Special species: **{'enabled' if policy.get('allow_special_species') else 'event-only'}**\n"
             f"VIP benefits: guild **{policy.get('vip_guild_id') or 'not set'}** · role **{policy.get('vip_role_id') or 'not set'}** · storage **{STORAGE_CAPACITY}/{VIP_STORAGE_CAPACITY}** + **{PARTY_SIZE}** party · monthly {reward_summary(vip_pack_values(policy.get('vip_monthly_pack')))}\n"
-            f"Default Pokédex style: **{resolve_style(policy.get('pokedex_default_style','retro')).label}**\n"
-            f"Poké Mart prices: {price_text}"
+            f"Default Pokedex style: **{resolve_style(policy.get('pokedex_default_style','retro')).label}**\n"
+            f"Poke Mart prices: {price_text}"
         )
 
     @pokemon_owner_set.command(name="encountertime")
@@ -2426,12 +2426,12 @@ class Pokemon(commands.Cog):
         await ctx.send(f"Cached {count} generation {generation} species.")
     @pokemon_owner_set.command(name="resetplayer")
     async def reset_player(self,ctx,user:discord.Member,confirmation:str):
-        """Reset one complete Pokémon profile.
+        """Reset one complete Pokemon profile.
 
-        This permanently clears the trainer starter, collection, party, Pokédex, badges, inventory, and active Pokémon battle. The final argument must be `confirm`.
+        This permanently clears the trainer starter, collection, party, Pokedex, badges, inventory, and active Pokemon battle. The final argument must be `confirm`.
         """
         if confirmation.casefold()!="confirm":
-            await ctx.send(f"This clears all Pokémon progress for {user.mention}. Run `{ctx.clean_prefix}pokemonownerset resetplayer {user.mention} confirm` to proceed.")
+            await ctx.send(f"This clears all Pokemon progress for {user.mention}. Run `{ctx.clean_prefix}pokemonownerset resetplayer {user.mention} confirm` to proceed.")
             return
         removed=await self.reset_player_data(user.id)
         for raw in removed:
@@ -2440,7 +2440,7 @@ class Pokemon(commands.Cog):
                 try:
                     message=await channel.fetch_message(int(raw["message_id"]));await message.edit(content="This battle ended because the trainer profile was reset.",view=None)
                 except (discord.Forbidden,discord.NotFound,discord.HTTPException,KeyError,TypeError,ValueError):pass
-        await ctx.send(f"Reset {user.mention}'s Pokémon profile. They can run `{ctx.clean_prefix}pokemon` to choose a new starter.")
+        await ctx.send(f"Reset {user.mention}'s Pokemon profile. They can run `{ctx.clean_prefix}pokemon` to choose a new starter.")
 
     @pokemon_set.command(name="clear")
     async def clear_encounter(self,ctx):
@@ -2487,7 +2487,7 @@ class Pokemon(commands.Cog):
                     removed.append(dict(raw));encounters.pop(key);self.battles.pop(int(key),None)
             await self.config.encounters.set(encounters)
         for raw in removed:await self.clear_guild(int(raw["guild_id"]),int(raw.get("battle",{}).get("encounter_id",0)))
-        for raw in cancelled:await self.close_trade_message(raw,"This Pokémon trade was cancelled because a trainer's data was deleted.")
+        for raw in cancelled:await self.close_trade_message(raw,"This Pokemon trade was cancelled because a trainer's data was deleted.")
         return removed
 
     async def red_delete_data_for_user(self,*,requester,user_id):
