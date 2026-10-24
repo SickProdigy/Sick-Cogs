@@ -66,7 +66,7 @@ class MainMenuView(discord.ui.View):
 
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
-        await interaction.response.send_message("This Pokémon menu belongs to another trainer.",ephemeral=True);return False
+        await interaction.response.send_message("This Pokemon menu belongs to another trainer.",ephemeral=True);return False
 
 
 class GymChallengeView(discord.ui.View):
@@ -87,9 +87,9 @@ class ReleasePokemonView(discord.ui.View):
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This release confirmation belongs to another trainer.",ephemeral=True);return False
-    @discord.ui.button(label="Release Pokémon",emoji="🕊️",style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Release Pokemon",emoji="🕊️",style=discord.ButtonStyle.danger)
     async def confirm(self,interaction,button):await self.cog.release_collection_pokemon(interaction,self.identity,self.name,self.source_message)
-    @discord.ui.button(label="Keep Pokémon",style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Keep Pokemon",style=discord.ButtonStyle.secondary)
     async def cancel(self,interaction,button):await interaction.response.edit_message(content=f"**{self.name}** was kept.",view=None)
 
 
@@ -145,7 +145,7 @@ class MartView(discord.ui.View):
         for index,(key,label) in enumerate(items):self.add_item(MartItemButton(cog,user_id,key,label,index//5))
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
-        await interaction.response.send_message("This Poké Mart belongs to another trainer.",ephemeral=True);return False
+        await interaction.response.send_message("This Poke Mart belongs to another trainer.",ephemeral=True);return False
 
 class CollectionPokemonSelect(discord.ui.Select):
     def __init__(self,cog,user_id,items):
@@ -154,7 +154,7 @@ class CollectionPokemonSelect(discord.ui.Select):
             species=SPECIES[item["species_id"]];name=item.get("nickname") or species.name
             party=f" · P{item['party_slot']}" if item.get("party_slot") else ""
             options.append(discord.SelectOption(label=f"{number}. {name} · Lv.{item['level']}{party}",value=item["instance_id"]))
-        super().__init__(placeholder="Select a Pokémon to manage…",options=options,row=0)
+        super().__init__(placeholder="Select a Pokemon to manage…",options=options,row=0)
         self.cog=cog;self.user_id=user_id
     async def callback(self,interaction):
         await self.cog.collection_party_choice(interaction,self.values[0])
@@ -193,7 +193,7 @@ class PartyPlacementView(discord.ui.View):
             action="Move to" if moving else "Replace"
             label=f"{action} {index+1}: {name}{level}"
             self.add_item(PartyPlacementButton(cog,user_id,identity,target,label[:80],1+index//3,source_message))
-        release=discord.ui.Button(label="Remove from party to release" if moving else "Release Pokémon",emoji="🕊️",style=discord.ButtonStyle.danger,row=4,disabled=moving)
+        release=discord.ui.Button(label="Remove from party to release" if moving else "Release Pokemon",emoji="🕊️",style=discord.ButtonStyle.danger,row=4,disabled=moving)
         release.callback=self.release
         self.add_item(release)
         self.cog=cog;self.identity=identity;self.source_message=source_message
@@ -263,7 +263,7 @@ class BattleView(BattleMenu):
     async def fight(self, interaction, button):
         await interaction.response.edit_message(view=FightView(self.cog, self.encounter_id))
 
-    @discord.ui.button(label="Pokémon", emoji="🔄", style=discord.ButtonStyle.primary, custom_id="party")
+    @discord.ui.button(label="Pokemon", emoji="🔄", style=discord.ButtonStyle.primary, custom_id="party")
     async def party(self, interaction, button):
         await interaction.response.edit_message(view=PartyView(self.cog, self.encounter_id))
 
@@ -377,7 +377,7 @@ class BagView(BattleMenu):
                 button.label=f"{button.label} x{counts[key]}";button.disabled=counts[key]<1
         self.ball.custom_id=f"pokemon:{encounter_id}:bag:ball";self.great_ball.custom_id=f"pokemon:{encounter_id}:bag:great";self.ultra_ball.custom_id=f"pokemon:{encounter_id}:bag:ultra";self.potion.custom_id=f"pokemon:{encounter_id}:bag:potion";self.revive.custom_id=f"pokemon:{encounter_id}:bag:revive";self.back.custom_id=f"pokemon:{encounter_id}:bag:back"
 
-    @discord.ui.button(label="Poké Ball",emoji="🔴",style=discord.ButtonStyle.success,custom_id="ball",row=0)
+    @discord.ui.button(label="Poke Ball",emoji="🔴",style=discord.ButtonStyle.success,custom_id="ball",row=0)
     async def ball(self,interaction,button):await self.cog.throw_ball(interaction,self.encounter_id,"poke_ball")
     @discord.ui.button(label="Great Ball",emoji="🔵",style=discord.ButtonStyle.primary,custom_id="great",row=0)
     async def great_ball(self,interaction,button):await self.cog.throw_ball(interaction,self.encounter_id,"great_ball")

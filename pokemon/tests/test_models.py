@@ -173,14 +173,14 @@ class BattleTests(unittest.TestCase):
         a=battle(22);b=battle(22)
         self.assertEqual(a.throw_ball(),b.throw_ball())
         self.assertEqual(a.raw(),b.raw())
-        self.assertIn("You threw a Poké Ball",a.result or a.last_action)
+        self.assertIn("You threw a Poke Ball",a.result or a.last_action)
     def test_failed_ball_allows_wild_response(self):
         b=battle(1);old_hp=b.player_hp
         self.assertFalse(b.throw_ball())
         self.assertEqual(b.state,"active")
         self.assertLessEqual(b.player_hp,old_hp)
         self.assertGreater(b.rolls,0)
-        self.assertIn("You threw a Poké Ball",b.last_action)
+        self.assertIn("You threw a Poke Ball",b.last_action)
         self.assertIn(f"{SPECIES[b.wild_species_id].name} used",b.last_action)
     def test_speed_tie_uses_recorded_deterministic_roll(self):
         player=OwnedPokemon.create("tie",19,7,seed=3)
@@ -366,7 +366,7 @@ class BattleTests(unittest.TestCase):
 
     def test_pokemon_center_dialogue_is_ascii_safe(self):
         self.assertEqual(BattleRenderer.pokemon_center_message("SickProdigy",True),"SickProdigy, your Pokemon are back to perfect health!")
-        self.assertNotIn("Pokémon",BattleRenderer.pokemon_center_message("SickProdigy",True))
+        self.assertNotIn("é",BattleRenderer.pokemon_center_message("SickProdigy",True))
         pokemon=OwnedPokemon.create("center-state",25,5,seed=2);pokemon.current_hp=0;self.assertEqual(BattleRenderer.pokemon_center_state(pokemon)[0],"FAINTED")
         pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status="poison";self.assertEqual(BattleRenderer.pokemon_center_state(pokemon)[0],"POISONED");self.assertEqual(BattleRenderer.pokemon_center_state(pokemon,True)[0],"READY")
 
