@@ -271,14 +271,14 @@ class BattleRenderer:
         for index,line in enumerate(lines[:max_lines]):draw.text((x,y+index*(size+3)),line,fill=RETRO[0],font=font)
 
     @staticmethod
-    def _gender_mark(draw,origin,gender,fill=RETRO[0]):
+    def _gender_mark(draw,origin,gender,fill=RETRO[0],width=1):
         x,y=origin
         if gender=="male":
-            draw.ellipse((x,y+5,x+7,y+12),outline=fill,width=1);draw.line((x+6,y+6,x+12,y),fill=fill,width=1)
-            draw.line((x+9,y,x+12,y,x+12,y+3),fill=fill,width=1)
+            draw.ellipse((x,y+5,x+7,y+12),outline=fill,width=width);draw.line((x+6,y+6,x+12,y),fill=fill,width=width)
+            draw.line((x+9,y,x+12,y,x+12,y+3),fill=fill,width=width)
         elif gender=="female":
-            draw.ellipse((x,y+3,x+7,y+10),outline=fill,width=1);draw.line((x+3,y+10,x+3,y+17),fill=fill,width=1);draw.line((x,y+14,x+7,y+14),fill=fill,width=1)
-        else:draw.line((x,y+9,x+9,y+9),fill=fill,width=1)
+            draw.ellipse((x,y+3,x+7,y+10),outline=fill,width=width);draw.line((x+3,y+10,x+3,y+17),fill=fill,width=width);draw.line((x,y+14,x+7,y+14),fill=fill,width=width)
+        else:draw.line((x,y+9,x+9,y+9),fill=fill,width=width)
 
     @staticmethod
     def _pokeball(draw,center,radius):
@@ -395,10 +395,10 @@ class BattleRenderer:
             species=SPECIES[item.species_id];name=item.nickname or species.name;number=(page-1)*9+index+1
             shiny=" · SHINY" if item.shiny else ""
             draw.text((left+12,top+149),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=17))
-            level_text=f"Lv.{item.level}";level_font=ImageFont.load_default(size=14);level_x=left+180
-            draw.text((level_x,top+151),level_text,fill=(65,91,78),font=level_font)
+            level_text=f"Lv.{item.level}";level_font=ImageFont.load_default(size=16);level_x=left+176
+            draw.text((level_x,top+149),level_text,fill=(42,70,58),font=level_font,stroke_width=1,stroke_fill=(42,70,58))
             mark_x=min(left+239,level_x+int(draw.textlength(level_text,font=level_font))+6)
-            self._gender_mark(draw,(mark_x,top+150),item.gender,(65,91,78))
+            self._gender_mark(draw,(mark_x,top+148),item.gender,(42,70,58),width=2)
             if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
             slot=party_slots[index] if index<len(party_slots) else None
             if slot:
