@@ -198,6 +198,14 @@ class BattleRenderer:
         try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total,trainer_name,party_slots)
         except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
 
+    async def bag_card(self,items,trainer_name):
+        async def item_data(key):
+            try:return await self.get_item_sprite(key)
+            except RenderError:return None
+        data=await asyncio.gather(*(item_data(key) for key,_,_ in items))
+        try:return await self._render(self._bag_card_sync,items,trainer_name,data)
+        except (OSError,ValueError) as exc:raise RenderError("Poke Bag card rendering failed.") from exc
+
     async def mart_card(self,items,balance,currency,scope):
         async def item_data(key):
             try:return await self.get_item_sprite(key)
@@ -428,6 +436,19 @@ class BattleRenderer:
             elif key=="thunder_stone":draw.line((x+7,y-17,x-4,y-3,x+3,y-3,x-8,y+16),fill=(255,255,218),width=4)
             elif key=="leaf_stone":draw.line((x,y-18,x,y+16),fill=(215,239,155),width=3);draw.line((x,y-7,x-9,y-13,x,y-2,x+10,y-9,x,y+5,x-9,y+11),fill=(215,239,155),width=2)
             else:draw.ellipse((x-5,y-14,x+1,y-8),fill=(238,226,250));draw.ellipse((x+7,y-2,x+10,y+1),fill=(238,226,250))
+
+    def _bag_card_sync(self,items,trainer_name,item_data=None):
+        canvas=Image.new("RGB",(900,650),(225,217,177));draw=ImageDraw.Draw(canvas);draw.rounded_rectangle((20,18,880,632),18,fill=(245,239,207),outline=(54,83,70),width=5)
+        trainer=" ".join(str(trainer_name).split())[:24] or "Trainer";draw.text((45,35),f"{trainer.upper()}'S POKE BAG",fill=(42,70,58),font=ImageFont.load_default(size=29),stroke_width=1,stroke_fill=(42,70,58))
+        for index,(key,label,count) in enumerate(items):
+            col=index%2;row=index//2;left=43+410*col;top=92+99*row
+            draw.rounded_rectangle((left,top,left+384,top+82),12,fill=(221,229,200),outline=(78,105,88),width=3)
+            data=item_data[index] if item_data and index<len(item_data) else None
+            if data:
+                icon=self._open(data,(58,58),trim=True,upscale=True);canvas.paste(icon,(left+48-icon.width//2,top+41-icon.height//2),icon)
+            else:self._mart_icon(draw,key,(left+48,top+41))
+            draw.text((left+88,top+16),label,fill=(42,70,58),font=ImageFont.load_default(size=19),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+47),f"OWNED  {count:,}",fill=(65,91,78),font=ImageFont.load_default(size=16))
+        draw.text((45,598),"BALLS · MEDICINE · EVOLUTION STONES",fill=(65,91,78),font=ImageFont.load_default(size=14));return self._save(canvas)
 
     def _mart_card_sync(self,items,balance,currency,scope,item_data=None):
         canvas=Image.new("RGB",(900,650),(225,217,177));draw=ImageDraw.Draw(canvas);draw.rounded_rectangle((20,18,880,632),18,fill=(245,239,207),outline=(54,83,70),width=5)
