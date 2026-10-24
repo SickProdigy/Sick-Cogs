@@ -447,7 +447,7 @@ class BattleRenderer:
             if data:
                 icon=self._open(data,(58,58),trim=True,upscale=True);canvas.paste(icon,(left+48-icon.width//2,top+41-icon.height//2),icon)
             else:self._mart_icon(draw,key,(left+48,top+41))
-            draw.text((left+88,top+16),label,fill=(42,70,58),font=ImageFont.load_default(size=19),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+47),f"OWNED  {count:,}",fill=(65,91,78),font=ImageFont.load_default(size=16),stroke_width=1,stroke_fill=(65,91,78))
+            draw.text((left+88,top+16),label,fill=(42,70,58),font=ImageFont.load_default(size=19),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+47),f"OWNED  {count:,}",fill=(65,91,78),font=ImageFont.load_default(size=18))
         draw.text((45,598),"BALLS · MEDICINE · EVOLUTION STONES",fill=(65,91,78),font=ImageFont.load_default(size=14));return self._save(canvas)
 
     def _mart_card_sync(self,items,balance,currency,scope,item_data=None):
