@@ -259,9 +259,13 @@ class BattleRenderer:
         if battle.state!="active":
             species_id=battle.player.species_id if battle.state=="won" else battle.wild_species_id
             result_sprite=await self.get_sprite(species_id,shiny=battle.player.shiny if battle.state=="won" else battle.wild_shiny)
+            ball_sprite=None
+            if battle.state=="caught" and battle.last_ball in {"poke_ball","great_ball","ultra_ball"}:
+                try:ball_sprite=await self.get_item_sprite(battle.last_ball)
+                except RenderError:pass
             try:
                 if battle.state=="won" and battle.gym_key:return await self._render(self._gym_victory_sync,battle,result_sprite,avatar_data)
-                return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data)
+                return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data,ball_sprite)
             except (OSError,ValueError) as exc:raise RenderError("Battle result rendering failed.") from exc
         front = await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
         try:
@@ -532,7 +536,7 @@ class BattleRenderer:
         self._dialogue(draw,battle.result or f"{badge} earned!",(70,360),width=76,size=16)
         return self._save(canvas)
 
-    def _battle_result_sync(self,battle,data,avatar_data=None):
+    def _battle_result_sync(self,battle,data,avatar_data=None,ball_data=None):
         wild=SPECIES[battle.wild_species_id];message=self.battle_result_text(battle)
         if battle.state in {"lost","ran"}:
             canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
@@ -559,7 +563,10 @@ class BattleRenderer:
         if battle.state=="caught":
             draw.ellipse((pokemon_x-155,205,pokemon_x+155,310),fill=(182,168,89),outline=RETRO[0],width=4)
             image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,240-image.height),image)
-            self._pokeball(draw,((295 if has_avatar else 400),290),43)
+            ball_center=((295 if has_avatar else 400),290)
+            if ball_data:
+                ball=self._open(ball_data,(86,86),trim=True,upscale=True);canvas.paste(ball,(ball_center[0]-ball.width//2,ball_center[1]-ball.height//2),ball)
+            else:self._pokeball(draw,ball_center,43)
         else:
             heading="Victory!"
             draw.text((400-int(draw.textlength(heading,font=ImageFont.load_default(size=34)))//2,42),heading,fill=RETRO[0],font=ImageFont.load_default(size=34))
