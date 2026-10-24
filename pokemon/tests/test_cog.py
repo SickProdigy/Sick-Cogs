@@ -605,10 +605,11 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bag_command_uses_trainer_name(self):
         section=StoredSection({"balls":8,"items":{"great_ball":6,"ultra_ball":1,"potion":10,"revive":2}})
-        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section)
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section);cog.renderer=SimpleNamespace(bag_card=AsyncMock(return_value=io.BytesIO(b"card")))
         ctx=SimpleNamespace(author=SimpleNamespace(display_name="SickProdigy"),send=AsyncMock())
         await Pokemon.pokemon_bag.callback(cog,ctx)
-        text=ctx.send.await_args.args[0];self.assertTrue(text.startswith("**SickProdigy’s Poke Bag**"));self.assertIn("Great Ball: **6**",text)
+        sent=ctx.send.await_args.kwargs;self.assertEqual(sent["embed"].title,"SickProdigy’s Poke Bag");self.assertIsNone(sent["embed"].description);self.assertEqual(len(sent["files"]),1)
+        items,trainer=cog.renderer.bag_card.await_args.args;self.assertEqual(trainer,"SickProdigy");self.assertIn(("great_ball","Great Ball",6),items);self.assertIn(("moon_stone","Moon Stone",0),items)
 
     async def test_owner_reset_requires_confirmation_and_releases_battle(self):
         section=StoredSection({"collection":[{"instance_id":"starter"}],"starter_chosen":True})

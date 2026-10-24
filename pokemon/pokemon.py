@@ -957,8 +957,9 @@ class Pokemon(commands.Cog):
             session=PokedexSession(user_id=user.id,seen={int(x) for x in conf.get("pokedex_seen",[])},caught={int(x) for x in conf.get("pokedex_caught",[])},style=await self.selected_pokedex_style(user),stats=migrated_pokedex_stats(conf));view=PokedexView(self,session)
             await interaction.response.send_message(embed=render_pokedex(session),view=view,ephemeral=True);view.message=await interaction.original_response();return
         if section=="bag":
-            items=conf.get("items",{});counts=(int(conf.get("balls",0)),int(items.get("great_ball",0)),int(items.get("ultra_ball",0)),int(items.get("potion",0)),int(items.get("revive",0)))
-            items=conf.get("items",{});stones=(int(items.get("fire_stone",0)),int(items.get("water_stone",0)),int(items.get("thunder_stone",0)),int(items.get("leaf_stone",0)),int(items.get("moon_stone",0)));trainer=getattr(user,"display_name",getattr(user,"name","Trainer"));text=f"**{trainer}’s Poke Bag**\n**Poke Balls**\nPoke Ball: **{{}}** · Great Ball: **{{}}** · Ultra Ball: **{{}}**\n**Medicine**\nPotion: **{{}}** · Revive: **{{}}**".format(*counts)+"\n**Evolution Stones**\nFire: **{}** · Water: **{}** · Thunder: **{}** · Leaf: **{}** · Moon: **{}**".format(*stones);await interaction.response.send_message(text,ephemeral=True);return
+            embed,files=await self.rendered_bag(user,conf)
+            await interaction.response.send_message(embed=embed,files=files,ephemeral=True)
+            return
         if section=="research":
             async with self.lock(("user",user.id)):
                 conf=await self.config.user(user).all();self.ensure_daily_research(conf);await self.config.user(user).set(conf)
@@ -1655,12 +1656,29 @@ class Pokemon(commands.Cog):
         move=pokemon.pending_moves[0];embed,files=await self.rendered_progression(pokemon,move_key=move,pending=True)
         await ctx.send(embed=embed,files=files,view=MoveLearnView(self,ctx.author.id,pokemon,move))
 
+    async def rendered_bag(self,user,conf=None):
+        conf=conf or await self.config.user(user).all()
+        stored=conf.get("items",{})
+        counts={"poke_ball":int(conf.get("balls",0))}
+        counts.update({key:int(stored.get(key,0)) for key in MART_ITEMS if key!="poke_ball"})
+        items=[(key,label,counts[key]) for key,(label,_,_) in MART_ITEMS.items()]
+        trainer=getattr(user,"display_name",getattr(user,"name","Trainer"))
+        lines=[f"**{label}:** {count:,}" for _,label,count in items]
+        embed=discord.Embed(title=f"{trainer}’s Poke Bag",description="\n".join(lines),color=discord.Color.gold())
+        try:
+            image=await self.renderer.bag_card(items,trainer)
+            embed.description=None
+            embed.set_image(url="attachment://bag.png")
+            files=[discord.File(image,filename="bag.png")]
+        except RenderError:
+            files=[]
+        return embed,files
+
     @pokemon.command(name="bag")
     async def pokemon_bag(self,ctx):
-        """View your available medicine and items."""
-        conf=await self.config.user(ctx.author).all();items=conf.get("items",{})
-        trainer=getattr(ctx.author,"display_name",getattr(ctx.author,"name","Trainer"))
-        await ctx.send(f"**{trainer}’s Poke Bag**\n**Poke Balls**\nPoke Ball: **{int(conf.get('balls',0))}** · Great Ball: **{int(items.get('great_ball',0))}** · Ultra Ball: **{int(items.get('ultra_ball',0))}**\n**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**\n**Evolution Stones**\nFire: **{int(items.get('fire_stone',0))}** · Water: **{int(items.get('water_stone',0))}** · Thunder: **{int(items.get('thunder_stone',0))}** · Leaf: **{int(items.get('leaf_stone',0))}** · Moon: **{int(items.get('moon_stone',0))}**")
+        """View your illustrated inventory."""
+        embed,files=await self.rendered_bag(ctx.author)
+        await ctx.send(embed=embed,files=files)
 
     @pokemon.command(name="achievements",aliases=["goals"])
     async def achievements(self,ctx):
