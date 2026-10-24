@@ -178,6 +178,10 @@ class BattleRenderer:
         try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total,trainer_name,party_slots)
         except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
 
+    async def mart_card(self,items,balance,currency,scope):
+        try:return await self._render(self._mart_card_sync,items,balance,currency,scope)
+        except (OSError,ValueError) as exc:raise RenderError("Poké Mart card rendering failed.") from exc
+
     async def pokedex_registration(self,pokemon,trainer_name):
         data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
         try:return await self._render(self._pokedex_registration_sync,pokemon,data,trainer_name)
@@ -376,6 +380,27 @@ class BattleRenderer:
             draw.text((left+10,top+190),f"Lv.{item.level}",fill=(82,62,29),font=ImageFont.load_default(size=15))
             draw.text((left+10,top+211),f"HP {current}/{maximum}",fill=(82,62,29),font=ImageFont.load_default(size=14))
             self._gender_mark(draw,(left+145,top+207),item.gender,(82,62,29))
+        return self._save(canvas)
+
+    @staticmethod
+    def _mart_icon(draw,key,center):
+        x,y=center
+        if key.endswith("ball"):
+            colors={"poke_ball":(205,63,58),"great_ball":(55,103,170),"ultra_ball":(55,55,48)};color=colors[key]
+            draw.ellipse((x-25,y-25,x+25,y+25),fill=color,outline=(42,70,58),width=3);draw.rectangle((x-24,y-2,x+24,y+6),fill=(245,239,207));draw.ellipse((x-7,y-7,x+7,y+7),fill=(245,239,207),outline=(42,70,58),width=2)
+        elif key in {"potion","revive"}:
+            color=(205,90,119) if key=="potion" else (238,190,64);draw.rounded_rectangle((x-17,y-19,x+17,y+25),7,fill=color,outline=(42,70,58),width=3);draw.rectangle((x-9,y-28,x+9,y-18),fill=(225,231,216),outline=(42,70,58),width=2);draw.line((x-9,y+2,x+9,y+2),fill=(245,239,207),width=4)
+        else:
+            colors={"fire_stone":(218,91,52),"water_stone":(69,132,202),"thunder_stone":(229,190,45),"leaf_stone":(83,151,73),"moon_stone":(132,112,170)};color=colors[key];points=[(x,y-29),(x+22,y-8),(x+17,y+23),(x-17,y+23),(x-22,y-8)];draw.polygon(points,fill=color,outline=(42,70,58));draw.line(points+[points[0]],fill=(42,70,58),width=3)
+
+    def _mart_card_sync(self,items,balance,currency,scope):
+        canvas=Image.new("RGB",(900,650),(225,217,177));draw=ImageDraw.Draw(canvas);draw.rounded_rectangle((20,18,880,632),18,fill=(245,239,207),outline=(54,83,70),width=5)
+        draw.text((45,35),"POKÉ MART",fill=(42,70,58),font=ImageFont.load_default(size=31),stroke_width=1,stroke_fill=(42,70,58));draw.text((590,43),f"BALANCE  {balance:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=16))
+        for index,(key,label,price) in enumerate(items):
+            col=index%2;row=index//2;left=43+410*col;top=92+99*row
+            draw.rounded_rectangle((left,top,left+384,top+82),12,fill=(221,229,200),outline=(78,105,88),width=3);self._mart_icon(draw,key,(left+48,top+41))
+            draw.text((left+88,top+16),label,fill=(42,70,58),font=ImageFont.load_default(size=19),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+47),f"{price:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=16))
+        draw.text((45,598),f"{scope.upper()} BANK · USE THE BUTTONS BELOW TO BUY ONE",fill=(65,91,78),font=ImageFont.load_default(size=14))
         return self._save(canvas)
 
     def _collection_card_sync(self,pokemon,data,page,pages,total,trainer_name,party_slots=None):
