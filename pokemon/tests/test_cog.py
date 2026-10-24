@@ -830,6 +830,15 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await cog.send_trade_evolution_cards(interaction,record);cog.rendered_progression.assert_awaited_once();interaction.followup.send.assert_awaited_once()
 
 
+    async def test_pokedex_numeric_argument_opens_entry_and_explicit_page_still_pages(self):
+        section=StoredSection({"pokedex_seen":[56],"pokedex_caught":[],"pokedex_stats":{"56":{"seen":1}}});cog=Pokemon.__new__(Pokemon)
+        cog.config=SimpleNamespace(user=lambda user:section);cog.selected_pokedex_style=AsyncMock(return_value="retro")
+        ctx=SimpleNamespace(author=SimpleNamespace(id=10),send=AsyncMock())
+        await Pokemon.pokedex.callback(cog,ctx,"056",None)
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].footer.text,"Generation 1 · Entry #056")
+        await Pokemon.pokedex.callback(cog,ctx,"page",5)
+        self.assertIn("Page 5/11",ctx.send.await_args.kwargs["embed"].footer.text)
+
     async def test_interactive_trade_lobby_requires_both_locks_and_confirmations(self):
         record={"trade_id":3,"state":"lobby","offerer_id":10,"recipient_id":20,"offerer_name":"Red","recipient_name":"Blue","offered_id":"a","requested_id":"b","offered_name":"Charmander","requested_name":"Squirtle","offered_level":5,"requested_level":6}
         trades=StoredValue({"3":record});cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades);cog.accept_trade=AsyncMock()
