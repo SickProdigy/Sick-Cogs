@@ -452,7 +452,7 @@ class BattleRenderer:
 
     def _mart_card_sync(self,items,balance,currency,scope,item_data=None):
         canvas=Image.new("RGB",(900,650),(225,217,177));draw=ImageDraw.Draw(canvas);draw.rounded_rectangle((20,18,880,632),18,fill=(245,239,207),outline=(54,83,70),width=5)
-        draw.text((45,35),"POKE MART",fill=(42,70,58),font=ImageFont.load_default(size=31),stroke_width=1,stroke_fill=(42,70,58));draw.text((855,43),f"BALANCE  {balance:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=18),anchor="ra")
+        draw.text((45,35),"POKE MART",fill=(42,70,58),font=ImageFont.load_default(size=31),stroke_width=1,stroke_fill=(42,70,58));draw.text((650,43),f"BALANCE  {balance:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=20),stroke_width=1,stroke_fill=(65,91,78),anchor="mt")
         for index,(key,label,price) in enumerate(items):
             col=index%2;row=index//2;left=43+410*col;top=92+99*row
             draw.rounded_rectangle((left,top,left+384,top+82),12,fill=(221,229,200),outline=(78,105,88),width=3)
@@ -460,7 +460,7 @@ class BattleRenderer:
             if data:
                 icon=self._open(data,(58,58),trim=True,upscale=True);canvas.paste(icon,(left+48-icon.width//2,top+41-icon.height//2),icon)
             else:self._mart_icon(draw,key,(left+48,top+41))
-            draw.text((left+88,top+16),label,fill=(42,70,58),font=ImageFont.load_default(size=19),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+47),f"{price:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=18))
+            draw.text((left+88,top+16),label,fill=(42,70,58),font=ImageFont.load_default(size=19),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+47),f"{price:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=20),stroke_width=1,stroke_fill=(65,91,78))
         draw.text((45,598),f"{scope.upper()} BANK · USE THE BUTTONS BELOW TO BUY ONE",fill=(65,91,78),font=ImageFont.load_default(size=14))
         return self._save(canvas)
 
