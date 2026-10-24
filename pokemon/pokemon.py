@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import time
+import unicodedata
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
@@ -178,7 +179,7 @@ def store_caught_pokemon(conf,pokemon,capacity):
     conf.setdefault("collection",[]).append(pokemon.raw());return True
 
 def mart_item_key(value):
-    key=str(value).casefold().replace("-","_").replace(" ","_")
+    key="".join(character for character in unicodedata.normalize("NFKD",str(value).casefold()) if not unicodedata.combining(character)).replace("-","_").replace(" ","_")
     return MART_ALIASES.get(key,key) if MART_ALIASES.get(key,key) in MART_ITEMS else None
 
 def mart_purchase(value):

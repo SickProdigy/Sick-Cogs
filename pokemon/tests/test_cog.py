@@ -634,7 +634,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_mart_defaults_and_aliases_match_payday_scale(self):
         self.assertEqual({key:mart_prices()[key] for key in ("poke_ball","great_ball","ultra_ball","potion","revive")},{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400})
         self.assertTrue(all(mart_prices()[key]==5000 for key in STONE_EVOLUTIONS if key!="moon_stone"));self.assertEqual(mart_prices()["moon_stone"],25000)
-        self.assertEqual((mart_item_key("pokeball"),mart_item_key("great-ball"),mart_item_key("thunder"),mart_item_key("missing")),("poke_ball","great_ball","thunder_stone",None));self.assertEqual(mart_purchase("Fire Stone 2"),("fire_stone",2));self.assertEqual(mart_purchase("Moon Stone"),("moon_stone",1))
+        self.assertEqual((mart_item_key("pokeball"),mart_item_key("Poké Ball"),mart_item_key("great-ball"),mart_item_key("thunder"),mart_item_key("missing")),("poke_ball","poke_ball","great_ball","thunder_stone",None));self.assertEqual(mart_purchase("Fire Stone 2"),("fire_stone",2));self.assertEqual(mart_purchase("Moon Stone"),("moon_stone",1))
         conf={"balls":1,"items":{"potion":2}};grant_mart_item(conf,"poke_ball",3);grant_mart_item(conf,"potion",2)
         self.assertEqual((conf["balls"],conf["items"]["potion"]),(4,4))
 
