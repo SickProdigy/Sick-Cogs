@@ -234,8 +234,10 @@ class CogPolicyTests(unittest.TestCase):
 
     def test_terminal_battle_embed_uses_state_specific_titles(self):
         current=battle();current.trainer_name="SickProdigy";wild=SPECIES[current.wild_species_id]
-        current.state="caught"
-        self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"Gotcha! {wild.name} was caught by SickProdigy!")
+        current.state="caught";current.caught_count=5
+        caught_embed=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
+        self.assertEqual(caught_embed.title,f"Gotcha! {wild.name} was caught by SickProdigy!")
+        self.assertIn("Caught: **5**",caught_embed.fields[0].value)
         current.state="ran"
         self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"{wild.name} escaped from SickProdigy!")
         current.state="lost"

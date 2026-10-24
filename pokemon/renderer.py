@@ -570,6 +570,7 @@ class BattleRenderer:
         if battle.state=="caught":
             font=ImageFont.load_default(size=14);level=f"Lv. {battle.wild_level}";draw.text((70,386),level,fill=RETRO[1],font=font)
             mark_x=70+int(draw.textlength(level,font=font))+8;self._gender_mark(draw,(mark_x,384),battle.wild_gender,RETRO[1])
+            caught=f"Caught: {max(1,int(battle.caught_count))}";count_font=ImageFont.load_default(size=16);draw.text((730,384),caught,fill=RETRO[1],font=count_font,stroke_width=1,stroke_fill=RETRO[1],anchor="ra")
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0,expired=False,shiny=False):
