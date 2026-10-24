@@ -328,7 +328,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.3.0";__author__="SickProdigy"
+    __version__="1.3.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1967,17 +1967,27 @@ class Pokemon(commands.Cog):
         await self.config.user(user).pokedex_style.set(style)
 
     @pokemon.command(name="pokedex",aliases=["dex"])
-    async def pokedex(self,ctx,page:int=1):
-        """Browse the Pokemon you have seen and caught."""
+    async def pokedex(self,ctx,query:str=None,page:int=None):
+        """Browse the Pokedex or open an entry by number/discovered name.
+
+        Use `pokedex 56` for entry #056 or `pokedex page 5` for page 5.
+        """
         conf=await self.config.user(ctx.author).all()
         session=PokedexSession(
             user_id=ctx.author.id,
             seen={int(value) for value in conf.get("pokedex_seen",[])},
             caught={int(value) for value in conf.get("pokedex_caught",[])},
             style=await self.selected_pokedex_style(ctx.author),
-            page=max(0,page-1),
             stats=migrated_pokedex_stats(conf),
         )
+        if query:
+            query=str(query)
+            if query.casefold() in {"page","p"}:
+                if page is None or page<1:await ctx.send("Choose a Pokedex page number of 1 or higher.");return
+                session.page=page-1
+            elif page is not None:await ctx.send("Use `pokemon pokedex <number-or-name>` or `pokemon pokedex page <number>`.");return
+            elif not session.search(query):
+                await ctx.send("No matching Pokemon was found in this generation. Names must already be discovered.");return
         view=PokedexView(self,session)
         view.message=await ctx.send(embed=render_pokedex(session),view=view)
 
