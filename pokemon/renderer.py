@@ -1,4 +1,4 @@
-"""Bounded Pokémon encounter and retro battle rendering."""
+"""Bounded Pokemon encounter and retro battle rendering."""
 
 import asyncio
 import io
@@ -14,6 +14,7 @@ from .data import MOVES, SPECIES, sprite
 from .models import OwnedPokemon,pokemon_max_hp
 
 SPRITE_HOST = "raw.githubusercontent.com"
+ITEM_SPRITES={key:key.replace("_","-") for key in ("poke_ball","great_ball","ultra_ball","potion","revive","fire_stone","water_stone","thunder_stone","leaf_stone","moon_stone")}
 MAX_SPRITE_BYTES = 2 * 1024 * 1024
 MAX_RENDER_BYTES = 8 * 1024 * 1024
 MAX_COVER_BYTES = 6 * 1024 * 1024
@@ -111,6 +112,25 @@ class BattleRenderer:
         await self._prune()
         return data
 
+    async def get_item_sprite(self,key):
+        name=ITEM_SPRITES.get(str(key))
+        if name is None:raise RenderError("Unknown Mart item sprite.")
+        path=self.cache_dir/f"item-{name}.png"
+        if path.exists() and 0<path.stat().st_size<=MAX_SPRITE_BYTES:return path.read_bytes()
+        url=f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/{name}.png"
+        session=await self._session()
+        try:
+            async with session.get(url) as response:
+                if response.status!=200:raise RenderError(f"Item sprite provider returned HTTP {response.status}.")
+                if (response.url.host or "").casefold()!=SPRITE_HOST:raise RenderError("Item sprite provider redirected to an untrusted host.")
+                data=await response.read()
+        except (aiohttp.ClientError,asyncio.TimeoutError) as exc:raise RenderError("Item sprite download failed.") from exc
+        if not 0<len(data)<=MAX_SPRITE_BYTES:raise RenderError("Item sprite file size is invalid.")
+        try:
+            with Image.open(io.BytesIO(data)) as image:image.verify()
+        except Exception as exc:raise RenderError("Item sprite is invalid.") from exc
+        self.cache_dir.mkdir(parents=True,exist_ok=True);temporary=path.with_suffix(".tmp");temporary.write_bytes(data);temporary.replace(path);await self._prune();return data
+
     async def get_cover(self,entry):
         label,repo,path=entry;key=label.casefold().replace(" ","-").replace("!","").replace("/","-").replace(",","").replace("’","")
         cached=self.cache_dir/f"cover-{key}.img"
@@ -178,10 +198,26 @@ class BattleRenderer:
         try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total,trainer_name,party_slots)
         except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
 
+    async def bag_card(self,items,trainer_name):
+        async def item_data(key):
+            try:return await self.get_item_sprite(key)
+            except RenderError:return None
+        data=await asyncio.gather(*(item_data(key) for key,_,_ in items))
+        try:return await self._render(self._bag_card_sync,items,trainer_name,data)
+        except (OSError,ValueError) as exc:raise RenderError("Poke Bag card rendering failed.") from exc
+
+    async def mart_card(self,items,balance,currency,scope):
+        async def item_data(key):
+            try:return await self.get_item_sprite(key)
+            except RenderError:return None
+        data=await asyncio.gather(*(item_data(key) for key,_,_ in items))
+        try:return await self._render(self._mart_card_sync,items,balance,currency,scope,data)
+        except (OSError,ValueError) as exc:raise RenderError("Poke Mart card rendering failed.") from exc
+
     async def pokedex_registration(self,pokemon,trainer_name):
         data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
         try:return await self._render(self._pokedex_registration_sync,pokemon,data,trainer_name)
-        except (OSError,ValueError) as exc:raise RenderError("Pokédex registration rendering failed.") from exc
+        except (OSError,ValueError) as exc:raise RenderError("Pokedex registration rendering failed.") from exc
 
     @staticmethod
     def trainer_party(conf):
@@ -211,7 +247,7 @@ class BattleRenderer:
     async def pokemon_center(self,party,trainer_name,complete=False):
         party=list(party)[:6];data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in party))
         try:return await self._render(self._pokemon_center_sync,party,data,trainer_name,complete)
-        except (OSError,ValueError) as exc:raise RenderError("Pokémon Center rendering failed.") from exc
+        except (OSError,ValueError) as exc:raise RenderError("Pokemon Center rendering failed.") from exc
 
     async def progression(self,pokemon,evolved_from=None,move_key=None,pending=False):
         current=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
@@ -223,9 +259,13 @@ class BattleRenderer:
         if battle.state!="active":
             species_id=battle.player.species_id if battle.state=="won" else battle.wild_species_id
             result_sprite=await self.get_sprite(species_id,shiny=battle.player.shiny if battle.state=="won" else battle.wild_shiny)
+            ball_sprite=None
+            if battle.state=="caught" and battle.last_ball in {"poke_ball","great_ball","ultra_ball"}:
+                try:ball_sprite=await self.get_item_sprite(battle.last_ball)
+                except RenderError:pass
             try:
                 if battle.state=="won" and battle.gym_key:return await self._render(self._gym_victory_sync,battle,result_sprite,avatar_data)
-                return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data)
+                return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data,ball_sprite)
             except (OSError,ValueError) as exc:raise RenderError("Battle result rendering failed.") from exc
         front = await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
         try:
@@ -271,14 +311,14 @@ class BattleRenderer:
         for index,line in enumerate(lines[:max_lines]):draw.text((x,y+index*(size+3)),line,fill=RETRO[0],font=font)
 
     @staticmethod
-    def _gender_mark(draw,origin,gender,fill=RETRO[0]):
+    def _gender_mark(draw,origin,gender,fill=RETRO[0],width=1):
         x,y=origin
         if gender=="male":
-            draw.ellipse((x,y+5,x+7,y+12),outline=fill,width=1);draw.line((x+6,y+6,x+12,y),fill=fill,width=1)
-            draw.line((x+9,y,x+12,y,x+12,y+3),fill=fill,width=1)
+            draw.ellipse((x,y+5,x+7,y+12),outline=fill,width=width);draw.line((x+6,y+6,x+12,y),fill=fill,width=width)
+            draw.line((x+9,y,x+12,y,x+12,y+3),fill=fill,width=width)
         elif gender=="female":
-            draw.ellipse((x,y+3,x+7,y+10),outline=fill,width=1);draw.line((x+3,y+10,x+3,y+17),fill=fill,width=1);draw.line((x,y+14,x+7,y+14),fill=fill,width=1)
-        else:draw.line((x,y+9,x+9,y+9),fill=fill,width=1)
+            draw.ellipse((x,y+3,x+7,y+10),outline=fill,width=width);draw.line((x+3,y+10,x+3,y+17),fill=fill,width=width);draw.line((x,y+14,x+7,y+14),fill=fill,width=width)
+        else:draw.line((x,y+9,x+9,y+9),fill=fill,width=width)
 
     @staticmethod
     def _pokeball(draw,center,radius):
@@ -378,6 +418,56 @@ class BattleRenderer:
             self._gender_mark(draw,(left+145,top+207),item.gender,(82,62,29))
         return self._save(canvas)
 
+    @staticmethod
+    def _mart_icon(draw,key,center):
+        x,y=center
+        if key.endswith("ball"):
+            colors={"poke_ball":(205,63,58),"great_ball":(55,103,170),"ultra_ball":(55,55,48)};color=colors[key]
+            draw.ellipse((x-25,y-25,x+25,y+25),fill=color,outline=(42,70,58),width=3);draw.rectangle((x-24,y-2,x+24,y+6),fill=(245,239,207));draw.ellipse((x-7,y-7,x+7,y+7),fill=(245,239,207),outline=(42,70,58),width=2)
+        elif key in {"potion","revive"}:
+            color=(205,90,119) if key=="potion" else (238,190,64);draw.rounded_rectangle((x-17,y-19,x+17,y+25),7,fill=color,outline=(42,70,58),width=3);draw.rectangle((x-9,y-28,x+9,y-18),fill=(225,231,216),outline=(42,70,58),width=2);draw.line((x-9,y+2,x+9,y+2),fill=(245,239,207),width=4)
+        else:
+            palettes={"fire_stone":((126,48,31),(226,78,39),(255,177,72)),"water_stone":((34,78,142),(52,132,211),(151,219,255)),"thunder_stone":((156,111,18),(239,190,32),(255,242,116)),"leaf_stone":((42,104,53),(72,154,70),(166,218,111)),"moon_stone":((69,58,111),(125,104,170),(206,190,232))};dark,base,glow=palettes[key]
+            layers=(((0,-29),(22,-8),(17,23),(-17,23),(-22,-8)),((0,-23),(17,-6),(13,18),(-13,18),(-17,-6)),((-2,-17),(11,-5),(8,10),(-8,10),(-11,-5)))
+            for points,color in zip(layers,(dark,base,glow)):
+                polygon=[(x+dx,y+dy) for dx,dy in points];draw.polygon(polygon,fill=color)
+            outer=[(x+dx,y+dy) for dx,dy in layers[0]];draw.line(outer+[outer[0]],fill=(42,70,58),width=3)
+            spots={"fire_stone":[(-8,-5,4),(8,7,3)],"water_stone":[(-7,5,4),(8,-8,3),(10,10,2)],"thunder_stone":[(-9,9,3),(9,-8,3)],"leaf_stone":[(-9,-4,3),(9,8,3)],"moon_stone":[(-8,-5,5),(8,8,4),(7,-12,2)]}[key]
+            for dx,dy,radius in spots:draw.ellipse((x+dx-radius,y+dy-radius,x+dx+radius,y+dy+radius),fill=dark,outline=base,width=1)
+            if key=="fire_stone":draw.line((x-5,y+14,x+3,y+2,x-2,y-7,x+8,y-17),fill=(255,232,139),width=3)
+            elif key=="water_stone":
+                for dx,dy,radius in ((-8,-10,3),(7,2,2),(1,13,2)):draw.ellipse((x+dx-radius,y+dy-radius,x+dx+radius,y+dy+radius),outline=(225,248,255),width=2)
+            elif key=="thunder_stone":draw.line((x+7,y-17,x-4,y-3,x+3,y-3,x-8,y+16),fill=(255,255,218),width=4)
+            elif key=="leaf_stone":draw.line((x,y-18,x,y+16),fill=(215,239,155),width=3);draw.line((x,y-7,x-9,y-13,x,y-2,x+10,y-9,x,y+5,x-9,y+11),fill=(215,239,155),width=2)
+            else:draw.ellipse((x-5,y-14,x+1,y-8),fill=(238,226,250));draw.ellipse((x+7,y-2,x+10,y+1),fill=(238,226,250))
+
+    def _bag_card_sync(self,items,trainer_name,item_data=None):
+        canvas=Image.new("RGB",(900,650),(225,217,177));draw=ImageDraw.Draw(canvas);draw.rounded_rectangle((20,18,880,632),18,fill=(245,239,207),outline=(54,83,70),width=5)
+        trainer=" ".join(str(trainer_name).split())[:24] or "Trainer";draw.text((45,35),f"{trainer.upper()}'S POKE BAG",fill=(42,70,58),font=ImageFont.load_default(size=29),stroke_width=1,stroke_fill=(42,70,58))
+        for index,(key,label,count) in enumerate(items):
+            col=index%2;row=index//2;left=43+410*col;top=92+99*row
+            draw.rounded_rectangle((left,top,left+384,top+82),12,fill=(221,229,200),outline=(78,105,88),width=3)
+            data=item_data[index] if item_data and index<len(item_data) else None
+            if data:
+                icon=self._open(data,(58,58),trim=True,upscale=True);canvas.paste(icon,(left+48-icon.width//2,top+41-icon.height//2),icon)
+            else:self._mart_icon(draw,key,(left+48,top+41))
+            draw.text((left+88,top+16),label,fill=(42,70,58),font=ImageFont.load_default(size=19),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+47),f"OWNED  {count:,}",fill=(65,91,78),font=ImageFont.load_default(size=20),stroke_width=1,stroke_fill=(65,91,78))
+        draw.text((45,598),"BALLS · MEDICINE · EVOLUTION STONES",fill=(65,91,78),font=ImageFont.load_default(size=14));return self._save(canvas)
+
+    def _mart_card_sync(self,items,balance,currency,scope,item_data=None):
+        canvas=Image.new("RGB",(900,650),(225,217,177));draw=ImageDraw.Draw(canvas);draw.rounded_rectangle((20,18,880,632),18,fill=(245,239,207),outline=(54,83,70),width=5)
+        draw.text((45,35),"POKE MART",fill=(42,70,58),font=ImageFont.load_default(size=31),stroke_width=1,stroke_fill=(42,70,58));draw.text((650,43),f"BALANCE  {balance:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=20),stroke_width=1,stroke_fill=(65,91,78),anchor="mt")
+        for index,(key,label,price) in enumerate(items):
+            col=index%2;row=index//2;left=43+410*col;top=92+99*row
+            draw.rounded_rectangle((left,top,left+384,top+82),12,fill=(221,229,200),outline=(78,105,88),width=3)
+            data=item_data[index] if item_data and index<len(item_data) else None
+            if data:
+                icon=self._open(data,(58,58),trim=True,upscale=True);canvas.paste(icon,(left+48-icon.width//2,top+41-icon.height//2),icon)
+            else:self._mart_icon(draw,key,(left+48,top+41))
+            draw.text((left+88,top+16),label,fill=(42,70,58),font=ImageFont.load_default(size=19),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+47),f"{price:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=20),stroke_width=1,stroke_fill=(65,91,78))
+        draw.text((45,598),f"{scope.upper()} BANK · USE THE BUTTONS BELOW TO BUY ONE",fill=(65,91,78),font=ImageFont.load_default(size=14))
+        return self._save(canvas)
+
     def _collection_card_sync(self,pokemon,data,page,pages,total,trainer_name,party_slots=None):
         canvas=Image.new("RGB",(900,720),(225,217,177));draw=ImageDraw.Draw(canvas)
         for y in range(720):
@@ -394,11 +484,11 @@ class BattleRenderer:
             image=self._open(raw,(142,120),trim=True,upscale=True);canvas.paste(image,(cx-image.width//2,top+126-image.height),image)
             species=SPECIES[item.species_id];name=item.nickname or species.name;number=(page-1)*9+index+1
             shiny=" · SHINY" if item.shiny else ""
-            draw.text((left+12,top+149),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=17))
-            level_text=f"Lv.{item.level}";level_font=ImageFont.load_default(size=14);level_x=left+180
-            draw.text((level_x,top+151),level_text,fill=(65,91,78),font=level_font)
-            mark_x=min(left+239,level_x+int(draw.textlength(level_text,font=level_font))+6)
-            self._gender_mark(draw,(mark_x,top+150),item.gender,(65,91,78))
+            draw.text((left+12,top+149),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=17),stroke_width=1,stroke_fill=(42,70,58))
+            level_text=f"Lv. {item.level}";level_font=ImageFont.load_default(size=15);level_x=left+176
+            draw.text((level_x,top+150),level_text,fill=(42,70,58),font=level_font)
+            mark_x=min(left+239,level_x+int(draw.textlength(level_text,font=level_font))+8)
+            self._gender_mark(draw,(mark_x,top+148),item.gender,(42,70,58),width=2)
             if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
             slot=party_slots[index] if index<len(party_slots) else None
             if slot:
@@ -446,7 +536,7 @@ class BattleRenderer:
         self._dialogue(draw,battle.result or f"{badge} earned!",(70,360),width=76,size=16)
         return self._save(canvas)
 
-    def _battle_result_sync(self,battle,data,avatar_data=None):
+    def _battle_result_sync(self,battle,data,avatar_data=None,ball_data=None):
         wild=SPECIES[battle.wild_species_id];message=self.battle_result_text(battle)
         if battle.state in {"lost","ran"}:
             canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
@@ -473,7 +563,10 @@ class BattleRenderer:
         if battle.state=="caught":
             draw.ellipse((pokemon_x-155,205,pokemon_x+155,310),fill=(182,168,89),outline=RETRO[0],width=4)
             image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,240-image.height),image)
-            self._pokeball(draw,((295 if has_avatar else 400),290),43)
+            ball_center=((295 if has_avatar else 400),290)
+            if ball_data:
+                ball=self._open(ball_data,(86,86),trim=True,upscale=True);canvas.paste(ball,(ball_center[0]-ball.width//2,ball_center[1]-ball.height//2),ball)
+            else:self._pokeball(draw,ball_center,43)
         else:
             heading="Victory!"
             draw.text((400-int(draw.textlength(heading,font=ImageFont.load_default(size=34)))//2,42),heading,fill=RETRO[0],font=ImageFont.load_default(size=34))
@@ -484,6 +577,7 @@ class BattleRenderer:
         if battle.state=="caught":
             font=ImageFont.load_default(size=14);level=f"Lv. {battle.wild_level}";draw.text((70,386),level,fill=RETRO[1],font=font)
             mark_x=70+int(draw.textlength(level,font=font))+8;self._gender_mark(draw,(mark_x,384),battle.wild_gender,RETRO[1])
+            caught=f"Caught: {max(1,int(battle.caught_count))}";count_font=ImageFont.load_default(size=16);draw.text((730,384),caught,fill=RETRO[1],font=count_font,stroke_width=1,stroke_fill=RETRO[1],anchor="ra")
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0,expired=False,shiny=False):

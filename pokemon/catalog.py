@@ -1,4 +1,4 @@
-"""Bounded PokéAPI catalog cache with bundled fallback data."""
+"""Bounded PokeAPI catalog cache with bundled fallback data."""
 
 import asyncio
 import json
@@ -35,7 +35,7 @@ class PokemonCatalog:
                 if version:CATALOG_VERSIONS.get(version)
                 parsed = [self.parse_cached(item) for item in raw.get("species", [])]
             except (OSError, ValueError, TypeError, KeyError, CatalogVersionError) as exc:
-                raise CatalogError("The Pokémon catalog cache is invalid.") from exc
+                raise CatalogError("The Pokemon catalog cache is invalid.") from exc
             for item in parsed:
                 previous=SPECIES.get(item.id)
                 if previous and previous.learnset and (item.id<=151 or not item.learnset):
@@ -98,16 +98,16 @@ class PokemonCatalog:
         try:
             async with session.get(f"{API_ROOT}{path}") as response:
                 if response.status != 200:
-                    raise CatalogError(f"PokéAPI returned HTTP {response.status}.")
+                    raise CatalogError(f"PokeAPI returned HTTP {response.status}.")
                 return await response.json()
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
-            raise CatalogError("PokéAPI request failed.") from exc
+            raise CatalogError("PokeAPI request failed.") from exc
 
     @staticmethod
     def parse_api(pokemon: dict, species: dict, generation: int = 1) -> Species:
         species_id = int(pokemon["id"])
         if not 1 <= species_id <= MAX_SPECIES:
-            raise CatalogError("PokéAPI returned an unsupported species ID.")
+            raise CatalogError("PokeAPI returned an unsupported species ID.")
         stats = {
             str(item["stat"]["name"]): int(item["base_stat"])
             for item in pokemon["stats"]

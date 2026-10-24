@@ -11,7 +11,7 @@ class Ball:
 
 
 BALLS = {
-    "poke_ball": Ball("poke_ball","Poké Ball",1.0),
+    "poke_ball": Ball("poke_ball","Poke Ball",1.0),
     "great_ball": Ball("great_ball","Great Ball",1.5),
     "ultra_ball": Ball("ultra_ball","Ultra Ball",2.0),
 }

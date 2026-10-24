@@ -66,7 +66,7 @@ class MainMenuView(discord.ui.View):
 
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
-        await interaction.response.send_message("This Pokémon menu belongs to another trainer.",ephemeral=True);return False
+        await interaction.response.send_message("This Pokemon menu belongs to another trainer.",ephemeral=True);return False
 
 
 class GymChallengeView(discord.ui.View):
@@ -82,14 +82,14 @@ class GymChallengeView(discord.ui.View):
 
 
 class ReleasePokemonView(discord.ui.View):
-    def __init__(self,cog,user_id,identity,name):
-        super().__init__(timeout=120);self.cog=cog;self.user_id=user_id;self.identity=identity;self.name=name
+    def __init__(self,cog,user_id,identity,name,source_message=None):
+        super().__init__(timeout=120);self.cog=cog;self.user_id=user_id;self.identity=identity;self.name=name;self.source_message=source_message
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This release confirmation belongs to another trainer.",ephemeral=True);return False
-    @discord.ui.button(label="Release Pokémon",emoji="🕊️",style=discord.ButtonStyle.danger)
-    async def confirm(self,interaction,button):await self.cog.release_collection_pokemon(interaction,self.identity,self.name)
-    @discord.ui.button(label="Keep Pokémon",style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Release Pokemon",emoji="🕊️",style=discord.ButtonStyle.danger)
+    async def confirm(self,interaction,button):await self.cog.release_collection_pokemon(interaction,self.identity,self.name,self.source_message)
+    @discord.ui.button(label="Keep Pokemon",style=discord.ButtonStyle.secondary)
     async def cancel(self,interaction,button):await interaction.response.edit_message(content=f"**{self.name}** was kept.",view=None)
 
 
@@ -132,6 +132,21 @@ class TradeView(discord.ui.View):
     async def decline(self,interaction,button):await self.cog.cancel_trade(interaction,self.trade_id)
 
 
+class MartItemButton(discord.ui.Button):
+    def __init__(self,cog,user_id,key,label,row):
+        super().__init__(label=label,style=discord.ButtonStyle.primary,row=row)
+        self.cog=cog;self.user_id=user_id;self.key=key
+    async def callback(self,interaction):
+        await self.cog.mart_button_purchase(interaction,self.key)
+
+class MartView(discord.ui.View):
+    def __init__(self,cog,user_id,items):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id
+        for index,(key,label) in enumerate(items):self.add_item(MartItemButton(cog,user_id,key,label,index//5))
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This Poke Mart belongs to another trainer.",ephemeral=True);return False
+
 class CollectionPokemonSelect(discord.ui.Select):
     def __init__(self,cog,user_id,items):
         options=[]
@@ -139,25 +154,36 @@ class CollectionPokemonSelect(discord.ui.Select):
             species=SPECIES[item["species_id"]];name=item.get("nickname") or species.name
             party=f" · P{item['party_slot']}" if item.get("party_slot") else ""
             options.append(discord.SelectOption(label=f"{number}. {name} · Lv.{item['level']}{party}",value=item["instance_id"]))
-        super().__init__(placeholder="Select a Pokémon for your party…",options=options,row=0)
+        super().__init__(placeholder="Select a Pokemon to manage…",options=options,row=0)
         self.cog=cog;self.user_id=user_id
     async def callback(self,interaction):
         await self.cog.collection_party_choice(interaction,self.values[0])
 
+class CollectionSortSelect(discord.ui.Select):
+    OPTIONS=(("A–Z","name_asc"),("Z–A","name_desc"),("Highest level","level_desc"),("Lowest level","level_asc"))
+    def __init__(self,view,sort):
+        options=[discord.SelectOption(label=label,value=value,default=value==sort) for label,value in self.OPTIONS]
+        super().__init__(placeholder="Sort collection…",options=options,row=1)
+        self.browser=view
+    async def callback(self,interaction):
+        await self.browser.refresh(interaction,1,self.values[0])
+
 class CollectionBrowserView(discord.ui.View):
-    def __init__(self,cog,user_id,page,pages,items):
-        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;self.page=page;self.pages=pages
+    def __init__(self,cog,user_id,page,pages,items,sort="name_asc"):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;self.page=page;self.pages=pages;self.sort=sort
         if items:self.add_item(CollectionPokemonSelect(cog,user_id,items))
+        self.add_item(CollectionSortSelect(self,sort))
         self.previous.disabled=page<=1;self.next.disabled=page>=pages
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This collection belongs to another trainer.",ephemeral=True);return False
-    async def refresh(self,interaction,page):
-        embed,files,page,pages,items=await self.cog.rendered_collection(interaction.user,page)
-        await interaction.response.edit_message(embed=embed,attachments=files,view=CollectionBrowserView(self.cog,self.user_id,page,pages,items))
-    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary,row=1)
+    async def refresh(self,interaction,page,sort=None):
+        sort=sort or self.sort
+        embed,files,page,pages,items=await self.cog.rendered_collection(interaction.user,page,sort=sort)
+        await interaction.response.edit_message(embed=embed,attachments=files,view=CollectionBrowserView(self.cog,self.user_id,page,pages,items,sort))
+    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary,row=2)
     async def previous(self,interaction,button):await self.refresh(interaction,self.page-1)
-    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=1)
+    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=2)
     async def next(self,interaction,button):await self.refresh(interaction,self.page+1)
 
 class PartyPlacementButton(discord.ui.Button):
@@ -178,9 +204,15 @@ class PartyPlacementView(discord.ui.View):
             action="Move to" if moving else "Replace"
             label=f"{action} {index+1}: {name}{level}"
             self.add_item(PartyPlacementButton(cog,user_id,identity,target,label[:80],1+index//3,source_message))
+        release=discord.ui.Button(label="Remove from party to release" if moving else "Release Pokemon",emoji="🕊️",style=discord.ButtonStyle.danger,row=4,disabled=moving)
+        release.callback=self.release
+        self.add_item(release)
+        self.cog=cog;self.identity=identity;self.source_message=source_message
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This party choice belongs to another trainer.",ephemeral=True);return False
+    async def release(self,interaction):
+        await self.cog.begin_collection_release(interaction,self.identity,self.source_message)
 
 
 class MoveForgetSelect(discord.ui.Select):
@@ -242,7 +274,7 @@ class BattleView(BattleMenu):
     async def fight(self, interaction, button):
         await interaction.response.edit_message(view=FightView(self.cog, self.encounter_id))
 
-    @discord.ui.button(label="Pokémon", emoji="🔄", style=discord.ButtonStyle.primary, custom_id="party")
+    @discord.ui.button(label="Pokemon", emoji="🔄", style=discord.ButtonStyle.primary, custom_id="party")
     async def party(self, interaction, button):
         await interaction.response.edit_message(view=PartyView(self.cog, self.encounter_id))
 
@@ -356,7 +388,7 @@ class BagView(BattleMenu):
                 button.label=f"{button.label} x{counts[key]}";button.disabled=counts[key]<1
         self.ball.custom_id=f"pokemon:{encounter_id}:bag:ball";self.great_ball.custom_id=f"pokemon:{encounter_id}:bag:great";self.ultra_ball.custom_id=f"pokemon:{encounter_id}:bag:ultra";self.potion.custom_id=f"pokemon:{encounter_id}:bag:potion";self.revive.custom_id=f"pokemon:{encounter_id}:bag:revive";self.back.custom_id=f"pokemon:{encounter_id}:bag:back"
 
-    @discord.ui.button(label="Poké Ball",emoji="🔴",style=discord.ButtonStyle.success,custom_id="ball",row=0)
+    @discord.ui.button(label="Poke Ball",emoji="🔴",style=discord.ButtonStyle.success,custom_id="ball",row=0)
     async def ball(self,interaction,button):await self.cog.throw_ball(interaction,self.encounter_id,"poke_ball")
     @discord.ui.button(label="Great Ball",emoji="🔵",style=discord.ButtonStyle.primary,custom_id="great",row=0)
     async def great_ball(self,interaction,button):await self.cog.throw_ball(interaction,self.encounter_id,"great_ball")
