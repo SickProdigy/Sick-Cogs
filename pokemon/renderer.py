@@ -391,7 +391,19 @@ class BattleRenderer:
         elif key in {"potion","revive"}:
             color=(205,90,119) if key=="potion" else (238,190,64);draw.rounded_rectangle((x-17,y-19,x+17,y+25),7,fill=color,outline=(42,70,58),width=3);draw.rectangle((x-9,y-28,x+9,y-18),fill=(225,231,216),outline=(42,70,58),width=2);draw.line((x-9,y+2,x+9,y+2),fill=(245,239,207),width=4)
         else:
-            colors={"fire_stone":(218,91,52),"water_stone":(69,132,202),"thunder_stone":(229,190,45),"leaf_stone":(83,151,73),"moon_stone":(132,112,170)};color=colors[key];points=[(x,y-29),(x+22,y-8),(x+17,y+23),(x-17,y+23),(x-22,y-8)];draw.polygon(points,fill=color,outline=(42,70,58));draw.line(points+[points[0]],fill=(42,70,58),width=3)
+            palettes={"fire_stone":((126,48,31),(226,78,39),(255,177,72)),"water_stone":((34,78,142),(52,132,211),(151,219,255)),"thunder_stone":((156,111,18),(239,190,32),(255,242,116)),"leaf_stone":((42,104,53),(72,154,70),(166,218,111)),"moon_stone":((69,58,111),(125,104,170),(206,190,232))};dark,base,glow=palettes[key]
+            layers=(((0,-29),(22,-8),(17,23),(-17,23),(-22,-8)),((0,-23),(17,-6),(13,18),(-13,18),(-17,-6)),((-2,-17),(11,-5),(8,10),(-8,10),(-11,-5)))
+            for points,color in zip(layers,(dark,base,glow)):
+                polygon=[(x+dx,y+dy) for dx,dy in points];draw.polygon(polygon,fill=color)
+            outer=[(x+dx,y+dy) for dx,dy in layers[0]];draw.line(outer+[outer[0]],fill=(42,70,58),width=3)
+            spots={"fire_stone":[(-8,-5,4),(8,7,3)],"water_stone":[(-7,5,4),(8,-8,3),(10,10,2)],"thunder_stone":[(-9,9,3),(9,-8,3)],"leaf_stone":[(-9,-4,3),(9,8,3)],"moon_stone":[(-8,-5,5),(8,8,4),(7,-12,2)]}[key]
+            for dx,dy,radius in spots:draw.ellipse((x+dx-radius,y+dy-radius,x+dx+radius,y+dy+radius),fill=dark,outline=base,width=1)
+            if key=="fire_stone":draw.line((x-5,y+14,x+3,y+2,x-2,y-7,x+8,y-17),fill=(255,232,139),width=3)
+            elif key=="water_stone":
+                for dx,dy,radius in ((-8,-10,3),(7,2,2),(1,13,2)):draw.ellipse((x+dx-radius,y+dy-radius,x+dx+radius,y+dy+radius),outline=(225,248,255),width=2)
+            elif key=="thunder_stone":draw.line((x+7,y-17,x-4,y-3,x+3,y-3,x-8,y+16),fill=(255,255,218),width=4)
+            elif key=="leaf_stone":draw.line((x,y-18,x,y+16),fill=(215,239,155),width=3);draw.line((x,y-7,x-9,y-13,x,y-2,x+10,y-9,x,y+5,x-9,y+11),fill=(215,239,155),width=2)
+            else:draw.ellipse((x-5,y-14,x+1,y-8),fill=(238,226,250));draw.ellipse((x+7,y-2,x+10,y+1),fill=(238,226,250))
 
     def _mart_card_sync(self,items,balance,currency,scope):
         canvas=Image.new("RGB",(900,650),(225,217,177));draw=ImageDraw.Draw(canvas);draw.rounded_rectangle((20,18,880,632),18,fill=(245,239,207),outline=(54,83,70),width=5)
