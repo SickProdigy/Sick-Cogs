@@ -17,7 +17,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,GymChallengeView,TradeCollectionView,ReleasePokemonView,MartView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,TradeLobbyView,TradeSelectionView,GymChallengeView,TradeCollectionView,ReleasePokemonView,MartView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -328,7 +328,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.2.0";__author__="SickProdigy"
+    __version__="1.3.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -352,7 +352,9 @@ class Pokemon(commands.Cog):
                             await self.config.encounters.set(records)
             elif raw.get("state")=="open":self.bot.add_view(EncounterView(self,int(key)),message_id=raw.get("message_id"))
         for key,raw in (await self.config.trades()).items():
-            if raw.get("state")=="offered" and raw.get("message_id"):
+            if raw.get("state") in {"lobby","review"} and raw.get("message_id"):
+                self.bot.add_view(TradeLobbyView(self,int(key),raw),message_id=int(raw["message_id"]))
+            elif raw.get("state")=="offered" and raw.get("message_id"):
                 self.bot.add_view(TradeView(self,int(key),int(raw["offerer_id"]),int(raw["recipient_id"])),message_id=int(raw["message_id"]))
     def cog_unload(self):
         self.cleanup_loop.cancel();self.bot.loop.create_task(self.renderer.close())
@@ -641,7 +643,7 @@ class Pokemon(commands.Cog):
     @staticmethod
     def trade_reserved(trades,instance_id,exclude=None):
         for key,raw in trades.items():
-            if str(key)==str(exclude) or raw.get("state") not in {"offered","settling"}:continue
+            if str(key)==str(exclude) or raw.get("state") not in {"lobby","review","offered","settling"}:continue
             reserved=set(raw.get("offered_ids",[]))|{raw.get("offered_id"),raw.get("requested_id")}
             if instance_id in reserved:return True
         return False
@@ -657,16 +659,16 @@ class Pokemon(commands.Cog):
         async with self.lock("trades"):
             trades=await self.config.trades();record=trades.get(str(trade_id))
             if not record or record.get("state") not in ({"settling"} if recovering else {"offered","settling"}):return None
-            first=min(int(record["offerer_id"]),int(record["recipient_id"]));second=max(int(record["offerer_id"]),int(record["recipient_id"]))
+            first=min(int(record["offerer_id"]),int(record.get("recipient_id") or 0));second=max(int(record["offerer_id"]),int(record.get("recipient_id") or 0))
             async with self.lock(("user",first)),self.lock(("user",second)):
-                offerer_section=self.config.user_from_id(int(record["offerer_id"]));recipient_section=self.config.user_from_id(int(record["recipient_id"]))
+                offerer_section=self.config.user_from_id(int(record["offerer_id"]));recipient_section=self.config.user_from_id(int(record.get("recipient_id") or 0))
                 offerer=await offerer_section.all();recipient=await recipient_section.all();gift=record.get("kind")=="gift"
                 if record.get("state")=="offered":
-                    if self.trainer_in_active_battle(int(record["offerer_id"])) or self.trainer_in_active_battle(int(record["recipient_id"])):raise ValueError("Finish both trainers’ active battles before accepting the trade.")
+                    if self.trainer_in_active_battle(int(record["offerer_id"])) or self.trainer_in_active_battle(int(record.get("recipient_id") or 0)):raise ValueError("Finish both trainers’ active battles before accepting the trade.")
                     if gift:
                         offered_ids=list(record.get("offered_ids",[]));owned={raw.get("instance_id"):dict(raw) for raw in offerer.get("collection",[])};offered=[owned.get(identity) for identity in offered_ids]
                         if not offered_ids or any(raw is None for raw in offered) or len(offerer.get("collection",[]))-len(offered_ids)<1:record["state"]="invalid";trades[str(trade_id)]=record;await self.config.trades.set(trades);return record
-                        capacity=await self.vip_capacity(int(record["recipient_id"]));needed=sum(1 for raw in offered if not any(item.get("instance_id")==raw["instance_id"] for item in recipient.get("collection",[])))
+                        capacity=await self.vip_capacity(int(record.get("recipient_id") or 0));needed=sum(1 for raw in offered if not any(item.get("instance_id")==raw["instance_id"] for item in recipient.get("collection",[])))
                         if len(recipient.get("collection",[]))+needed>capacity:raise ValueError(f"The receiving trainer does not have {needed} free collection slot(s).")
                         record["offered_pokemon"]=offered
                     else:
@@ -701,7 +703,7 @@ class Pokemon(commands.Cog):
         async with self.lock("trades"):
             trades=await self.config.trades()
             for key,raw in trades.items():
-                if raw.get("state")!="offered":continue
+                if raw.get("state") not in {"lobby","review","offered"}:continue
                 try:due=datetime.fromisoformat(raw["expires_at"])
                 except (KeyError,TypeError,ValueError):due=now
                 if due<=now:raw["state"]="expired";expired.append(dict(raw))
@@ -1519,12 +1521,118 @@ class Pokemon(commands.Cog):
         if final and record.get("evolutions"):embed.add_field(name="Trade Evolution",value="\n".join(evolution_lines(record["evolutions"])),inline=False)
         embed.set_footer(text=f"Trade #{record['trade_id']}");return embed
 
+
+    @staticmethod
+    def trade_lobby_embed(record):
+        symbols={"male":"♂","female":"♀","genderless":"—","unknown":"?"}
+        embed=discord.Embed(title="Pokemon Trade",description="Choose one Pokemon each, lock both offers, then both trainers must give final approval.",color=discord.Color.gold())
+        for side,label,prefix in (("offerer","Trainer 1","offered"),("recipient","Trainer 2","requested")):
+            name=record.get(f"{side}_name") or "Waiting for a trainer…";pokemon_name=record.get(f"{prefix}_name")
+            choice=(f"**{'Shiny ' if record.get(f'{prefix}_shiny') else ''}{pokemon_name}** · {symbols.get(record.get(f'{prefix}_gender'),'?')} · Lv.{record.get(f'{prefix}_level')}") if pokemon_name else "No Pokemon selected"
+            locked=bool(record.get(f"{side}_locked"));confirmed=bool(record.get(f"{side}_confirmed"));status="✅ Final accepted" if confirmed else ("🔒 Offer locked" if locked else "✏️ Offer unlocked")
+            embed.add_field(name=f"{label} · {name}",value=f"{choice}\n{status}",inline=True)
+        if record.get("offerer_locked") and record.get("recipient_locked"):embed.description="Both offers are locked. Review both Pokemon carefully, then each trainer presses **Final Accept**."
+        elif not record.get("recipient_id"):embed.description="Press **Join Trade** to become Trainer 2."
+        embed.set_footer(text=f"Trade #{record['trade_id']} · Expires in 15 minutes");return embed
+
+    async def get_trade_lobby(self,trade_id):
+        record=(await self.config.trades()).get(str(trade_id))
+        return record if record and record.get("state") in {"lobby","review"} else None
+
+    async def refresh_trade_lobby(self,record):
+        channel=self.bot.get_channel(int(record.get("channel_id",0)))
+        if not channel or not record.get("message_id"):return
+        try:message=await channel.fetch_message(int(record["message_id"]));await message.edit(content=None,embed=self.trade_lobby_embed(record),view=TradeLobbyView(self,int(record["trade_id"]),record))
+        except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
+
+    async def join_trade_lobby(self,interaction,trade_id):
+        async with self.lock("trades"):
+            trades=await self.config.trades();record=trades.get(str(trade_id))
+            if not record or record.get("state")!="lobby":await interaction.response.send_message("This trade is no longer open.",ephemeral=True);return
+            if record.get("recipient_id"):await interaction.response.send_message("Another trainer already joined this trade.",ephemeral=True);return
+            if interaction.user.id==int(record["offerer_id"]):await interaction.response.send_message("Trainer 1 cannot join their own trade.",ephemeral=True);return
+            if interaction.user.bot:await interaction.response.send_message("Bots cannot trade Pokemon.",ephemeral=True);return
+            if self.trainer_in_active_battle(interaction.user.id):await interaction.response.send_message("Finish your active battle before joining a trade.",ephemeral=True);return
+            record["recipient_id"]=interaction.user.id;record["recipient_name"]=interaction.user.display_name;trades[str(trade_id)]=record;await self.config.trades.set(trades)
+        await interaction.response.edit_message(content=None,embed=self.trade_lobby_embed(record),view=TradeLobbyView(self,trade_id,record))
+
+    async def show_lobby_collection(self,interaction,trade_id,page=1,edit=False):
+        record=await self.get_trade_lobby(trade_id);participants={int(record["offerer_id"]),int(record.get("recipient_id") or 0)} if record else set()
+        if not record or interaction.user.id not in participants:await interaction.response.send_message("This trade belongs to other trainers.",ephemeral=True);return
+        side="offerer" if interaction.user.id==int(record["offerer_id"]) else "recipient"
+        if record.get(f"{side}_locked"):await interaction.response.send_message("Unlock your offer before choosing a different Pokemon.",ephemeral=True);return
+        conf=await self.config.user(interaction.user).all();ordered=self.sorted_collection(conf);trades=await self.config.trades();current=record.get("offered_id" if side=="offerer" else "requested_id")
+        available=[(index+1,item) for index,item in enumerate(ordered) if item["instance_id"]==current or not self.trade_reserved(trades,item["instance_id"],trade_id)]
+        per_page=25;pages=max(1,(len(available)+per_page-1)//per_page);page=max(1,min(page,pages));shown=available[(page-1)*per_page:page*per_page]
+        embed=discord.Embed(title=f"Choose your trade Pokemon · Page {page}/{pages}",description="Your selection stays private until you choose it.",color=discord.Color.blurple());view=TradeSelectionView(self,trade_id,interaction.user.id,page,pages,shown)
+        if edit:await interaction.response.edit_message(embed=embed,view=view)
+        else:await interaction.response.send_message(embed=embed,view=view,ephemeral=True)
+
+    async def select_lobby_pokemon(self,interaction,trade_id,instance_id):
+        async with self.lock("trades"),self.lock(("user",interaction.user.id)):
+            trades=await self.config.trades();record=trades.get(str(trade_id))
+            if not record or record.get("state") not in {"lobby","review"}:await interaction.response.edit_message(content="This trade is no longer available.",embed=None,view=None);return
+            if interaction.user.id==int(record["offerer_id"]):side,field="offerer","offered"
+            elif interaction.user.id==int(record.get("recipient_id") or 0):side,field="recipient","requested"
+            else:await interaction.response.send_message("This trade belongs to other trainers.",ephemeral=True);return
+            if record.get(f"{side}_locked"):await interaction.response.send_message("Unlock your offer before changing it.",ephemeral=True);return
+            conf=await self.config.user(interaction.user).all();raw=next((item for item in conf.get("collection",[]) if item.get("instance_id")==instance_id),None)
+            if not raw or self.trade_reserved(trades,instance_id,trade_id):await interaction.response.edit_message(content="That Pokemon is unavailable for this trade.",embed=None,view=None);return
+            record[f"{field}_id"]=instance_id;record[f"{field}_name"]=raw.get("nickname") or SPECIES[raw["species_id"]].name;record[f"{field}_level"]=int(raw["level"]);record[f"{field}_gender"]=raw.get("gender","unknown");record[f"{field}_shiny"]=bool(raw.get("shiny",False))
+            record["state"]="lobby";record["offerer_confirmed"]=False;record["recipient_confirmed"]=False;trades[str(trade_id)]=record;await self.config.trades.set(trades)
+        await interaction.response.edit_message(content=f"Selected **{record[f'{field}_name']}**. Return to the trade card and lock your offer when ready.",embed=None,view=None);await self.refresh_trade_lobby(record)
+
+    async def toggle_trade_lock(self,interaction,trade_id,side):
+        async with self.lock("trades"):
+            trades=await self.config.trades();record=trades.get(str(trade_id));expected=record.get(f"{side}_id") if record else None
+            if not record or record.get("state") not in {"lobby","review"}:await interaction.response.send_message("This trade is no longer available.",ephemeral=True);return
+            if interaction.user.id!=int(expected or 0):await interaction.response.send_message(f"Only {side.title()} can use this lock.",ephemeral=True);return
+            selection="offered_id" if side=="offerer" else "requested_id"
+            if not record.get(selection):await interaction.response.send_message("Choose a Pokemon before locking your offer.",ephemeral=True);return
+            record[f"{side}_locked"]=not bool(record.get(f"{side}_locked"));record["offerer_confirmed"]=False;record["recipient_confirmed"]=False;record["state"]="review" if record.get("offerer_locked") and record.get("recipient_locked") else "lobby";trades[str(trade_id)]=record;await self.config.trades.set(trades)
+        await interaction.response.edit_message(content=None,embed=self.trade_lobby_embed(record),view=TradeLobbyView(self,trade_id,record))
+
+    async def final_accept_lobby(self,interaction,trade_id):
+        settle=False
+        async with self.lock("trades"):
+            trades=await self.config.trades();record=trades.get(str(trade_id))
+            if not record or record.get("state")!="review":await interaction.response.send_message("Both trainers must lock their offers first.",ephemeral=True);return
+            if self.trainer_in_active_battle(int(record["offerer_id"])) or self.trainer_in_active_battle(int(record["recipient_id"])):await interaction.response.send_message("Finish both trainers’ active battles before confirming the trade.",ephemeral=True);return
+            if interaction.user.id==int(record["offerer_id"]):side="offerer"
+            elif interaction.user.id==int(record.get("recipient_id") or 0):side="recipient"
+            else:await interaction.response.send_message("This trade belongs to other trainers.",ephemeral=True);return
+            record[f"{side}_confirmed"]=True
+            if record.get("offerer_confirmed") and record.get("recipient_confirmed"):record["state"]="offered";settle=True
+            trades[str(trade_id)]=record;await self.config.trades.set(trades)
+        if settle:await self.accept_trade(interaction,trade_id)
+        else:await interaction.response.edit_message(content=None,embed=self.trade_lobby_embed(record),view=TradeLobbyView(self,trade_id,record))
+
+    async def create_trade_lobby(self,ctx,member=None):
+        if member and member.id==ctx.author.id:await ctx.send("Choose another trainer to trade with.");return
+        if member and member.bot:await ctx.send("Bots cannot own or trade Pokemon.");return
+        if self.trainer_in_active_battle(ctx.author.id) or (member and self.trainer_in_active_battle(member.id)):await ctx.send("Finish active battles before opening a trade.");return
+        trade_id=int(await self.config.next_trade());await self.config.next_trade.set(trade_id+1);now=datetime.now(timezone.utc)
+        record={"trade_id":trade_id,"kind":"lobby","state":"lobby","offerer_id":ctx.author.id,"recipient_id":member.id if member else None,"offerer_name":ctx.author.display_name,"recipient_name":member.display_name if member else None,"offered_id":None,"requested_id":None,"offerer_locked":False,"recipient_locked":False,"offerer_confirmed":False,"recipient_confirmed":False,"created_at":now.isoformat(),"expires_at":(now+timedelta(seconds=TRADE_TIMEOUT_SECONDS)).isoformat(),"guild_id":ctx.guild.id,"channel_id":ctx.channel.id,"message_id":None}
+        async with self.lock("trades"):
+            trades=await self.config.trades();trades[str(trade_id)]=record;await self.config.trades.set(trades)
+        try:message=await ctx.send(content=member.mention if member else None,embed=self.trade_lobby_embed(record),view=TradeLobbyView(self,trade_id,record),allowed_mentions=discord.AllowedMentions(users=True,roles=False,everyone=False))
+        except Exception:
+            async with self.lock("trades"):
+                trades=await self.config.trades();current=trades.get(str(trade_id))
+                if current and current.get("state")=="lobby":current["state"]="delivery_failed";trades[str(trade_id)]=current;await self.config.trades.set(trades)
+            raise
+        async with self.lock("trades"):
+            trades=await self.config.trades();current=trades.get(str(trade_id))
+            if current and current.get("state")=="lobby":current["message_id"]=message.id;trades[str(trade_id)]=current;await self.config.trades.set(trades)
+
     @pokemon.group(name="trade",invoke_without_command=True)
     @commands.guild_only()
     async def trade(self,ctx,member:discord.Member=None,your_slot:int=None,their_slot:int=None):
         """Offer an exact Pokemon-for-Pokemon trade."""
+        if your_slot is None and their_slot is None:
+            await self.create_trade_lobby(ctx,member);return
         if member is None or your_slot is None or their_slot is None:
-            await ctx.send("Use `pokemon trade @trainer <your collection number> <their collection number>`. View another trainer’s numbered choices with `pokemon trade collection @trainer`. Both Pokemon are shown for confirmation.");return
+            await ctx.send("Use `pokemon trade` for an interactive trade, or `pokemon trade @trainer <your number> <their number>` for the numbered shortcut.");return
         if member.id==ctx.author.id:await ctx.send("Choose another trainer to trade with.");return
         if member.bot:await ctx.send("Bots cannot own or trade Pokemon.");return
         first=min(ctx.author.id,member.id);second=max(ctx.author.id,member.id)
@@ -1590,8 +1698,8 @@ class Pokemon(commands.Cog):
         """Cancel one of your pending trade offers."""
         async with self.lock("trades"):
             trades=await self.config.trades();record=trades.get(str(trade_id))
-            if not record or record.get("state")!="offered":await ctx.send("That trade is no longer pending.");return
-            if ctx.author.id not in {int(record["offerer_id"]),int(record["recipient_id"])}:await ctx.send("That trade belongs to other trainers.");return
+            if not record or record.get("state") not in {"lobby","review","offered"}:await ctx.send("That trade is no longer pending.");return
+            if ctx.author.id not in {int(value) for value in (record.get("offerer_id"),record.get("recipient_id")) if value is not None}:await ctx.send("That trade belongs to other trainers.");return
             record["state"]="cancelled";trades[str(trade_id)]=record;await self.config.trades.set(trades)
         await self.close_trade_message(record,f"Trade #{trade_id} was cancelled.");await ctx.send(f"Trade #{trade_id} cancelled.")
 
@@ -1620,9 +1728,9 @@ class Pokemon(commands.Cog):
     async def cancel_trade(self,interaction,trade_id):
         async with self.lock("trades"):
             trades=await self.config.trades();record=trades.get(str(trade_id))
-            if not record or record.get("state")!="offered":await interaction.response.edit_message(content="This trade is no longer available.",view=None);return
-            if interaction.user.id not in {int(record["offerer_id"]),int(record["recipient_id"])}:await interaction.response.send_message("This trade belongs to other trainers.",ephemeral=True);return
-            record["state"]="declined" if interaction.user.id==int(record["recipient_id"]) else "cancelled";trades[str(trade_id)]=record;await self.config.trades.set(trades)
+            if not record or record.get("state") not in {"lobby","review","offered"}:await interaction.response.edit_message(content="This trade is no longer available.",view=None);return
+            if interaction.user.id not in {int(value) for value in (record.get("offerer_id"),record.get("recipient_id")) if value is not None}:await interaction.response.send_message("This trade belongs to other trainers.",ephemeral=True);return
+            record["state"]="declined" if interaction.user.id==int(record.get("recipient_id") or 0) else "cancelled";trades[str(trade_id)]=record;await self.config.trades.set(trades)
         action="declined" if record["state"]=="declined" else "cancelled";await interaction.response.edit_message(content=f"Trade #{trade_id} was {action}.",view=None)
 
     @pokemon.group(name="party",invoke_without_command=True)
@@ -2543,7 +2651,7 @@ class Pokemon(commands.Cog):
         async with self.lock("trades"),self.lock(("user",user_id)),self.lock("encounters"):
             trades=await self.config.trades()
             for raw in trades.values():
-                if raw.get("state") in {"offered","settling"} and user_id in {int(raw.get("offerer_id",0)),int(raw.get("recipient_id",0))}:raw["state"]="cancelled_deleted_user";cancelled.append(dict(raw))
+                if raw.get("state") in {"lobby","review","offered","settling"} and user_id in {int(value) for value in (raw.get("offerer_id"),raw.get("recipient_id")) if value is not None}:raw["state"]="cancelled_deleted_user";cancelled.append(dict(raw))
             await self.config.trades.set(trades);await self.config.user_from_id(user_id).clear()
             encounters=await self.config.encounters()
             for key in list(encounters):

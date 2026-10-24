@@ -16,7 +16,7 @@ from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
 from pokemon.pokemon import BIOMES, GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, biome_weight, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeCollectionView, GymChallengeView
+from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeLobbyView, TradeCollectionView, GymChallengeView
 
 
 class StoredValue:
@@ -828,6 +828,25 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         evolved=OwnedPokemon.create("kadabra",65,16,seed=2).raw();sections={10:StoredSection({"collection":[]}),20:StoredSection({"collection":[evolved]})};cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user_from_id=lambda uid:sections[uid]);cog.rendered_progression=AsyncMock(return_value=(discord.Embed(title="Kadabra evolved!"),[]))
         interaction=SimpleNamespace(followup=SimpleNamespace(send=AsyncMock()));record={"trade_id":9,"offerer_id":10,"recipient_id":20,"evolutions":[{"instance_id":"kadabra","from":64,"to":65}]}
         await cog.send_trade_evolution_cards(interaction,record);cog.rendered_progression.assert_awaited_once();interaction.followup.send.assert_awaited_once()
+
+
+    async def test_interactive_trade_lobby_requires_both_locks_and_confirmations(self):
+        record={"trade_id":3,"state":"lobby","offerer_id":10,"recipient_id":20,"offerer_name":"Red","recipient_name":"Blue","offered_id":"a","requested_id":"b","offered_name":"Charmander","requested_name":"Squirtle","offered_level":5,"requested_level":6}
+        trades=StoredValue({"3":record});cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades);cog.accept_trade=AsyncMock()
+        first=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock()))
+        second=SimpleNamespace(user=SimpleNamespace(id=20),response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock()))
+        await cog.toggle_trade_lock(first,3,"offerer");self.assertEqual(trades.value["3"]["state"],"lobby")
+        await cog.toggle_trade_lock(second,3,"recipient");self.assertEqual(trades.value["3"]["state"],"review")
+        await cog.final_accept_lobby(first,3);self.assertTrue(trades.value["3"]["offerer_confirmed"]);cog.accept_trade.assert_not_awaited()
+        await cog.final_accept_lobby(second,3);self.assertEqual(trades.value["3"]["state"],"offered");cog.accept_trade.assert_awaited_once_with(second,3)
+
+    async def test_bare_trade_command_opens_joinable_lobby(self):
+        trades=StoredValue({});next_trade=StoredValue(1);message=SimpleNamespace(id=99);author=SimpleNamespace(id=10,display_name="Red",bot=False)
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades,next_trade=next_trade)
+        ctx=SimpleNamespace(author=author,guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=2),send=AsyncMock(return_value=message))
+        await Pokemon.trade.callback(cog,ctx)
+        record=trades.value["1"];self.assertEqual(record["state"],"lobby");self.assertIsNone(record["recipient_id"]);self.assertEqual(record["message_id"],99)
+        self.assertIsInstance(ctx.send.await_args.kwargs["view"],TradeLobbyView)
 
     async def test_trade_view_limits_acceptance_to_recipient(self):
         view=TradeView(SimpleNamespace(),7,10,20);outsider=SimpleNamespace(user=SimpleNamespace(id=30),response=SimpleNamespace(send_message=AsyncMock()))
