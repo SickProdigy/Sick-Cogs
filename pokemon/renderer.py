@@ -14,6 +14,7 @@ from .data import MOVES, SPECIES, sprite
 from .models import OwnedPokemon,pokemon_max_hp
 
 SPRITE_HOST = "raw.githubusercontent.com"
+ITEM_SPRITES={key:key.replace("_","-") for key in ("poke_ball","great_ball","ultra_ball","potion","revive","fire_stone","water_stone","thunder_stone","leaf_stone","moon_stone")}
 MAX_SPRITE_BYTES = 2 * 1024 * 1024
 MAX_RENDER_BYTES = 8 * 1024 * 1024
 MAX_COVER_BYTES = 6 * 1024 * 1024
@@ -111,6 +112,25 @@ class BattleRenderer:
         await self._prune()
         return data
 
+    async def get_item_sprite(self,key):
+        name=ITEM_SPRITES.get(str(key))
+        if name is None:raise RenderError("Unknown Mart item sprite.")
+        path=self.cache_dir/f"item-{name}.png"
+        if path.exists() and 0<path.stat().st_size<=MAX_SPRITE_BYTES:return path.read_bytes()
+        url=f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/{name}.png"
+        session=await self._session()
+        try:
+            async with session.get(url) as response:
+                if response.status!=200:raise RenderError(f"Item sprite provider returned HTTP {response.status}.")
+                if (response.url.host or "").casefold()!=SPRITE_HOST:raise RenderError("Item sprite provider redirected to an untrusted host.")
+                data=await response.read()
+        except (aiohttp.ClientError,asyncio.TimeoutError) as exc:raise RenderError("Item sprite download failed.") from exc
+        if not 0<len(data)<=MAX_SPRITE_BYTES:raise RenderError("Item sprite file size is invalid.")
+        try:
+            with Image.open(io.BytesIO(data)) as image:image.verify()
+        except Exception as exc:raise RenderError("Item sprite is invalid.") from exc
+        self.cache_dir.mkdir(parents=True,exist_ok=True);temporary=path.with_suffix(".tmp");temporary.write_bytes(data);temporary.replace(path);await self._prune();return data
+
     async def get_cover(self,entry):
         label,repo,path=entry;key=label.casefold().replace(" ","-").replace("!","").replace("/","-").replace(",","").replace("’","")
         cached=self.cache_dir/f"cover-{key}.img"
@@ -179,7 +199,11 @@ class BattleRenderer:
         except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
 
     async def mart_card(self,items,balance,currency,scope):
-        try:return await self._render(self._mart_card_sync,items,balance,currency,scope)
+        async def item_data(key):
+            try:return await self.get_item_sprite(key)
+            except RenderError:return None
+        data=await asyncio.gather(*(item_data(key) for key,_,_ in items))
+        try:return await self._render(self._mart_card_sync,items,balance,currency,scope,data)
         except (OSError,ValueError) as exc:raise RenderError("Poke Mart card rendering failed.") from exc
 
     async def pokedex_registration(self,pokemon,trainer_name):
@@ -405,12 +429,16 @@ class BattleRenderer:
             elif key=="leaf_stone":draw.line((x,y-18,x,y+16),fill=(215,239,155),width=3);draw.line((x,y-7,x-9,y-13,x,y-2,x+10,y-9,x,y+5,x-9,y+11),fill=(215,239,155),width=2)
             else:draw.ellipse((x-5,y-14,x+1,y-8),fill=(238,226,250));draw.ellipse((x+7,y-2,x+10,y+1),fill=(238,226,250))
 
-    def _mart_card_sync(self,items,balance,currency,scope):
+    def _mart_card_sync(self,items,balance,currency,scope,item_data=None):
         canvas=Image.new("RGB",(900,650),(225,217,177));draw=ImageDraw.Draw(canvas);draw.rounded_rectangle((20,18,880,632),18,fill=(245,239,207),outline=(54,83,70),width=5)
-        draw.text((45,35),"POKÉ MART",fill=(42,70,58),font=ImageFont.load_default(size=31),stroke_width=1,stroke_fill=(42,70,58));draw.text((590,43),f"BALANCE  {balance:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=16))
+        draw.text((45,35),"POKE MART",fill=(42,70,58),font=ImageFont.load_default(size=31),stroke_width=1,stroke_fill=(42,70,58));draw.text((590,43),f"BALANCE  {balance:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=16))
         for index,(key,label,price) in enumerate(items):
             col=index%2;row=index//2;left=43+410*col;top=92+99*row
-            draw.rounded_rectangle((left,top,left+384,top+82),12,fill=(221,229,200),outline=(78,105,88),width=3);self._mart_icon(draw,key,(left+48,top+41))
+            draw.rounded_rectangle((left,top,left+384,top+82),12,fill=(221,229,200),outline=(78,105,88),width=3)
+            data=item_data[index] if item_data and index<len(item_data) else None
+            if data:
+                icon=self._open(data,(58,58),trim=True,upscale=True);canvas.paste(icon,(left+48-icon.width//2,top+41-icon.height//2),icon)
+            else:self._mart_icon(draw,key,(left+48,top+41))
             draw.text((left+88,top+16),label,fill=(42,70,58),font=ImageFont.load_default(size=19),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+47),f"{price:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=16))
         draw.text((45,598),f"{scope.upper()} BANK · USE THE BUTTONS BELOW TO BUY ONE",fill=(65,91,78),font=ImageFont.load_default(size=14))
         return self._save(canvas)
