@@ -315,7 +315,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.1.7";__author__="SickProdigy"
+    __version__="1.1.8";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -952,7 +952,7 @@ class Pokemon(commands.Cog):
             except RenderError:files=[]
             await interaction.response.send_message(embed=embed,files=files,ephemeral=True);return
         if section=="collection":
-            embed,files,page,pages,items=await self.rendered_collection(user,1);await interaction.response.send_message(embed=embed,files=files,view=CollectionBrowserView(self,user.id,page,pages,items),ephemeral=True);return
+            embed,files,page,pages,items=await self.rendered_collection(user,1);await interaction.response.send_message(embed=embed,files=files,view=CollectionBrowserView(self,user.id,page,pages,items,"name_asc"),ephemeral=True);return
         if section=="pokedex":
             session=PokedexSession(user_id=user.id,seen={int(x) for x in conf.get("pokedex_seen",[])},caught={int(x) for x in conf.get("pokedex_caught",[])},style=await self.selected_pokedex_style(user),stats=migrated_pokedex_stats(conf));view=PokedexView(self,session)
             await interaction.response.send_message(embed=render_pokedex(session),view=view,ephemeral=True);view.message=await interaction.original_response();return
@@ -1369,12 +1369,20 @@ class Pokemon(commands.Cog):
         trainer_name=getattr(ctx.author,"display_name",getattr(ctx.author,"name","Trainer"))
         embed,files=await self.rendered_starter(pokemon,trainer_name);await ctx.send(embed=embed,files=files)
 
-    @staticmethod
-    def sorted_collection(conf):
-        return sorted(conf.get("collection",[]),key=lambda raw:((raw.get("nickname") or SPECIES[raw["species_id"]].name).casefold(),raw["species_id"],raw["instance_id"]))
+    COLLECTION_SORTS={"name_asc":"A–Z","name_desc":"Z–A","level_desc":"Highest level","level_asc":"Lowest level"}
 
-    async def rendered_collection(self,user,page=1,manage=True):
-        conf=await self.config.user(user).all();capacity=await self.vip_capacity(user.id);ordered=self.sorted_collection(conf);total=len(ordered)
+    @staticmethod
+    def sorted_collection(conf,sort="name_asc"):
+        def name(raw):return (raw.get("nickname") or SPECIES[raw["species_id"]].name).casefold()
+        ordered=sorted(conf.get("collection",[]),key=lambda raw:(name(raw),raw["species_id"],raw["instance_id"]))
+        if sort=="name_desc":return list(reversed(ordered))
+        if sort=="level_desc":return sorted(ordered,key=lambda raw:-int(raw.get("level",1)))
+        if sort=="level_asc":return sorted(ordered,key=lambda raw:int(raw.get("level",1)))
+        return ordered
+
+    async def rendered_collection(self,user,page=1,manage=True,sort="name_asc"):
+        sort=sort if sort in self.COLLECTION_SORTS else "name_asc"
+        conf=await self.config.user(user).all();capacity=await self.vip_capacity(user.id);ordered=self.sorted_collection(conf,sort);total=len(ordered)
         pages=max(1,(total+COLLECTION_PAGE_SIZE-1)//COLLECTION_PAGE_SIZE);page=max(1,min(int(page),pages));start=(page-1)*COLLECTION_PAGE_SIZE
         party_slots={identity:index+1 for index,identity in enumerate(conf.get("party",[])[:6])};raw_items=[dict(raw) for raw in ordered[start:start+COLLECTION_PAGE_SIZE]]
         for raw in raw_items:raw["party_slot"]=party_slots.get(raw.get("instance_id"))
@@ -1386,7 +1394,7 @@ class Pokemon(commands.Cog):
             lines.append(f"{number}. {party}{marker}{raw.get('nickname') or species.name} · Lv. {raw['level']}")
         trainer=getattr(user,"display_name",getattr(user,"name",str(user)))
         embed=discord.Embed(title=f"{trainer}'s Collection · {page}/{pages}",description="\n".join(lines) or "Empty",color=discord.Color.gold())
-        embed.set_footer(text=f"{total}/{capacity} Pokemon" + (" · Select one below to manage your Pokemon" if manage else " · Use these numbers when proposing a trade"))
+        embed.set_footer(text=f"{total}/{capacity} Pokemon · Sorted {self.COLLECTION_SORTS[sort]}" + (" · Select one below to manage your Pokemon" if manage else " · Use these numbers when proposing a trade"))
         try:
             image=await self.renderer.collection_card(items,page,pages,total,trainer,[raw.get("party_slot") for raw in raw_items]);embed.set_image(url="attachment://collection.png")
             embed.description=None
@@ -1401,7 +1409,7 @@ class Pokemon(commands.Cog):
         conf=await self.config.user(ctx.author).all()
         if not conf["collection"]:await ctx.send("Choose a starter first.");return
         embed,files,page,pages,items=await self.rendered_collection(ctx.author,page)
-        await ctx.send(embed=embed,files=files,view=CollectionBrowserView(self,ctx.author.id,page,pages,items))
+        await ctx.send(embed=embed,files=files,view=CollectionBrowserView(self,ctx.author.id,page,pages,items,"name_asc"))
 
     @collection.command(name="release")
     async def collection_release(self,ctx,number:int):

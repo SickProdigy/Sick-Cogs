@@ -159,20 +159,31 @@ class CollectionPokemonSelect(discord.ui.Select):
     async def callback(self,interaction):
         await self.cog.collection_party_choice(interaction,self.values[0])
 
+class CollectionSortSelect(discord.ui.Select):
+    OPTIONS=(("A–Z","name_asc"),("Z–A","name_desc"),("Highest level","level_desc"),("Lowest level","level_asc"))
+    def __init__(self,view,sort):
+        options=[discord.SelectOption(label=label,value=value,default=value==sort) for label,value in self.OPTIONS]
+        super().__init__(placeholder="Sort collection…",options=options,row=1)
+        self.browser=view
+    async def callback(self,interaction):
+        await self.browser.refresh(interaction,1,self.values[0])
+
 class CollectionBrowserView(discord.ui.View):
-    def __init__(self,cog,user_id,page,pages,items):
-        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;self.page=page;self.pages=pages
+    def __init__(self,cog,user_id,page,pages,items,sort="name_asc"):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;self.page=page;self.pages=pages;self.sort=sort
         if items:self.add_item(CollectionPokemonSelect(cog,user_id,items))
+        self.add_item(CollectionSortSelect(self,sort))
         self.previous.disabled=page<=1;self.next.disabled=page>=pages
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This collection belongs to another trainer.",ephemeral=True);return False
-    async def refresh(self,interaction,page):
-        embed,files,page,pages,items=await self.cog.rendered_collection(interaction.user,page)
-        await interaction.response.edit_message(embed=embed,attachments=files,view=CollectionBrowserView(self.cog,self.user_id,page,pages,items))
-    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary,row=1)
+    async def refresh(self,interaction,page,sort=None):
+        sort=sort or self.sort
+        embed,files,page,pages,items=await self.cog.rendered_collection(interaction.user,page,sort=sort)
+        await interaction.response.edit_message(embed=embed,attachments=files,view=CollectionBrowserView(self.cog,self.user_id,page,pages,items,sort))
+    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary,row=2)
     async def previous(self,interaction,button):await self.refresh(interaction,self.page-1)
-    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=1)
+    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=2)
     async def next(self,interaction,button):await self.refresh(interaction,self.page+1)
 
 class PartyPlacementButton(discord.ui.Button):
