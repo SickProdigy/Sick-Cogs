@@ -82,13 +82,13 @@ class GymChallengeView(discord.ui.View):
 
 
 class ReleasePokemonView(discord.ui.View):
-    def __init__(self,cog,user_id,identity,name):
-        super().__init__(timeout=120);self.cog=cog;self.user_id=user_id;self.identity=identity;self.name=name
+    def __init__(self,cog,user_id,identity,name,source_message=None):
+        super().__init__(timeout=120);self.cog=cog;self.user_id=user_id;self.identity=identity;self.name=name;self.source_message=source_message
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This release confirmation belongs to another trainer.",ephemeral=True);return False
     @discord.ui.button(label="Release Pokémon",emoji="🕊️",style=discord.ButtonStyle.danger)
-    async def confirm(self,interaction,button):await self.cog.release_collection_pokemon(interaction,self.identity,self.name)
+    async def confirm(self,interaction,button):await self.cog.release_collection_pokemon(interaction,self.identity,self.name,self.source_message)
     @discord.ui.button(label="Keep Pokémon",style=discord.ButtonStyle.secondary)
     async def cancel(self,interaction,button):await interaction.response.edit_message(content=f"**{self.name}** was kept.",view=None)
 
@@ -139,7 +139,7 @@ class CollectionPokemonSelect(discord.ui.Select):
             species=SPECIES[item["species_id"]];name=item.get("nickname") or species.name
             party=f" · P{item['party_slot']}" if item.get("party_slot") else ""
             options.append(discord.SelectOption(label=f"{number}. {name} · Lv.{item['level']}{party}",value=item["instance_id"]))
-        super().__init__(placeholder="Select a Pokémon for your party…",options=options,row=0)
+        super().__init__(placeholder="Select a Pokémon to manage…",options=options,row=0)
         self.cog=cog;self.user_id=user_id
     async def callback(self,interaction):
         await self.cog.collection_party_choice(interaction,self.values[0])
@@ -178,9 +178,15 @@ class PartyPlacementView(discord.ui.View):
             action="Move to" if moving else "Replace"
             label=f"{action} {index+1}: {name}{level}"
             self.add_item(PartyPlacementButton(cog,user_id,identity,target,label[:80],1+index//3,source_message))
+        release=discord.ui.Button(label="Remove from party to release" if moving else "Release Pokémon",emoji="🕊️",style=discord.ButtonStyle.danger,row=4,disabled=moving)
+        release.callback=self.release
+        self.add_item(release)
+        self.cog=cog;self.identity=identity;self.source_message=source_message
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This party choice belongs to another trainer.",ephemeral=True);return False
+    async def release(self,interaction):
+        await self.cog.begin_collection_release(interaction,self.identity,self.source_message)
 
 
 class MoveForgetSelect(discord.ui.Select):

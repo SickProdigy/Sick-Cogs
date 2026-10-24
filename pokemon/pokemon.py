@@ -1379,9 +1379,10 @@ class Pokemon(commands.Cog):
             lines.append(f"{number}. {party}{marker}{raw.get('nickname') or species.name} · Lv. {raw['level']}")
         trainer=getattr(user,"display_name",getattr(user,"name",str(user)))
         embed=discord.Embed(title=f"{trainer}'s Collection · {page}/{pages}",description="\n".join(lines) or "Empty",color=discord.Color.gold())
-        embed.set_footer(text=f"{total}/{capacity} Pokémon" + (" · Select one below to manage your party" if manage else " · Use these numbers when proposing a trade"))
+        embed.set_footer(text=f"{total}/{capacity} Pokémon" + (" · Select one below to manage your Pokémon" if manage else " · Use these numbers when proposing a trade"))
         try:
             image=await self.renderer.collection_card(items,page,pages,total,trainer,[raw.get("party_slot") for raw in raw_items]);embed.set_image(url="attachment://collection.png")
+            embed.description=None
             files=[discord.File(image,filename="collection.png")]
         except RenderError:
             log.exception("Collection card rendering failed");files=[]
@@ -1408,7 +1409,17 @@ class Pokemon(commands.Cog):
         if self.trainer_in_active_battle(ctx.author.id):await ctx.send("Finish your active battle before releasing a Pokémon.");return
         await ctx.send(f"Release **{name} · Lv.{raw['level']}** permanently? This cannot be undone.",view=ReleasePokemonView(self,ctx.author.id,identity,name))
 
-    async def release_collection_pokemon(self,interaction,identity,name):
+    async def begin_collection_release(self,interaction,identity,source_message=None):
+        conf=await self.config.user(interaction.user).all();owned={raw.get("instance_id"):raw for raw in conf.get("collection",[])};raw=owned.get(identity)
+        if raw is None:await interaction.response.edit_message(content="That Pokémon is no longer available.",view=None);return
+        name=raw.get("nickname") or SPECIES[raw["species_id"]].name
+        if len(conf.get("collection",[]))<=1:await interaction.response.edit_message(content="You must keep at least one Pokémon.",view=None);return
+        if identity in conf.get("party",[]):await interaction.response.edit_message(content=f"Remove **{name}** from your party before releasing it.",view=None);return
+        if self.trade_reserved(await self.config.trades(),identity):await interaction.response.edit_message(content=f"**{name}** is reserved in a pending trade or gift.",view=None);return
+        if self.trainer_in_active_battle(interaction.user.id):await interaction.response.edit_message(content="Finish your active battle before releasing a Pokémon.",view=None);return
+        await interaction.response.edit_message(content=f"Release **{name} · Lv.{raw['level']}** permanently? This cannot be undone.",view=ReleasePokemonView(self,interaction.user.id,identity,name,source_message))
+
+    async def release_collection_pokemon(self,interaction,identity,name,source_message=None):
         async with self.lock(("user",interaction.user.id)):
             conf=await self.config.user(interaction.user).all();owned={raw.get("instance_id"):raw for raw in conf.get("collection",[])}
             if identity not in owned:await interaction.response.edit_message(content="That Pokémon is no longer available.",view=None);return
@@ -1417,12 +1428,15 @@ class Pokemon(commands.Cog):
             if self.trade_reserved(await self.config.trades(),identity):await interaction.response.send_message("That Pokémon is reserved in a pending trade or gift.",ephemeral=True);return
             conf["collection"]=[raw for raw in conf["collection"] if raw.get("instance_id")!=identity];await self.config.user(interaction.user).set(conf)
         await interaction.response.edit_message(content=f"**{name}** was released. The collection slot is now free.",view=None)
+        if source_message is not None:
+            try:await source_message.delete()
+            except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
 
     async def collection_party_choice(self,interaction,identity):
         conf=await self.config.user(interaction.user).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};raw=owned.get(identity)
         if not raw:await interaction.response.send_message("That Pokémon is no longer in your collection.",ephemeral=True);return
         name=raw.get("nickname") or SPECIES[raw["species_id"]].name
-        await interaction.response.send_message(f"Where should **{name} · Lv.{raw['level']}** go?",view=PartyPlacementView(self,interaction.user.id,identity,list(conf.get("party",[])),owned,getattr(interaction,"message",None)),ephemeral=True)
+        await interaction.response.send_message(f"Manage **{name} · Lv.{raw['level']}**. Choose a party position or release it.",view=PartyPlacementView(self,interaction.user.id,identity,list(conf.get("party",[])),owned,getattr(interaction,"message",None)),ephemeral=True)
 
     async def place_collection_pokemon(self,interaction,identity,target=None,source_message=None):
         async with self.lock(("user",interaction.user.id)):
