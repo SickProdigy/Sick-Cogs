@@ -13,10 +13,10 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import COMPLETED_GYMS,KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
-from pokemon.pokemon import GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
+from pokemon.pokemon import BIOMES, GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, biome_weight, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeCollectionView, GymChallengeView
+from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeLobbyView, TradeCollectionView, GymChallengeView
 
 
 class StoredValue:
@@ -168,6 +168,10 @@ class CogPolicyTests(unittest.TestCase):
         self.assertEqual((rarity_tier(common),rarity_tier(rare),rarity_tier(very_rare)),("common","rare","very_rare"))
         self.assertEqual((spawn_weight(common),spawn_weight(rare),spawn_weight(very_rare)),(100,35,15))
         self.assertGreater(spawn_weight(very_rare),spawn_weight(very_rare,"challenging"))
+        self.assertEqual(set(BIOMES),{"mixed","forest","cave","shoreline","mountain","grassland","urban"})
+        self.assertGreater(biome_weight(SPECIES[1],"forest"),biome_weight(SPECIES[1],"shoreline"))
+        self.assertGreater(biome_weight(SPECIES[7],"shoreline"),biome_weight(SPECIES[7],"forest"))
+        self.assertEqual(spawn_weight(common,"friendly","mixed"),spawn_weight(common))
 
     def test_global_policy_clamps_server_pace_and_generations(self):
         self.assertEqual(GUILD["battle_timeout"],15*60)
@@ -767,22 +771,22 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repaired.moves,("ember",));self.assertEqual(repaired.move_pp,{"ember":1})
         rapidash.moves=("ember","agility");self.assertEqual(repair_underleveled_evolution_moves(rapidash.raw())["moves"],["ember","agility"])
 
-    async def test_schema_twenty_adds_profiles_and_prior_migrations(self):
+    async def test_schema_twenty_one_adds_biomes_and_prior_migrations(self):
         schema=AsyncMock(return_value=13);schema.set=AsyncMock();timer_minimum=AsyncMock(return_value=60);timer_minimum.set=AsyncMock()
         encounter_minimum=StoredValue(60);encounter_maximum=StoredValue(900);encounter_default=StoredValue(120);prices=StoredValue({**mart_prices(),"moon_stone":5000})
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,minimum_timer=timer_minimum,minimum_encounter_timeout=encounter_minimum,maximum_encounter_timeout=encounter_maximum,encounter_timeout=encounter_default,all_guilds=AsyncMock(return_value={}),all_users=AsyncMock(return_value={}),encounters=StoredValue({}),mart_prices=prices)
-        await cog._migrate();timer_minimum.set.assert_awaited_once_with(60);self.assertEqual(schema.set.await_args_list[-1].args,(20,));self.assertEqual((encounter_minimum.value,encounter_maximum.value,encounter_default.value),(60,900,120));self.assertEqual(prices.value["moon_stone"],25000)
+        await cog._migrate();timer_minimum.set.assert_awaited_once_with(60);self.assertEqual(schema.set.await_args_list[-1].args,(21,));self.assertEqual((encounter_minimum.value,encounter_maximum.value,encounter_default.value),(60,900,120));self.assertEqual(prices.value["moon_stone"],25000)
 
-    async def test_schema_twenty_preserves_custom_moon_stone_price(self):
+    async def test_schema_twenty_one_preserves_custom_moon_stone_price(self):
         schema=AsyncMock(return_value=17);schema.set=AsyncMock();prices=StoredValue({**mart_prices(),"moon_stone":42000})
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,mart_prices=prices,all_guilds=AsyncMock(return_value={}))
-        await cog._migrate();self.assertEqual(prices.value["moon_stone"],42000);self.assertEqual(schema.set.await_args.args,(20,))
+        await cog._migrate();self.assertEqual(prices.value["moon_stone"],42000);self.assertEqual(schema.set.await_args.args,(21,))
 
-    async def test_schema_twenty_migrates_existing_guilds_without_retuning(self):
+    async def test_schema_twenty_one_migrates_existing_guilds_without_retuning(self):
         schema=StoredValue(18);section=StoredSection({"enabled":True,"timer_minutes":47,"encounter_timeout":420,"battle_timeout":780,"max_active_encounters":4})
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(schema=schema,all_guilds=AsyncMock(return_value={42:dict(section.value)}),guild_from_id=lambda guild_id:section)
         await cog._migrate()
-        self.assertEqual(schema.value,20);self.assertEqual(section.value["notification_mode"],"silent");self.assertEqual(section.value["spawn_profile"],"custom");self.assertEqual((section.value["timer_minutes"],section.value["encounter_timeout"],section.value["battle_timeout"],section.value["max_active_encounters"]),(47,420,780,4));self.assertIsNone(section.value["notification_role_id"]);self.assertIsNone(section.value["quiet_timezone"])
+        self.assertEqual(schema.value,21);self.assertEqual(section.value["notification_mode"],"silent");self.assertEqual(section.value["channel_biomes"],{});self.assertEqual(section.value["spawn_profile"],"custom");self.assertEqual((section.value["timer_minutes"],section.value["encounter_timeout"],section.value["battle_timeout"],section.value["max_active_encounters"]),(47,420,780,4));self.assertIsNone(section.value["notification_role_id"]);self.assertIsNone(section.value["quiet_timezone"])
 
     async def test_gift_settlement_moves_up_to_three_without_payment(self):
         gifts=[OwnedPokemon.create(f"gift-{index}",species,5,seed=index).raw() for index,species in enumerate((1,4,7),1)];keeper=OwnedPokemon.create("keeper",25,5,seed=9).raw();offerer=StoredSection({"collection":gifts+[keeper],"party":[raw["instance_id"] for raw in gifts]});recipient=StoredSection({"collection":[],"party":[]})
@@ -824,6 +828,34 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         evolved=OwnedPokemon.create("kadabra",65,16,seed=2).raw();sections={10:StoredSection({"collection":[]}),20:StoredSection({"collection":[evolved]})};cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user_from_id=lambda uid:sections[uid]);cog.rendered_progression=AsyncMock(return_value=(discord.Embed(title="Kadabra evolved!"),[]))
         interaction=SimpleNamespace(followup=SimpleNamespace(send=AsyncMock()));record={"trade_id":9,"offerer_id":10,"recipient_id":20,"evolutions":[{"instance_id":"kadabra","from":64,"to":65}]}
         await cog.send_trade_evolution_cards(interaction,record);cog.rendered_progression.assert_awaited_once();interaction.followup.send.assert_awaited_once()
+
+
+    async def test_pokedex_numeric_argument_opens_entry_and_explicit_page_still_pages(self):
+        section=StoredSection({"pokedex_seen":[56],"pokedex_caught":[],"pokedex_stats":{"56":{"seen":1}}});cog=Pokemon.__new__(Pokemon)
+        cog.config=SimpleNamespace(user=lambda user:section);cog.selected_pokedex_style=AsyncMock(return_value="retro")
+        ctx=SimpleNamespace(author=SimpleNamespace(id=10),send=AsyncMock())
+        await Pokemon.pokedex.callback(cog,ctx,"056",None)
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].footer.text,"Generation 1 · Entry #056")
+        await Pokemon.pokedex.callback(cog,ctx,"page",5)
+        self.assertIn("Page 5/11",ctx.send.await_args.kwargs["embed"].footer.text)
+
+    async def test_interactive_trade_lobby_requires_both_locks_and_confirmations(self):
+        record={"trade_id":3,"state":"lobby","offerer_id":10,"recipient_id":20,"offerer_name":"Red","recipient_name":"Blue","offered_id":"a","requested_id":"b","offered_name":"Charmander","requested_name":"Squirtle","offered_level":5,"requested_level":6}
+        trades=StoredValue({"3":record});cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades);cog.accept_trade=AsyncMock()
+        first=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock()))
+        second=SimpleNamespace(user=SimpleNamespace(id=20),response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock()))
+        await cog.toggle_trade_lock(first,3,"offerer");self.assertEqual(trades.value["3"]["state"],"lobby")
+        await cog.toggle_trade_lock(second,3,"recipient");self.assertEqual(trades.value["3"]["state"],"review")
+        await cog.final_accept_lobby(first,3);self.assertTrue(trades.value["3"]["offerer_confirmed"]);cog.accept_trade.assert_not_awaited()
+        await cog.final_accept_lobby(second,3);self.assertEqual(trades.value["3"]["state"],"offered");cog.accept_trade.assert_awaited_once_with(second,3)
+
+    async def test_bare_trade_command_opens_joinable_lobby(self):
+        trades=StoredValue({});next_trade=StoredValue(1);message=SimpleNamespace(id=99);author=SimpleNamespace(id=10,display_name="Red",bot=False)
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(trades=trades,next_trade=next_trade)
+        ctx=SimpleNamespace(author=author,guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=2),send=AsyncMock(return_value=message))
+        await Pokemon.trade.callback(cog,ctx)
+        record=trades.value["1"];self.assertEqual(record["state"],"lobby");self.assertIsNone(record["recipient_id"]);self.assertEqual(record["message_id"],99)
+        self.assertIsInstance(ctx.send.await_args.kwargs["view"],TradeLobbyView)
 
     async def test_trade_view_limits_acceptance_to_recipient(self):
         view=TradeView(SimpleNamespace(),7,10,20);outsider=SimpleNamespace(user=SimpleNamespace(id=30),response=SimpleNamespace(send_message=AsyncMock()))
@@ -1041,6 +1073,15 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock());channel=SimpleNamespace(id=10,mention="<#10>")
         await Pokemon.set_channel.callback(cog,ctx,channel)
         ctx.send.assert_awaited_once_with("Wild encounters were already enabled in <#10>.")
+
+    async def test_channel_biome_command_is_optional_and_channel_scoped(self):
+        channels=StoredValue([10]);biomes=StoredValue({});section=SimpleNamespace(channels=channels,channel_biomes=biomes)
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section)
+        ctx=SimpleNamespace(guild=SimpleNamespace(id=42),clean_prefix="!",send=AsyncMock());channel=SimpleNamespace(id=10,mention="<#10>")
+        await Pokemon.set_biome.callback(cog,ctx,channel,"forest")
+        self.assertEqual(biomes.value,{"10":"forest"});self.assertIn("changed from **mixed** to **forest**",ctx.send.await_args.args[0])
+        await Pokemon.set_biome.callback(cog,ctx,channel,"mixed")
+        self.assertEqual(biomes.value,{})
 
     async def test_timed_mode_defaults_to_balanced_and_spawns_in_configured_channel(self):
         self.assertEqual((GUILD["spawn_mode"],GUILD["spawn_profile"],GUILD["timer_minutes"],GUILD["encounter_timeout"],GUILD["battle_timeout"],GUILD["max_active_encounters"]),("timed","balanced",30,900,900,2))

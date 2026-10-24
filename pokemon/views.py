@@ -132,6 +132,58 @@ class TradeView(discord.ui.View):
     async def decline(self,interaction,button):await self.cog.cancel_trade(interaction,self.trade_id)
 
 
+class TradePokemonSelect(discord.ui.Select):
+    def __init__(self,view,items):
+        options=[]
+        for number,item in items:
+            name=item.get("nickname") or SPECIES[item["species_id"]].name
+            shiny="Shiny " if item.get("shiny") else ""
+            options.append(discord.SelectOption(label=f"{number}. {shiny}{name} · Lv.{item['level']}"[:100],value=item["instance_id"]))
+        super().__init__(placeholder="Choose the Pokemon you will offer…",options=options,row=0)
+        self.browser=view
+    async def callback(self,interaction):await self.browser.cog.select_lobby_pokemon(interaction,self.browser.trade_id,self.values[0])
+
+
+class TradeSelectionView(discord.ui.View):
+    def __init__(self,cog,trade_id,user_id,page,pages,items):
+        super().__init__(timeout=180);self.cog=cog;self.trade_id=trade_id;self.user_id=user_id;self.page=page;self.pages=pages
+        if items:self.add_item(TradePokemonSelect(self,items))
+        self.previous.disabled=page<=1;self.next.disabled=page>=pages
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This trade selection belongs to another trainer.",ephemeral=True);return False
+    async def show(self,interaction,page):await self.cog.show_lobby_collection(interaction,self.trade_id,page,edit=True)
+    @discord.ui.button(label="Previous",emoji="◀️",style=discord.ButtonStyle.secondary,row=1)
+    async def previous(self,interaction,button):await self.show(interaction,self.page-1)
+    @discord.ui.button(label="Next",emoji="▶️",style=discord.ButtonStyle.secondary,row=1)
+    async def next(self,interaction,button):await self.show(interaction,self.page+1)
+
+
+class TradeLobbyView(discord.ui.View):
+    def __init__(self,cog,trade_id,record):
+        super().__init__(timeout=None);self.cog=cog;self.trade_id=trade_id
+        joined=bool(record.get("recipient_id"));both_locked=bool(record.get("offerer_locked") and record.get("recipient_locked"))
+        self.join.disabled=joined;self.choose.disabled=not joined or both_locked
+        self.offerer_lock.disabled=not joined or not record.get("offered_id");self.recipient_lock.disabled=not joined or not record.get("requested_id")
+        self.offerer_lock.label=("Unlock" if record.get("offerer_locked") else "Lock")+" Trainer 1"
+        self.recipient_lock.label=("Unlock" if record.get("recipient_locked") else "Lock")+" Trainer 2"
+        self.final_accept.disabled=not both_locked
+        for item,action in ((self.join,"join"),(self.choose,"choose"),(self.offerer_lock,"offerer-lock"),(self.recipient_lock,"recipient-lock"),(self.final_accept,"final"),(self.cancel,"cancel")):
+            item.custom_id=f"pokemon:trade-lobby:{trade_id}:{action}"
+    @discord.ui.button(label="Join Trade",emoji="🤝",style=discord.ButtonStyle.primary,row=0)
+    async def join(self,interaction,button):await self.cog.join_trade_lobby(interaction,self.trade_id)
+    @discord.ui.button(label="Choose Pokemon",emoji="📦",style=discord.ButtonStyle.secondary,row=0)
+    async def choose(self,interaction,button):await self.cog.show_lobby_collection(interaction,self.trade_id,1)
+    @discord.ui.button(label="Lock Trainer 1",emoji="🔒",style=discord.ButtonStyle.secondary,row=1)
+    async def offerer_lock(self,interaction,button):await self.cog.toggle_trade_lock(interaction,self.trade_id,"offerer")
+    @discord.ui.button(label="Lock Trainer 2",emoji="🔒",style=discord.ButtonStyle.secondary,row=1)
+    async def recipient_lock(self,interaction,button):await self.cog.toggle_trade_lock(interaction,self.trade_id,"recipient")
+    @discord.ui.button(label="Final Accept",emoji="✅",style=discord.ButtonStyle.success,row=2)
+    async def final_accept(self,interaction,button):await self.cog.final_accept_lobby(interaction,self.trade_id)
+    @discord.ui.button(label="Cancel Trade",emoji="✖️",style=discord.ButtonStyle.danger,row=2)
+    async def cancel(self,interaction,button):await self.cog.cancel_trade(interaction,self.trade_id)
+
+
 class MartItemButton(discord.ui.Button):
     def __init__(self,cog,user_id,key,label,row):
         super().__init__(label=label,style=discord.ButtonStyle.primary,row=row)
