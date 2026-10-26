@@ -598,7 +598,7 @@ class BattleRenderer:
             draw.text((400-int(draw.textlength(heading,font=heading_font))//2,42),heading,fill=RETRO[0],font=heading_font)
             draw.ellipse((445,118,735,215),fill=(182,168,89),outline=RETRO[0],width=4)
             defeated=self._open(data,(155,110),trim=True,upscale=True);alpha=defeated.getchannel("A")
-            gray=ImageOps.grayscale(defeated);defeated=ImageOps.colorize(gray,(70,72,48),(214,205,147)).convert("RGBA");defeated.putalpha(alpha)
+            gray=ImageOps.autocontrast(ImageOps.grayscale(defeated),mask=alpha);defeated=ImageOps.colorize(gray,(35,42,25),(242,235,188)).convert("RGBA");defeated.putalpha(alpha)
             canvas.paste(defeated,(590-defeated.width//2,195-defeated.height),defeated)
             draw.ellipse((45,215,405,330),fill=(169,188,132),outline=RETRO[0],width=4)
             used=[item for item in battle.party if item.instance_id in set(battle.participants)][:6]
