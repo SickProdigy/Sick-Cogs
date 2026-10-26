@@ -561,6 +561,8 @@ class BattleRenderer:
         has_avatar=self._trainer_portrait(canvas,draw,avatar_data)
         pokemon_x=485 if has_avatar else 400
         if battle.state=="caught":
+            heading="Gotcha!";heading_font=ImageFont.load_default(size=34)
+            draw.text((400-int(draw.textlength(heading,font=heading_font))//2,42),heading,fill=RETRO[0],font=heading_font)
             draw.ellipse((pokemon_x-155,205,pokemon_x+155,310),fill=(182,168,89),outline=RETRO[0],width=4)
             image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,240-image.height),image)
             ball_center=((295 if has_avatar else 400),290)
@@ -573,11 +575,12 @@ class BattleRenderer:
             draw.ellipse((pokemon_x-165,225,pokemon_x+165,340),fill=(182,168,89),outline=RETRO[0],width=4)
             image=self._open(data,(250,215),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,300-image.height),image)
         draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
-        self._dialogue(draw,message,(70,360),width=76,size=16)
+        display_message=message.removeprefix("Gotcha! ") if battle.state=="caught" else message
+        self._dialogue(draw,display_message,(70,360),width=76,size=16)
         if battle.state=="caught":
-            font=ImageFont.load_default(size=14);level=f"Lv. {battle.wild_level}";draw.text((70,386),level,fill=RETRO[1],font=font)
-            mark_x=70+int(draw.textlength(level,font=font))+8;self._gender_mark(draw,(mark_x,384),battle.wild_gender,RETRO[1])
-            caught=f"Caught: {max(1,int(battle.caught_count))}";count_font=ImageFont.load_default(size=16);draw.text((730,384),caught,fill=RETRO[1],font=count_font,stroke_width=1,stroke_fill=RETRO[1],anchor="ra")
+            font=ImageFont.load_default(size=18);level=f"Lv. {battle.wild_level}";draw.text((70,384),level,fill=RETRO[1],font=font)
+            mark_x=70+int(draw.textlength(level,font=font))+8;self._gender_mark(draw,(mark_x,382),battle.wild_gender,RETRO[1])
+            caught=f"Caught: {max(1,int(battle.caught_count))}";count_font=ImageFont.load_default(size=20);draw.text((730,382),caught,fill=RETRO[1],font=count_font,anchor="ra")
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0,expired=False,shiny=False):
