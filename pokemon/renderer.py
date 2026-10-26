@@ -545,7 +545,23 @@ class BattleRenderer:
 
     def _battle_result_sync(self,battle,data,avatar_data=None,ball_data=None,participant_data=None):
         wild=SPECIES[battle.wild_species_id];message=self.battle_result_text(battle)
-        if battle.state in {"lost","ran"}:
+        if battle.state=="ran":
+            canvas=Image.new("RGB",(800,450),(229,214,145));draw=ImageDraw.Draw(canvas)
+            for y in range(450):
+                ratio=y/449;draw.line((0,y,800,y),fill=(int(244-49*ratio),int(232-58*ratio),int(174-69*ratio)))
+            draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
+            heading="Escaped!";heading_font=ImageFont.load_default(size=34)
+            draw.text((400-int(draw.textlength(heading,font=heading_font))//2,42),heading,fill=RETRO[0],font=heading_font)
+            self._trainer_portrait(canvas,draw,avatar_data)
+            draw.ellipse((380,215,700,320),fill=(182,168,89),outline=RETRO[0],width=4)
+            for start,end,y,width in ((280,390,135,6),(245,390,175,5),(300,400,215,4)):
+                draw.line((start,y,end,y),fill=RETRO[1],width=width)
+            image=self._open(data,(220,185),trim=True,upscale=True);canvas.paste(image,(535-image.width//2,260-image.height),image)
+            draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
+            self._dialogue(draw,message,(70,365),width=76,size=16)
+            return self._save(canvas)
+
+        if battle.state=="lost":
             canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
             for y in range(0,360,12):draw.line((0,y,800,y),fill=RETRO[4])
             draw.ellipse((465,190,750,255),fill=RETRO[2],outline=RETRO[0],width=4)
