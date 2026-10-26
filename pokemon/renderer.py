@@ -593,6 +593,7 @@ class BattleRenderer:
                 ball=self._open(ball_data,(86,86),trim=True,upscale=True);canvas.paste(ball,(ball_center[0]-ball.width//2,ball_center[1]-ball.height//2),ball)
             else:self._pokeball(draw,ball_center,43)
         else:
+            self._trainer_portrait(canvas,draw,avatar_data,center=(100,112),diameter=94)
             heading="Victory!";heading_font=ImageFont.load_default(size=34)
             draw.text((400-int(draw.textlength(heading,font=heading_font))//2,42),heading,fill=RETRO[0],font=heading_font)
             draw.ellipse((445,118,735,215),fill=(182,168,89),outline=RETRO[0],width=4)

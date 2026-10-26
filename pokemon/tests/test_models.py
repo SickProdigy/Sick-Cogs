@@ -415,6 +415,7 @@ class BattleTests(unittest.TestCase):
         with Image.open(scene) as image:self.assertEqual(image.size,(800,450))
         with Image.open(victory) as image:
             self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((100,112)),(220,40,80))
             self.assertEqual(image.getpixel((145,245)),(169,188,132))
             self.assertEqual(image.getpixel((225,250)),(40,120,220))
             self.assertNotEqual(image.getpixel((590,150)),(40,120,220))
