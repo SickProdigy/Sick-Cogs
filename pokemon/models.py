@@ -238,6 +238,7 @@ class Battle:
     def switch_to(self, index):
         if self.state != "active":
             raise BattleError("This encounter is over.")
+        forced=self.needs_switch
         if not 0 <= index < len(self.party):
             raise BattleError("That party slot is unavailable.")
         candidate=self.party[index]
@@ -254,8 +255,12 @@ class Battle:
         self.player_hp=self.party_hp[candidate.instance_id]
         self.player_status=self.party_status.get(candidate.instance_id,"")
         self.player_status_turns=self.party_status_turns.get(candidate.instance_id,0)
-        self.last_action=f"Go, {SPECIES[candidate.species_id].name}!"
-        self.result=None
+        switch_line=f"Go, {SPECIES[candidate.species_id].name}!"
+        self.last_action=switch_line;self.result=None
+        if not forced and self.wild_hp>0:
+            self._wild_response()
+            self.last_action=f"{switch_line} {self.last_action}"
+            if self.result:self.result=f"{self.last_action} {self.result}"
         self._record("switch")
 
     def switch_next(self):

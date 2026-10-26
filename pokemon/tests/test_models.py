@@ -218,7 +218,18 @@ class BattleTests(unittest.TestCase):
         b=Battle(1,100,1,2,3,first,10,10,30,30);b.initialize_party([first,second])
         b.switch_to(1)
         self.assertEqual(b.player.instance_id,"two")
+        self.assertEqual(b.turn,2)
+        self.assertIn("Go, Squirtle! Caterpie used",b.last_action)
+        self.assertEqual(b.action_history[-1]["action"],"switch")
         with self.assertRaises(BattleError):b.switch_to(1)
+
+    def test_voluntary_switch_can_knock_out_the_incoming_pokemon(self):
+        first=OwnedPokemon.create("one",4,10,seed=1);second=OwnedPokemon.create("two",7,10,seed=2);third=OwnedPokemon.create("three",1,10,seed=3)
+        b=Battle(1,100,1,2,3,first,6,100,30,300,seed=4);b.initialize_party([first,second,third]);b.party_hp["two"]=1;b.wild_pp={"rage":1,"slash":0,"flamethrower":0,"fire_spin":0}
+        b.switch_to(1)
+        self.assertEqual((b.player.instance_id,b.player_hp,b.turn),("two",0,2))
+        self.assertTrue(b.needs_switch)
+        self.assertIn("Charizard used Rage",b.result)
 
     def test_run_finishes(self):
         b=battle();b.run()
@@ -344,9 +355,12 @@ class BattleTests(unittest.TestCase):
         b=Battle(1,100,1,2,3,first,10,4,1,20,seed=5)
         b.initialize_party([first,second]);b.player_hp=0;b._finish_if_needed()
         self.assertTrue(b.needs_switch)
+        turn=b.turn
         b.switch_next()
         self.assertEqual(b.player.instance_id,"second")
         self.assertGreater(b.player_hp,0)
+        self.assertEqual(b.turn,turn)
+        self.assertEqual(b.last_action,"Go, Squirtle!")
     def test_renderer_trims_and_upscales_small_padded_sprites(self):
         source=io.BytesIO();image=Image.new("RGBA",(96,96),(0,0,0,0))
         for x in range(40,56):
