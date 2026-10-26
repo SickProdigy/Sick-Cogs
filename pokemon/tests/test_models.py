@@ -415,7 +415,9 @@ class BattleTests(unittest.TestCase):
         with Image.open(scene) as image:self.assertEqual(image.size,(800,450))
         with Image.open(victory) as image:
             self.assertEqual(image.size,(800,450))
-            self.assertEqual(image.getpixel((145,245)),(220,40,80))
+            self.assertEqual(image.getpixel((145,245)),(169,188,132))
+            self.assertEqual(image.getpixel((225,250)),(40,120,220))
+            self.assertNotEqual(image.getpixel((590,150)),(40,120,220))
         with Image.open(caught_result) as image:
             self.assertEqual(image.size,(800,450))
             self.assertEqual(image.getpixel((145,245)),(220,40,80))
@@ -441,12 +443,19 @@ class BattleTests(unittest.TestCase):
 
 
 class RendererAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_victory_result_fetches_defeated_opponent_and_used_party_sprites(self):
+        renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();second=OwnedPokemon.create("second",7,5,seed=2);current.initialize_party([current.player,second]);current.participants=[current.player.instance_id,second.instance_id];current.state="won"
+        renderer.get_sprite=AsyncMock(side_effect=[b"wild",b"first",b"second"]);renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
+        await renderer.battle(current)
+        self.assertEqual([call.args[0] for call in renderer.get_sprite.await_args_list],[current.wild_species_id,current.player.species_id,second.species_id])
+        self.assertEqual(renderer._render.await_args.args[-1],[b"first",b"second"])
+
     async def test_catch_result_uses_the_thrown_ball_sprite(self):
         renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();current.state="caught";current.last_ball="ultra_ball"
         renderer.get_sprite=AsyncMock(return_value=b"pokemon");renderer.get_item_sprite=AsyncMock(return_value=b"ball");renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
         await renderer.battle(current)
         renderer.get_item_sprite.assert_awaited_once_with("ultra_ball")
-        self.assertEqual(renderer._render.await_args.args[-1],b"ball")
+        self.assertEqual(renderer._render.await_args.args[-2],b"ball")
 
 class CatalogVersionTests(unittest.TestCase):
     def test_every_release_versions_all_future_mechanics_dimensions(self):

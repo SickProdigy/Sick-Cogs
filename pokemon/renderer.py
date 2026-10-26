@@ -257,15 +257,22 @@ class BattleRenderer:
 
     async def battle(self, battle, avatar_data=None):
         if battle.state!="active":
-            species_id=battle.player.species_id if battle.state=="won" else battle.wild_species_id
-            result_sprite=await self.get_sprite(species_id,shiny=battle.player.shiny if battle.state=="won" else battle.wild_shiny)
+            participant_sprites=None
+            if battle.state=="won" and battle.gym_key:
+                result_sprite=await self.get_sprite(battle.player.species_id,shiny=battle.player.shiny)
+            elif battle.state=="won":
+                result_sprite=await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
+                used=[item for item in battle.party if item.instance_id in set(battle.participants)][:6]
+                participant_sprites=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in used))
+            else:
+                result_sprite=await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
             ball_sprite=None
             if battle.state=="caught" and battle.last_ball in {"poke_ball","great_ball","ultra_ball"}:
                 try:ball_sprite=await self.get_item_sprite(battle.last_ball)
                 except RenderError:pass
             try:
                 if battle.state=="won" and battle.gym_key:return await self._render(self._gym_victory_sync,battle,result_sprite,avatar_data)
-                return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data,ball_sprite)
+                return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data,ball_sprite,participant_sprites)
             except (OSError,ValueError) as exc:raise RenderError("Battle result rendering failed.") from exc
         front = await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
         try:
@@ -536,7 +543,7 @@ class BattleRenderer:
         self._dialogue(draw,battle.result or f"{badge} earned!",(70,360),width=76,size=16)
         return self._save(canvas)
 
-    def _battle_result_sync(self,battle,data,avatar_data=None,ball_data=None):
+    def _battle_result_sync(self,battle,data,avatar_data=None,ball_data=None,participant_data=None):
         wild=SPECIES[battle.wild_species_id];message=self.battle_result_text(battle)
         if battle.state in {"lost","ran"}:
             canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
@@ -558,7 +565,7 @@ class BattleRenderer:
         for y in range(450):
             ratio=y/449;draw.line((0,y,800,y),fill=(int(244-49*ratio),int(232-58*ratio),int(174-69*ratio)))
         draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
-        has_avatar=self._trainer_portrait(canvas,draw,avatar_data)
+        has_avatar=self._trainer_portrait(canvas,draw,avatar_data) if battle.state=="caught" else False
         pokemon_x=485 if has_avatar else 400
         if battle.state=="caught":
             heading="Gotta catch 'em all!";heading_font=ImageFont.load_default(size=34)
@@ -570,10 +577,18 @@ class BattleRenderer:
                 ball=self._open(ball_data,(86,86),trim=True,upscale=True);canvas.paste(ball,(ball_center[0]-ball.width//2,ball_center[1]-ball.height//2),ball)
             else:self._pokeball(draw,ball_center,43)
         else:
-            heading="Victory!"
-            draw.text((400-int(draw.textlength(heading,font=ImageFont.load_default(size=34)))//2,42),heading,fill=RETRO[0],font=ImageFont.load_default(size=34))
-            draw.ellipse((pokemon_x-165,225,pokemon_x+165,340),fill=(182,168,89),outline=RETRO[0],width=4)
-            image=self._open(data,(250,215),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,300-image.height),image)
+            heading="Victory!";heading_font=ImageFont.load_default(size=34)
+            draw.text((400-int(draw.textlength(heading,font=heading_font))//2,42),heading,fill=RETRO[0],font=heading_font)
+            draw.ellipse((445,118,735,215),fill=(182,168,89),outline=RETRO[0],width=4)
+            defeated=self._open(data,(155,110),trim=True,upscale=True);alpha=defeated.getchannel("A")
+            defeated=ImageOps.grayscale(defeated).convert("RGBA");defeated.putalpha(alpha.point(lambda value:int(value*0.42)))
+            canvas.paste(defeated,(590-defeated.width//2,195-defeated.height),defeated)
+            draw.ellipse((45,215,405,330),fill=(169,188,132),outline=RETRO[0],width=4)
+            used=[item for item in battle.party if item.instance_id in set(battle.participants)][:6]
+            sprites=list(participant_data or [data])[:len(used)]
+            layouts={1:[(225,292)],2:[(170,292),(280,292)],3:[(225,250),(150,300),(300,300)],4:[(170,250),(280,250),(155,302),(295,302)],5:[(170,245),(280,245),(120,302),(225,312),(330,302)],6:[(130,245),(225,235),(320,245),(120,302),(225,312),(330,302)]}
+            for raw,(x,bottom) in zip(sprites,layouts.get(len(sprites),[])):
+                image=self._open(raw,(82,76),trim=True,upscale=True);canvas.paste(image,(x-image.width//2,bottom-image.height),image)
         draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
         display_message=message.removeprefix("Gotcha! ") if battle.state=="caught" else message
         self._dialogue(draw,display_message,(70,360),width=76,size=16)
