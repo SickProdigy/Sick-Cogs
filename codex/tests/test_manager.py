@@ -1,10 +1,12 @@
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
-from codex.manager import CodexManager, CodexManagerError
+from codex.manager import CodexAppServer, CodexManager, CodexManagerError
 
 
 class FakeServer:
@@ -20,6 +22,19 @@ class FakeServer:
 
 
 class ManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_start_closes_spawned_server(self):
+        server = CodexAppServer(Path("/unused"), {})
+        process = SimpleNamespace(stderr=SimpleNamespace(read=AsyncMock()))
+        server._read_messages = AsyncMock()
+        server.request = AsyncMock(side_effect=CodexManagerError("failed"))
+        server.close = AsyncMock()
+
+        with patch("asyncio.create_subprocess_exec", return_value=process):
+            with self.assertRaisesRegex(CodexManagerError, "failed"):
+                await server.start()
+
+        server.close.assert_awaited_once()
+
     def test_shared_binary_is_separate_from_user_credentials(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -61,6 +76,27 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
             ):
                 await manager.begin_device_login(1)
             self.assertTrue(server.closed)
+
+    async def test_remove_account_quarantines_before_recursive_delete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = CodexManager(Path(directory), lambda: None)
+            account = manager.account_path(1)
+            account.mkdir(parents=True)
+            (account / "auth.json").write_text("credential")
+            observed = []
+            original_remove_tree = shutil.rmtree
+
+            def remove_tree(path):
+                observed.append((path, account.exists()))
+                original_remove_tree(path)
+
+            with patch("codex.manager.shutil.rmtree", side_effect=remove_tree):
+                await manager.remove_account(1)
+
+            self.assertFalse(account.exists())
+            self.assertEqual(len(observed), 1)
+            self.assertFalse(observed[0][1])
+            self.assertIn(".1.deleting-", observed[0][0].name)
 
 
 if __name__ == "__main__":

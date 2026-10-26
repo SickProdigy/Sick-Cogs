@@ -76,7 +76,7 @@ class Manager:
     async def logout(self, user_id):
         return None
 
-    def remove_account(self, user_id):
+    async def remove_account(self, user_id):
         self.removed.append(user_id)
 
 
