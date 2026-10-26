@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import shutil
+import uuid
 from contextlib import suppress
 from pathlib import Path
 
@@ -45,17 +46,21 @@ class CodexAppServer:
             raise CodexManagerError("Codex CLI could not be started.") from exc
         self._reader_task = asyncio.create_task(self._read_messages())
         self._stderr_task = asyncio.create_task(self.process.stderr.read())
-        await self.request(
-            "initialize",
-            {
-                "clientInfo": {
-                    "name": "sick-cogs-codex",
-                    "title": "Sick-Cogs Codex",
-                    "version": "1.0.0",
-                }
-            },
-        )
-        await self.notify("initialized", {})
+        try:
+            await self.request(
+                "initialize",
+                {
+                    "clientInfo": {
+                        "name": "sick-cogs-codex",
+                        "title": "Sick-Cogs Codex",
+                        "version": "1.0.0",
+                    }
+                },
+            )
+            await self.notify("initialized", {})
+        except BaseException:
+            await self.close()
+            raise
         return self
 
     async def _read_messages(self):
@@ -337,7 +342,12 @@ class CodexManager:
             )
         return server, result
 
-    def remove_account(self, user_id):
+    async def remove_account(self, user_id):
         path = self.account_path(user_id)
-        if path.is_dir():
-            shutil.rmtree(path)
+        while path.is_dir():
+            quarantine = path.with_name(f".{path.name}.deleting-{uuid.uuid4().hex}")
+            try:
+                path.replace(quarantine)
+            except FileNotFoundError:
+                continue
+            await asyncio.to_thread(shutil.rmtree, quarantine)

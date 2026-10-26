@@ -46,7 +46,7 @@ class Codex(commands.Cog):
     """Private live Codex allowance status and notifications."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.1"
+    __version__ = "1.0.2"
 
     def __init__(self, bot):
         self.bot = bot
@@ -94,7 +94,7 @@ class Codex(commands.Cog):
             await self.manager.logout(user_id)
         except CodexManagerError:
             pass
-        self.manager.remove_account(user_id)
+        await self.manager.remove_account(user_id)
         await self.config.user_from_id(user_id).clear()
 
     async def _user(self, user_id):
@@ -394,7 +394,7 @@ class Codex(commands.Cog):
                 " Remote revocation could not be confirmed; disconnect the "
                 "app in ChatGPT Settings if needed."
             )
-        self.manager.remove_account(ctx.author.id)
+        await self.manager.remove_account(ctx.author.id)
         await self.config.user(ctx.author).clear()
         await self._private(
             ctx,
