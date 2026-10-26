@@ -484,9 +484,9 @@ class BattleRenderer:
             image=self._open(raw,(142,120),trim=True,upscale=True);canvas.paste(image,(cx-image.width//2,top+126-image.height),image)
             species=SPECIES[item.species_id];name=item.nickname or species.name;number=(page-1)*9+index+1
             shiny=" · SHINY" if item.shiny else ""
-            draw.text((left+12,top+149),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=17),stroke_width=1,stroke_fill=(42,70,58))
-            level_text=f"Lv. {item.level}";level_font=ImageFont.load_default(size=15);level_x=left+176
-            draw.text((level_x,top+150),level_text,fill=(42,70,58),font=level_font)
+            draw.text((left+12,top+149),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=17))
+            level_text=f"Lv. {item.level}";level_font=ImageFont.load_default(size=17);level_x=left+176
+            draw.text((level_x,top+149),level_text,fill=(42,70,58),font=level_font,stroke_width=1,stroke_fill=(42,70,58))
             mark_x=min(left+239,level_x+int(draw.textlength(level_text,font=level_font))+8)
             self._gender_mark(draw,(mark_x,top+148),item.gender,(42,70,58),width=2)
             if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
