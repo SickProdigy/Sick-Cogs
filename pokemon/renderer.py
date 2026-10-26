@@ -484,17 +484,17 @@ class BattleRenderer:
             image=self._open(raw,(142,120),trim=True,upscale=True);canvas.paste(image,(cx-image.width//2,top+126-image.height),image)
             species=SPECIES[item.species_id];name=item.nickname or species.name;number=(page-1)*9+index+1
             shiny=" · SHINY" if item.shiny else ""
-            draw.text((left+12,top+149),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=17))
-            level_text=f"Lv. {item.level}";level_font=ImageFont.load_default(size=17);level_x=left+176
-            draw.text((level_x,top+149),level_text,fill=(42,70,58),font=level_font)
+            draw.text((left+12,top+152),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=19))
+            level_text=f"Lv. {item.level}";level_font=ImageFont.load_default(size=19);level_x=left+176
+            draw.text((level_x,top+152),level_text,fill=(42,70,58),font=level_font)
             mark_x=min(left+239,level_x+int(draw.textlength(level_text,font=level_font))+8)
-            self._gender_mark(draw,(mark_x,top+148),item.gender,(42,70,58),width=2)
+            self._gender_mark(draw,(mark_x,top+151),item.gender,(42,70,58),width=2)
             if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
             slot=party_slots[index] if index<len(party_slots) else None
             if slot:
-                label=f"P{slot}";font=ImageFont.load_default(size=17)
-                draw.rounded_rectangle((left+12,top+9,left+52,top+38),7,fill=(54,83,70),outline=(245,239,207),width=2)
-                draw.text((left+32,top+24),label,fill=(245,239,207),font=font,anchor="mm")
+                label=f"P{slot}";font=ImageFont.load_default(size=19)
+                draw.rounded_rectangle((left+12,top+8,left+54,top+40),7,fill=(54,83,70),outline=(245,239,207),width=2)
+                draw.text((left+33,top+25),label,fill=(245,239,207),font=font,anchor="mm")
         return self._save(canvas)
 
     @staticmethod
