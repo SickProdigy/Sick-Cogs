@@ -492,9 +492,9 @@ class BattleRenderer:
             if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
             slot=party_slots[index] if index<len(party_slots) else None
             if slot:
-                label=f"P{slot}";font=ImageFont.load_default(size=14)
-                draw.rounded_rectangle((left+12,top+10,left+48,top+34),7,fill=(54,83,70),outline=(245,239,207),width=2)
-                draw.text((left+20,top+15),label,fill=(245,239,207),font=font)
+                label=f"P{slot}";font=ImageFont.load_default(size=17)
+                draw.rounded_rectangle((left+12,top+9,left+52,top+38),7,fill=(54,83,70),outline=(245,239,207),width=2)
+                draw.text((left+32,top+24),label,fill=(245,239,207),font=font,anchor="mm")
         return self._save(canvas)
 
     @staticmethod
