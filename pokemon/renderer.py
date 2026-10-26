@@ -561,7 +561,7 @@ class BattleRenderer:
         has_avatar=self._trainer_portrait(canvas,draw,avatar_data)
         pokemon_x=485 if has_avatar else 400
         if battle.state=="caught":
-            heading="Gotcha!";heading_font=ImageFont.load_default(size=34)
+            heading="Gotta catch 'em all!";heading_font=ImageFont.load_default(size=34)
             draw.text((400-int(draw.textlength(heading,font=heading_font))//2,42),heading,fill=RETRO[0],font=heading_font)
             draw.ellipse((pokemon_x-155,205,pokemon_x+155,310),fill=(182,168,89),outline=RETRO[0],width=4)
             image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,240-image.height),image)
