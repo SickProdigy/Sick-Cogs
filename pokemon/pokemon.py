@@ -328,7 +328,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.3.3";__author__="SickProdigy"
+    __version__="1.3.4";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1053,6 +1053,7 @@ class Pokemon(commands.Cog):
             elif b.state=="lost":title=f"Gym Leader {gym.leader} defeated {trainer}!" if gym else f"{wild_name} escaped from {trainer}!"
             else:title=f"{wild_name} escaped from {trainer}!"
             e=discord.Embed(title=title,description=b.result or b.last_action,color=discord.Color.gold())
+            if b.state in {"ran","lost"}:return e
             e.set_thumbnail(url=sprite(wild.id,shiny=b.wild_shiny))
             if b.state=="caught":e.add_field(name="Caught Pokemon",value=f"{wild_name} · Lv. {b.wild_level}\nCaught: **{max(1,int(b.caught_count))}**",inline=True)
             e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
