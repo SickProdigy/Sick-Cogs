@@ -243,7 +243,10 @@ class CogPolicyTests(unittest.TestCase):
         self.assertEqual(caught_embed.title,f"Gotcha! {wild.name} was caught by SickProdigy!")
         self.assertIn("Caught: **5**",caught_embed.fields[0].value)
         current.state="ran"
-        self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"{wild.name} escaped from SickProdigy!")
+        escaped=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
+        self.assertEqual(escaped.title,f"{wild.name} escaped from SickProdigy!")
+        self.assertEqual(escaped.fields,[])
+        self.assertIsNone(escaped.thumbnail.url)
         current.state="lost"
         current.result=f"{wild.name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
         embed=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
