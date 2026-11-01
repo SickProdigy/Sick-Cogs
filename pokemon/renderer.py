@@ -566,7 +566,12 @@ class BattleRenderer:
             draw.ellipse((465,190,750,255),fill=RETRO[2],outline=RETRO[0],width=4)
             draw.ellipse((55,300,390,390),fill=RETRO[2],outline=RETRO[0],width=4)
             image=self._retro(self._open(data,(210,185),trim=True,upscale=True))
-            canvas.paste(image,(595-image.width//2,220-image.height),image)
+            sprite_left=595-image.width//2;sprite_top=220-image.height
+            if not battle.gym_key:
+                center_y=min(sprite_top+image.height//2-12,150)
+                for start_y,end_y in ((center_y-16,center_y-8),(center_y,center_y),(center_y+16,center_y+8)):
+                    draw.line((sprite_left-70,start_y,sprite_left-10,end_y),fill=RETRO[1],width=5)
+            canvas.paste(image,(sprite_left,sprite_top),image)
             self._status_box(draw,(40,35),wild.name,battle.wild_level,battle.wild_hp,battle.wild_max_hp,battle.wild_status,battle.wild_gender)
             if battle.state=="lost":
                 draw.rounded_rectangle((430,275,750,345),12,fill=RETRO[7],outline=RETRO[0],width=4)

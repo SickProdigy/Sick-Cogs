@@ -446,6 +446,8 @@ class BattleTests(unittest.TestCase):
             self.assertEqual(image.getpixel((200,340)),RETRO[2])
         with Image.open(loss_result) as image:
             self.assertEqual(image.size,(800,450))
+            self.assertIn(RETRO[1],set(image.crop((425,85,505,145)).get_flattened_data()))
+            self.assertNotIn(RETRO[1],set(image.crop((425,175,490,190)).get_flattened_data()))
             self.assertEqual(image.getpixel((10,410)),RETRO[5])
 
     def test_result_text_uses_named_bottom_box_messages(self):
