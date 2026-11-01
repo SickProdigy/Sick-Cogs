@@ -540,6 +540,10 @@ class BattleRenderer:
         if battle.gym_key=="boulder":
             points=((610,125),(665,105),(714,140),(705,205),(650,242),(592,207),(580,150))
             draw.polygon(points,fill=(126,126,112),outline=RETRO[0]);draw.line((607,144,648,128,687,151,674,195,632,211,604,188,607,144),fill=(201,192,151),width=6)
+        elif battle.gym_key=="cascade":
+            points=((650,100),(708,171),(700,207),(680,232),(650,244),(620,232),(600,207),(592,171))
+            draw.polygon(points,fill=(72,154,205),outline=RETRO[0]);draw.ellipse((610,154,690,230),fill=(91,181,225),outline=RETRO[0],width=4)
+            draw.line((625,180,637,151,654,128),fill=(210,239,244),width=7)
         draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
         self._dialogue(draw,battle.result or f"{badge} earned!",(70,360),width=76,size=16)
         return self._save(canvas)

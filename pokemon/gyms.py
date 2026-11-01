@@ -24,7 +24,7 @@ class Gym:
 
 KANTO_GYMS=(
     Gym("boulder","Boulder Badge","🪨","Brock","Pewter City",((74,12),(95,14))),
-    Gym("cascade","Cascade Badge","💧","Misty","Cerulean City",((121,21),)),
+    Gym("cascade","Cascade Badge","💧","Misty","Cerulean City",((120,18),(121,21))),
     Gym("thunder","Thunder Badge","⚡","Lt. Surge","Vermilion City",((26,24),)),
     Gym("rainbow","Rainbow Badge","🌈","Erika","Celadon City",((45,29),)),
     Gym("soul","Soul Badge","☠️","Koga","Fuchsia City",((110,43),)),
@@ -33,7 +33,7 @@ KANTO_GYMS=(
     Gym("earth","Earth Badge","🌍","Giovanni","Viridian City",((112,50),)),
 )
 GYMS={gym.key:gym for gym in KANTO_GYMS}
-COMPLETED_GYMS={"boulder"}
+COMPLETED_GYMS={"boulder","cascade"}
 
 
 def earned_badges(raw):
