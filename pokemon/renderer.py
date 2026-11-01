@@ -471,7 +471,7 @@ class BattleRenderer:
             if data:
                 icon=self._open(data,(58,58),trim=True,upscale=True);canvas.paste(icon,(left+48-icon.width//2,top+41-icon.height//2),icon)
             else:self._mart_icon(draw,key,(left+48,top+41))
-            draw.text((left+88,top+10),label,fill=(42,70,58),font=ImageFont.load_default(size=22));draw.text((left+88,top+43),f"{price:,} {currency}",fill=(55,80,68),font=ImageFont.load_default(size=25))
+            draw.text((left+88,top+10),label,fill=(42,70,58),font=ImageFont.load_default(size=22),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+43),f"{price:,} {currency}",fill=(55,80,68),font=ImageFont.load_default(size=25))
         draw.text((45,598),f"{scope.upper()} BANK · USE THE BUTTONS BELOW TO BUY ONE",fill=(65,91,78),font=ImageFont.load_default(size=14))
         return self._save(canvas)
 
