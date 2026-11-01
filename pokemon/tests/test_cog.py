@@ -244,7 +244,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("Caught: **5**",caught_embed.fields[0].value)
         current.state="ran"
         escaped=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
-        self.assertEqual(escaped.title,"Got away safely!")
+        self.assertEqual(escaped.title,"SickProdigy got away safely!")
         self.assertEqual(escaped.fields,[])
         self.assertIsNone(escaped.thumbnail.url)
         current.state="lost"
