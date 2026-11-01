@@ -455,7 +455,7 @@ class BattleTests(unittest.TestCase):
         b.state="won"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"SickProdigy defeated {wild.name}!")
         b.state="ran"
-        self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy!")
+        self.assertEqual(BattleRenderer.battle_result_text(b),"Got away safely!")
         b.state="lost"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
 
