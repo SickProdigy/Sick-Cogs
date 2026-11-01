@@ -657,7 +657,7 @@ class Battle:
         if self.state != "active":
             raise BattleError("This encounter is over.")
         self.state = "ran"
-        self.result = "You forfeited the Gym challenge." if self.battle_kind=="gym" else "You got away safely."
+        self.result = "You forfeited the Gym challenge." if self.battle_kind=="gym" else "Got away safely!"
         self._record("run")
 
     def caught(self, instance_id=None):

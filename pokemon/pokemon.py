@@ -1051,6 +1051,7 @@ class Pokemon(commands.Cog):
             if b.state=="caught":title=f"Gotcha! {wild_name} was caught by {trainer}!"
             elif b.state=="won":title=f"{trainer} defeated Gym Leader {gym.leader}!" if gym else f"{trainer} defeated {wild_name}!"
             elif b.state=="lost":title=f"Gym Leader {gym.leader} defeated {trainer}!" if gym else f"{wild_name} escaped from {trainer}!"
+            elif b.state=="ran":title="Got away safely!"
             else:title=f"{wild_name} escaped from {trainer}!"
             e=discord.Embed(title=title,description=b.result or b.last_action,color=discord.Color.gold())
             if b.state in {"ran","lost"}:return e
