@@ -551,11 +551,11 @@ class BattleRenderer:
             for y in range(0,315,12):draw.line((0,y,800,y),fill=RETRO[4])
             draw.ellipse((465,190,750,255),fill=RETRO[2],outline=RETRO[0],width=4)
             draw.ellipse((55,300,390,390),fill=RETRO[2],outline=RETRO[0],width=4)
-            heading="ESCAPED!";draw.text((40,45),heading,fill=RETRO[0],font=ImageFont.load_default(size=32))
+            heading="ESCAPED!";draw.text((400,45),heading,fill=RETRO[0],font=ImageFont.load_default(size=32),anchor="mt")
             image=self._retro(self._open(data,(220,185),trim=True,upscale=True))
-            sprite_left=625-image.width//2
-            for start,y,width in ((455,115,6),(470,155,5),(485,195,4)):
-                draw.line((start,y,sprite_left-8,y),fill=RETRO[1],width=width)
+            sprite_left=625-image.width//2;sprite_top=245-image.height;center_y=sprite_top+image.height//2
+            for start_y,end_y in ((center_y-24,center_y-12),(center_y,center_y),(center_y+24,center_y+12)):
+                draw.line((sprite_left-70,start_y,sprite_left-10,end_y),fill=RETRO[1],width=5)
             canvas.paste(image,(sprite_left,245-image.height),image)
             draw.rectangle((0,390,800,450),fill=RETRO[5],outline=RETRO[0],width=5)
             self._dialogue(draw,message,(20,400))
