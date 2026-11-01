@@ -218,11 +218,22 @@ class BattleTests(unittest.TestCase):
         b=Battle(1,100,1,2,3,first,10,10,30,30);b.initialize_party([first,second])
         b.switch_to(1)
         self.assertEqual(b.player.instance_id,"two")
+        self.assertEqual(b.turn,2)
+        self.assertIn("Go, Squirtle! Caterpie used",b.last_action)
+        self.assertEqual(b.action_history[-1]["action"],"switch")
         with self.assertRaises(BattleError):b.switch_to(1)
+
+    def test_voluntary_switch_can_knock_out_the_incoming_pokemon(self):
+        first=OwnedPokemon.create("one",4,10,seed=1);second=OwnedPokemon.create("two",7,10,seed=2);third=OwnedPokemon.create("three",1,10,seed=3)
+        b=Battle(1,100,1,2,3,first,6,100,30,300,seed=4);b.initialize_party([first,second,third]);b.party_hp["two"]=1;b.wild_pp={"rage":1,"slash":0,"flamethrower":0,"fire_spin":0}
+        b.switch_to(1)
+        self.assertEqual((b.player.instance_id,b.player_hp,b.turn),("two",0,2))
+        self.assertTrue(b.needs_switch)
+        self.assertIn("Charizard used Rage",b.result)
 
     def test_run_finishes(self):
         b=battle();b.run()
-        self.assertEqual(b.state,"ran")
+        self.assertEqual((b.state,b.result),("ran","Trainer got away safely!"))
         with self.assertRaises(BattleError):b.run()
     def test_round_trip(self):
         b=battle();b.trainer_name="SickProdigy";b.wild_shiny=True;b.caught_count=5;b.use_move(0)
@@ -344,9 +355,12 @@ class BattleTests(unittest.TestCase):
         b=Battle(1,100,1,2,3,first,10,4,1,20,seed=5)
         b.initialize_party([first,second]);b.player_hp=0;b._finish_if_needed()
         self.assertTrue(b.needs_switch)
+        turn=b.turn
         b.switch_next()
         self.assertEqual(b.player.instance_id,"second")
         self.assertGreater(b.player_hp,0)
+        self.assertEqual(b.turn,turn)
+        self.assertEqual(b.last_action,"Go, Squirtle!")
     def test_renderer_trims_and_upscales_small_padded_sprites(self):
         source=io.BytesIO();image=Image.new("RGBA",(96,96),(0,0,0,0))
         for x in range(40,56):
@@ -415,7 +429,10 @@ class BattleTests(unittest.TestCase):
         with Image.open(scene) as image:self.assertEqual(image.size,(800,450))
         with Image.open(victory) as image:
             self.assertEqual(image.size,(800,450))
-            self.assertEqual(image.getpixel((145,245)),(220,40,80))
+            self.assertEqual(image.getpixel((100,112)),(220,40,80))
+            self.assertEqual(image.getpixel((145,245)),(169,188,132))
+            self.assertEqual(image.getpixel((225,250)),(40,120,220))
+            self.assertNotEqual(image.getpixel((590,150)),(40,120,220))
         with Image.open(caught_result) as image:
             self.assertEqual(image.size,(800,450))
             self.assertEqual(image.getpixel((145,245)),(220,40,80))
@@ -423,9 +440,14 @@ class BattleTests(unittest.TestCase):
             self.assertIn(RETRO[1],set(image.crop((65,380,150,408)).get_flattened_data()))
         with Image.open(escape_result) as image:
             self.assertEqual(image.size,(800,450))
-            self.assertEqual(image.getpixel((10,410)),RETRO[5])
+            self.assertEqual(image.getpixel((300,135)),RETRO[5])
+            self.assertNotIn(RETRO[1],set(image.crop((460,120,530,185)).get_flattened_data()))
+            self.assertEqual(image.getpixel((500,220)),RETRO[2])
+            self.assertEqual(image.getpixel((200,340)),RETRO[2])
         with Image.open(loss_result) as image:
             self.assertEqual(image.size,(800,450))
+            self.assertIn(RETRO[1],set(image.crop((425,85,505,145)).get_flattened_data()))
+            self.assertNotIn(RETRO[1],set(image.crop((425,175,490,190)).get_flattened_data()))
             self.assertEqual(image.getpixel((10,410)),RETRO[5])
 
     def test_result_text_uses_named_bottom_box_messages(self):
@@ -435,18 +457,25 @@ class BattleTests(unittest.TestCase):
         b.state="won"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"SickProdigy defeated {wild.name}!")
         b.state="ran"
-        self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy!")
+        self.assertEqual(BattleRenderer.battle_result_text(b),"SickProdigy got away safely!")
         b.state="lost"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
 
 
 class RendererAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_victory_result_fetches_defeated_opponent_and_used_party_sprites(self):
+        renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();second=OwnedPokemon.create("second",7,5,seed=2);current.initialize_party([current.player,second]);current.participants=[current.player.instance_id,second.instance_id];current.state="won"
+        renderer.get_sprite=AsyncMock(side_effect=[b"wild",b"first",b"second"]);renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
+        await renderer.battle(current)
+        self.assertEqual([call.args[0] for call in renderer.get_sprite.await_args_list],[current.wild_species_id,current.player.species_id,second.species_id])
+        self.assertEqual(renderer._render.await_args.args[-1],[b"first",b"second"])
+
     async def test_catch_result_uses_the_thrown_ball_sprite(self):
         renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();current.state="caught";current.last_ball="ultra_ball"
         renderer.get_sprite=AsyncMock(return_value=b"pokemon");renderer.get_item_sprite=AsyncMock(return_value=b"ball");renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
         await renderer.battle(current)
         renderer.get_item_sprite.assert_awaited_once_with("ultra_ball")
-        self.assertEqual(renderer._render.await_args.args[-1],b"ball")
+        self.assertEqual(renderer._render.await_args.args[-2],b"ball")
 
 class CatalogVersionTests(unittest.TestCase):
     def test_every_release_versions_all_future_mechanics_dimensions(self):

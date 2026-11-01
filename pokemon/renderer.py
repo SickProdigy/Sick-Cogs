@@ -257,15 +257,22 @@ class BattleRenderer:
 
     async def battle(self, battle, avatar_data=None):
         if battle.state!="active":
-            species_id=battle.player.species_id if battle.state=="won" else battle.wild_species_id
-            result_sprite=await self.get_sprite(species_id,shiny=battle.player.shiny if battle.state=="won" else battle.wild_shiny)
+            participant_sprites=None
+            if battle.state=="won" and battle.gym_key:
+                result_sprite=await self.get_sprite(battle.player.species_id,shiny=battle.player.shiny)
+            elif battle.state=="won":
+                result_sprite=await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
+                used=[item for item in battle.party if item.instance_id in set(battle.participants)][:6]
+                participant_sprites=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in used))
+            else:
+                result_sprite=await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
             ball_sprite=None
             if battle.state=="caught" and battle.last_ball in {"poke_ball","great_ball","ultra_ball"}:
                 try:ball_sprite=await self.get_item_sprite(battle.last_ball)
                 except RenderError:pass
             try:
                 if battle.state=="won" and battle.gym_key:return await self._render(self._gym_victory_sync,battle,result_sprite,avatar_data)
-                return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data,ball_sprite)
+                return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data,ball_sprite,participant_sprites)
             except (OSError,ValueError) as exc:raise RenderError("Battle result rendering failed.") from exc
         front = await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
         try:
@@ -456,7 +463,7 @@ class BattleRenderer:
 
     def _mart_card_sync(self,items,balance,currency,scope,item_data=None):
         canvas=Image.new("RGB",(900,650),(225,217,177));draw=ImageDraw.Draw(canvas);draw.rounded_rectangle((20,18,880,632),18,fill=(245,239,207),outline=(54,83,70),width=5)
-        draw.text((45,35),"POKE MART",fill=(42,70,58),font=ImageFont.load_default(size=31),stroke_width=1,stroke_fill=(42,70,58));draw.text((650,43),f"BALANCE  {balance:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=20),stroke_width=1,stroke_fill=(65,91,78),anchor="mt")
+        draw.text((45,35),"POKE MART",fill=(42,70,58),font=ImageFont.load_default(size=31),stroke_width=1,stroke_fill=(42,70,58));draw.text((650,39),f"BALANCE  {balance:,} {currency}",fill=(55,80,68),font=ImageFont.load_default(size=24),anchor="mt")
         for index,(key,label,price) in enumerate(items):
             col=index%2;row=index//2;left=43+410*col;top=92+99*row
             draw.rounded_rectangle((left,top,left+384,top+82),12,fill=(221,229,200),outline=(78,105,88),width=3)
@@ -464,7 +471,7 @@ class BattleRenderer:
             if data:
                 icon=self._open(data,(58,58),trim=True,upscale=True);canvas.paste(icon,(left+48-icon.width//2,top+41-icon.height//2),icon)
             else:self._mart_icon(draw,key,(left+48,top+41))
-            draw.text((left+88,top+16),label,fill=(42,70,58),font=ImageFont.load_default(size=19),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+47),f"{price:,} {currency}",fill=(65,91,78),font=ImageFont.load_default(size=20),stroke_width=1,stroke_fill=(65,91,78))
+            draw.text((left+88,top+10),label,fill=(42,70,58),font=ImageFont.load_default(size=22),stroke_width=1,stroke_fill=(42,70,58));draw.text((left+88,top+43),f"{price:,} {currency}",fill=(55,80,68),font=ImageFont.load_default(size=25))
         draw.text((45,598),f"{scope.upper()} BANK · USE THE BUTTONS BELOW TO BUY ONE",fill=(65,91,78),font=ImageFont.load_default(size=14))
         return self._save(canvas)
 
@@ -484,17 +491,17 @@ class BattleRenderer:
             image=self._open(raw,(142,120),trim=True,upscale=True);canvas.paste(image,(cx-image.width//2,top+126-image.height),image)
             species=SPECIES[item.species_id];name=item.nickname or species.name;number=(page-1)*9+index+1
             shiny=" · SHINY" if item.shiny else ""
-            draw.text((left+12,top+149),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=17),stroke_width=1,stroke_fill=(42,70,58))
-            level_text=f"Lv. {item.level}";level_font=ImageFont.load_default(size=15);level_x=left+176
-            draw.text((level_x,top+150),level_text,fill=(42,70,58),font=level_font)
+            draw.text((left+12,top+152),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=19))
+            level_text=f"Lv. {item.level}";level_font=ImageFont.load_default(size=19);level_x=left+176
+            draw.text((level_x,top+152),level_text,fill=(42,70,58),font=level_font)
             mark_x=min(left+239,level_x+int(draw.textlength(level_text,font=level_font))+8)
-            self._gender_mark(draw,(mark_x,top+148),item.gender,(42,70,58),width=2)
+            self._gender_mark(draw,(mark_x,top+151),item.gender,(42,70,58),width=2)
             if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
             slot=party_slots[index] if index<len(party_slots) else None
             if slot:
-                label=f"P{slot}";font=ImageFont.load_default(size=14)
-                draw.rounded_rectangle((left+12,top+10,left+48,top+34),7,fill=(54,83,70),outline=(245,239,207),width=2)
-                draw.text((left+20,top+15),label,fill=(245,239,207),font=font)
+                label=f"P{slot}";font=ImageFont.load_default(size=19)
+                draw.rounded_rectangle((left+12,top+8,left+54,top+40),7,fill=(54,83,70),outline=(245,239,207),width=2)
+                draw.text((left+33,top+25),label,fill=(245,239,207),font=font,anchor="mm")
         return self._save(canvas)
 
     @staticmethod
@@ -504,6 +511,7 @@ class BattleRenderer:
         if battle.state=="caught":return f"Gotcha! {wild.name} was caught by {trainer}!"
         if battle.state=="won":return f"{trainer} defeated {wild.name}!"
         if battle.state=="lost":return (f"Gym challenge lost, {trainer}! Go to a Pokemon Center to heal." if battle.gym_key else f"{wild.name} escaped from {trainer}! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
+        if battle.state=="ran":return f"{trainer} got away safely!"
         return f"{wild.name} escaped from {trainer}!"
 
     @classmethod
@@ -536,15 +544,34 @@ class BattleRenderer:
         self._dialogue(draw,battle.result or f"{badge} earned!",(70,360),width=76,size=16)
         return self._save(canvas)
 
-    def _battle_result_sync(self,battle,data,avatar_data=None,ball_data=None):
+    def _battle_result_sync(self,battle,data,avatar_data=None,ball_data=None,participant_data=None):
         wild=SPECIES[battle.wild_species_id];message=self.battle_result_text(battle)
-        if battle.state in {"lost","ran"}:
+        if battle.state=="ran":
+            canvas=Image.new("RGB",(800,450),RETRO[4]);draw=ImageDraw.Draw(canvas)
+            draw.rectangle((0,0,800,315),fill=RETRO[5])
+            for y in range(0,315,12):draw.line((0,y,800,y),fill=RETRO[4])
+            draw.ellipse((465,190,750,255),fill=RETRO[2],outline=RETRO[0],width=4)
+            draw.ellipse((55,300,390,390),fill=RETRO[2],outline=RETRO[0],width=4)
+            heading="GOT AWAY SAFELY!";draw.text((400,45),heading,fill=RETRO[0],font=ImageFont.load_default(size=32),anchor="mt")
+            image=self._retro(self._open(data,(220,185),trim=True,upscale=True))
+            sprite_left=625-image.width//2
+            canvas.paste(image,(sprite_left,245-image.height),image)
+            draw.rectangle((0,390,800,450),fill=RETRO[5],outline=RETRO[0],width=5)
+            self._dialogue(draw,message,(20,400))
+            return self._save(canvas)
+
+        if battle.state=="lost":
             canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
             for y in range(0,360,12):draw.line((0,y,800,y),fill=RETRO[4])
             draw.ellipse((465,190,750,255),fill=RETRO[2],outline=RETRO[0],width=4)
             draw.ellipse((55,300,390,390),fill=RETRO[2],outline=RETRO[0],width=4)
             image=self._retro(self._open(data,(210,185),trim=True,upscale=True))
-            canvas.paste(image,(595-image.width//2,220-image.height),image)
+            sprite_left=595-image.width//2;sprite_top=220-image.height
+            if not battle.gym_key:
+                center_y=min(sprite_top+image.height//2-12,150)
+                for start_y,end_y in ((center_y-16,center_y-8),(center_y,center_y),(center_y+16,center_y+8)):
+                    draw.line((sprite_left-70,start_y,sprite_left-10,end_y),fill=RETRO[1],width=5)
+            canvas.paste(image,(sprite_left,sprite_top),image)
             self._status_box(draw,(40,35),wild.name,battle.wild_level,battle.wild_hp,battle.wild_max_hp,battle.wild_status,battle.wild_gender)
             if battle.state=="lost":
                 draw.rounded_rectangle((430,275,750,345),12,fill=RETRO[7],outline=RETRO[0],width=4)
@@ -558,9 +585,11 @@ class BattleRenderer:
         for y in range(450):
             ratio=y/449;draw.line((0,y,800,y),fill=(int(244-49*ratio),int(232-58*ratio),int(174-69*ratio)))
         draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
-        has_avatar=self._trainer_portrait(canvas,draw,avatar_data)
+        has_avatar=self._trainer_portrait(canvas,draw,avatar_data) if battle.state=="caught" else False
         pokemon_x=485 if has_avatar else 400
         if battle.state=="caught":
+            heading="Gotta catch 'em all!";heading_font=ImageFont.load_default(size=34)
+            draw.text((400-int(draw.textlength(heading,font=heading_font))//2,42),heading,fill=RETRO[0],font=heading_font)
             draw.ellipse((pokemon_x-155,205,pokemon_x+155,310),fill=(182,168,89),outline=RETRO[0],width=4)
             image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,240-image.height),image)
             ball_center=((295 if has_avatar else 400),290)
@@ -568,16 +597,26 @@ class BattleRenderer:
                 ball=self._open(ball_data,(86,86),trim=True,upscale=True);canvas.paste(ball,(ball_center[0]-ball.width//2,ball_center[1]-ball.height//2),ball)
             else:self._pokeball(draw,ball_center,43)
         else:
-            heading="Victory!"
-            draw.text((400-int(draw.textlength(heading,font=ImageFont.load_default(size=34)))//2,42),heading,fill=RETRO[0],font=ImageFont.load_default(size=34))
-            draw.ellipse((pokemon_x-165,225,pokemon_x+165,340),fill=(182,168,89),outline=RETRO[0],width=4)
-            image=self._open(data,(250,215),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,300-image.height),image)
+            self._trainer_portrait(canvas,draw,avatar_data,center=(100,112),diameter=94)
+            heading="Victory!";heading_font=ImageFont.load_default(size=34)
+            draw.text((400-int(draw.textlength(heading,font=heading_font))//2,42),heading,fill=RETRO[0],font=heading_font)
+            draw.ellipse((445,118,735,215),fill=(182,168,89),outline=RETRO[0],width=4)
+            defeated=self._open(data,(155,110),trim=True,upscale=True);alpha=defeated.getchannel("A")
+            gray=ImageOps.autocontrast(ImageOps.grayscale(defeated),mask=alpha);defeated=ImageOps.colorize(gray,(35,42,25),(242,235,188)).convert("RGBA");defeated.putalpha(alpha)
+            canvas.paste(defeated,(590-defeated.width//2,195-defeated.height),defeated)
+            draw.ellipse((45,215,405,330),fill=(169,188,132),outline=RETRO[0],width=4)
+            used=[item for item in battle.party if item.instance_id in set(battle.participants)][:6]
+            sprites=list(participant_data or [data])[:len(used)]
+            layouts={1:[(225,292)],2:[(170,292),(280,292)],3:[(225,250),(150,300),(300,300)],4:[(170,250),(280,250),(155,302),(295,302)],5:[(170,245),(280,245),(120,302),(225,312),(330,302)],6:[(130,245),(225,235),(320,245),(120,302),(225,312),(330,302)]}
+            for raw,(x,bottom) in zip(sprites,layouts.get(len(sprites),[])):
+                image=self._open(raw,(82,76),trim=True,upscale=True);canvas.paste(image,(x-image.width//2,bottom-image.height),image)
         draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
-        self._dialogue(draw,message,(70,360),width=76,size=16)
+        display_message=message.removeprefix("Gotcha! ") if battle.state=="caught" else message
+        self._dialogue(draw,display_message,(70,360),width=76,size=16)
         if battle.state=="caught":
-            font=ImageFont.load_default(size=14);level=f"Lv. {battle.wild_level}";draw.text((70,386),level,fill=RETRO[1],font=font)
-            mark_x=70+int(draw.textlength(level,font=font))+8;self._gender_mark(draw,(mark_x,384),battle.wild_gender,RETRO[1])
-            caught=f"Caught: {max(1,int(battle.caught_count))}";count_font=ImageFont.load_default(size=16);draw.text((730,384),caught,fill=RETRO[1],font=count_font,stroke_width=1,stroke_fill=RETRO[1],anchor="ra")
+            font=ImageFont.load_default(size=18);level=f"Lv. {battle.wild_level}";draw.text((70,384),level,fill=RETRO[1],font=font)
+            mark_x=70+int(draw.textlength(level,font=font))+8;self._gender_mark(draw,(mark_x,382),battle.wild_gender,RETRO[1])
+            caught=f"Caught: {max(1,int(battle.caught_count))}";count_font=ImageFont.load_default(size=20);draw.text((730,382),caught,fill=RETRO[1],font=count_font,anchor="ra")
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0,expired=False,shiny=False):
