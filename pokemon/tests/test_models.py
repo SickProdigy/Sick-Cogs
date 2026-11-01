@@ -233,7 +233,7 @@ class BattleTests(unittest.TestCase):
 
     def test_run_finishes(self):
         b=battle();b.run()
-        self.assertEqual(b.state,"ran")
+        self.assertEqual((b.state,b.result),("ran","Trainer got away safely!"))
         with self.assertRaises(BattleError):b.run()
     def test_round_trip(self):
         b=battle();b.trainer_name="SickProdigy";b.wild_shiny=True;b.caught_count=5;b.use_move(0)
@@ -441,7 +441,7 @@ class BattleTests(unittest.TestCase):
         with Image.open(escape_result) as image:
             self.assertEqual(image.size,(800,450))
             self.assertEqual(image.getpixel((300,135)),RETRO[5])
-            self.assertIn(RETRO[1],set(image.crop((460,120,530,185)).get_flattened_data()))
+            self.assertNotIn(RETRO[1],set(image.crop((460,120,530,185)).get_flattened_data()))
             self.assertEqual(image.getpixel((500,220)),RETRO[2])
             self.assertEqual(image.getpixel((200,340)),RETRO[2])
         with Image.open(loss_result) as image:
@@ -455,7 +455,7 @@ class BattleTests(unittest.TestCase):
         b.state="won"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"SickProdigy defeated {wild.name}!")
         b.state="ran"
-        self.assertEqual(BattleRenderer.battle_result_text(b),"Got away safely!")
+        self.assertEqual(BattleRenderer.battle_result_text(b),"SickProdigy got away safely!")
         b.state="lost"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
 

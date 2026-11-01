@@ -511,7 +511,7 @@ class BattleRenderer:
         if battle.state=="caught":return f"Gotcha! {wild.name} was caught by {trainer}!"
         if battle.state=="won":return f"{trainer} defeated {wild.name}!"
         if battle.state=="lost":return (f"Gym challenge lost, {trainer}! Go to a Pokemon Center to heal." if battle.gym_key else f"{wild.name} escaped from {trainer}! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
-        if battle.state=="ran":return "Got away safely!"
+        if battle.state=="ran":return f"{trainer} got away safely!"
         return f"{wild.name} escaped from {trainer}!"
 
     @classmethod
@@ -554,9 +554,7 @@ class BattleRenderer:
             draw.ellipse((55,300,390,390),fill=RETRO[2],outline=RETRO[0],width=4)
             heading="GOT AWAY SAFELY!";draw.text((400,45),heading,fill=RETRO[0],font=ImageFont.load_default(size=32),anchor="mt")
             image=self._retro(self._open(data,(220,185),trim=True,upscale=True))
-            sprite_left=625-image.width//2;sprite_top=245-image.height;center_y=sprite_top+image.height//2
-            for start_y,end_y in ((center_y-24,center_y-12),(center_y,center_y),(center_y+24,center_y+12)):
-                draw.line((sprite_left-70,start_y,sprite_left-10,end_y),fill=RETRO[1],width=5)
+            sprite_left=625-image.width//2
             canvas.paste(image,(sprite_left,245-image.height),image)
             draw.rectangle((0,390,800,450),fill=RETRO[5],outline=RETRO[0],width=5)
             self._dialogue(draw,message,(20,400))
