@@ -338,9 +338,9 @@ class GymProgressionTests(unittest.TestCase):
         self.assertEqual([gym.key for gym in KANTO_GYMS],["boulder","cascade","thunder","rainbow","soul","marsh","volcano","earth"])
         self.assertEqual(next_gym([]).leader,"Brock")
         self.assertEqual(next_gym([]).team,((74,12),(95,14)))
-        self.assertEqual(next_gym(["boulder"]).leader,"Misty")
+        self.assertEqual((next_gym(["boulder"]).leader,next_gym(["boulder"]).team),("Misty",((120,18),(121,21))))
         self.assertIsNone(next_gym([gym.key for gym in KANTO_GYMS]))
-        self.assertEqual(COMPLETED_GYMS,{"boulder"})
+        self.assertEqual(COMPLETED_GYMS,{"boulder","cascade"})
 
     def test_badge_case_and_profile_show_journey(self):
         user=SimpleNamespace(display_name="SickProdigy",display_avatar=SimpleNamespace(url="https://example.com/avatar.png"))
@@ -348,10 +348,12 @@ class GymProgressionTests(unittest.TestCase):
         profile=trainer_profile_embed(user,conf,300)
         self.assertIn("SickProdigy",profile.title)
         self.assertIn("1/8",profile.fields[0].name)
-        self.assertIn("Misty",profile.footer.text);self.assertIn("Locked",profile.footer.text)
+        self.assertIn("Misty",profile.footer.text);self.assertNotIn("Locked",profile.footer.text)
         self.assertEqual(badge_case(["boulder"]).count("◻️"),7)
         status=gym_status_embed(user,conf,"!poke gym challenge")
-        self.assertIn("Misty",status.fields[1].value);self.assertIn("under development",status.fields[1].value);self.assertNotIn("!poke gym challenge",status.footer.text)
+        self.assertIn("Misty",status.fields[1].value);self.assertIn("Staryu Lv. 18",status.fields[1].value);self.assertIn("Starmie Lv. 21",status.fields[1].value);self.assertIn("!poke gym challenge",status.footer.text)
+        locked=gym_status_embed(user,{**conf,"badges":["boulder","cascade"]},"!poke gym challenge")
+        self.assertIn("Lt. Surge",locked.fields[1].value);self.assertIn("under development",locked.fields[1].value)
 
 
 class PokedexTests(unittest.TestCase):
@@ -958,7 +960,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         sent=ctx.send.await_args.kwargs;self.assertIn("!poke gym challenge",sent["embed"].footer.text);self.assertEqual(sent["view"].challenge.label,"Challenge Brock")
 
     async def test_unfinished_next_gym_is_locked_in_ui_and_authoritative_path(self):
-        conf={"badges":["boulder"],"collection":[],"party":[]};section=StoredSection(conf)
+        conf={"badges":["boulder","cascade"],"collection":[],"party":[]};section=StoredSection(conf)
         guild_section=SimpleNamespace(all=AsyncMock(return_value={"active_encounter":None,"max_active_encounters":1}))
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(user=lambda user:section,guild=lambda guild:guild_section,all=AsyncMock(return_value={"maximum_concurrency":3}))
         cog.guild_encounters=AsyncMock(return_value={})
@@ -1005,12 +1007,30 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((raw["kind"],raw["gym_key"],raw["battle"]["battle_kind"]),("gym","boulder","gym"))
         self.assertEqual([item["species_id"] for item in raw["battle"]["opponent_party"]],[74,95])
 
+    async def test_second_gym_starts_misty_restart_safe_battle(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        player=OwnedPokemon.create("misty-starter",1,22,seed=5)
+        conf={"collection":[player.raw()],"party":["misty-starter"],"badges":["boulder"]}
+        active=StoredValue(None);timeout=StoredValue(1800);next_encounter_value=StoredValue(22)
+        cog=Pokemon.__new__(Pokemon);cog.battles={};cog.locks={};user_section=StoredSection(conf)
+        guild_section=SimpleNamespace(all=AsyncMock(return_value={"active_encounter":None,"max_active_encounters":1}),active_encounter=active,battle_timeout=timeout,spawn_profile=StoredValue("balanced"))
+        cog.config=SimpleNamespace(user=lambda user:user_section,guild=lambda guild:guild_section,next_encounter=next_encounter_value,all=AsyncMock(return_value={"maximum_concurrency":3}))
+        cog.rendered_battle=AsyncMock(return_value=(discord.Embed(title="Misty Gym"),[]));cog.put_encounter=AsyncMock()
+        message=SimpleNamespace(id=109)
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42),guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=2),send=AsyncMock(return_value=message))
+        await Pokemon.gym_challenge.callback(cog,ctx)
+        battle=cog.battles[22];raw=cog.put_encounter.await_args.args[1]
+        self.assertEqual((battle.battle_kind,battle.gym_key,battle.wild_species_id,battle.wild_level,battle.opponent_total),("gym","cascade",120,18,2))
+        self.assertEqual([(item["species_id"],item["level"]) for item in raw["battle"]["opponent_party"]],[(120,18),(121,21)])
+        self.assertIn(120,user_section.value["pokedex_seen"]);self.assertEqual(next_encounter_value.value,23)
+
     async def test_gym_badge_settlement_is_idempotent(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
-        player=OwnedPokemon.create("gym-player",7,20,seed=4)
-        battle=Battle(9,42,1,2,3,player,95,12,50,1,battle_kind="gym",gym_key="boulder")
+        player=OwnedPokemon.create("gym-player",7,25,seed=4)
+        battle=Battle(9,42,1,2,3,player,120,18,50,1,battle_kind="gym",gym_key="cascade")
+        battle.initialize_opponents(((120,18),(121,21)));battle.opponent_index=1;battle.wild_species_id=121;battle.wild_level=21;battle.opponents_defeated=[120,121]
         battle.state="won";battle.result="Victory."
-        stored={"collection":[player.raw()],"badges":[]}
+        stored={"collection":[player.raw()],"badges":["boulder"]}
         section=SimpleNamespace(
             all=AsyncMock(side_effect=lambda:dict(stored)),
             set=AsyncMock(side_effect=lambda value:stored.update(value)),
@@ -1019,10 +1039,13 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog.config=SimpleNamespace(user_from_id=lambda user_id:section)
         await cog.sync_battle_player(battle)
         await cog.sync_battle_player(battle)
-        self.assertEqual(stored["badges"],["boulder"])
-        self.assertEqual(battle.result.count("Boulder Badge"),1)
-        stored["badges"]=[];lost=Battle(10,42,1,2,3,player,74,12,50,1,battle_kind="gym",gym_key="boulder");lost.state="lost";lost.result="Gym challenge lost."
-        await cog.sync_battle_player(lost);self.assertEqual(stored["badges"],[])
+        self.assertEqual(stored["badges"],["boulder","cascade"])
+        self.assertEqual(battle.result.count("Cascade Badge"),1)
+        self.assertEqual(stored["pokedex_seen"],[120,121])
+        self.assertEqual((stored["pokedex_stats"]["120"]["battled"],stored["pokedex_stats"]["120"]["defeated"]),(1,1))
+        self.assertEqual((stored["pokedex_stats"]["121"]["battled"],stored["pokedex_stats"]["121"]["defeated"]),(1,1))
+        stored["badges"]=["boulder"];lost=Battle(10,42,1,2,3,player,120,18,50,1,battle_kind="gym",gym_key="cascade");lost.state="lost";lost.result="Gym challenge lost."
+        await cog.sync_battle_player(lost);self.assertEqual(stored["badges"],["boulder"])
 
     async def test_gym_view_removes_bag_and_rejects_poke_balls(self):
         current=battle();current.battle_kind="gym";current.gym_key="boulder"
