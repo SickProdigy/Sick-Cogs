@@ -210,7 +210,7 @@ class AzerothDatabase:
             raise ValueError("Audience must be humans or ai.")
         payload = await self._request(
             "GET",
-            "/v1/characters/online",
+            "/v1/players/online",
             params={"audience": audience, "limit": max(1, min(int(limit), 100))},
         )
         return [self._record(item) for item in payload.get("entries", []) if isinstance(item, dict)]

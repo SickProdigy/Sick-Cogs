@@ -72,6 +72,7 @@ class ApiClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_online_limit_is_bounded(self):
         api = FakeApi(responses=[{"entries": []}])
         await api.online("humans", 1000)
+        self.assertEqual(api.requests[0][1], "/v1/players/online")
         self.assertEqual(
             api.requests[0][2]["params"], {"audience": "humans", "limit": 100}
         )
