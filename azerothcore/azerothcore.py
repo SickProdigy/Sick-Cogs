@@ -1143,13 +1143,7 @@ class AzerothCore(commands.Cog):
 
     @ac.command(name="online")
     async def ac_online(self, ctx: commands.Context):
-        """Show online human players and AI companions separately."""
-        if await self.database.is_configured():
-            try:
-                return await self._send_api_online(ctx)
-            except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
-                return await ctx.send(str(exc))
-
+        """Show online players through the compatible SOAP interface."""
         server_name = await self._server_display_name()
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
@@ -1268,6 +1262,16 @@ class AzerothCore(commands.Cog):
                 return
 
         await ctx.send("No online player information returned.")
+
+    @ac.command(name="apionline")
+    async def ac_api_online(self, ctx: commands.Context):
+        """Show online human players and AI companions through ac-api-v1."""
+        if not await self.database.is_configured():
+            return await ctx.send("The private AzerothCore API is not configured.")
+        try:
+            await self._send_api_online(ctx)
+        except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
+            await ctx.send(str(exc))
 
     @ac.command(name="player", aliases=("character",))
     async def ac_player(self, ctx: commands.Context, *, name: str):
