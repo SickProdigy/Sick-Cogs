@@ -1090,6 +1090,13 @@ class AzerothCore(commands.Cog):
             return await ctx.send(error)
 
         info = self._parse_server_info(out)
+        api_info = None
+        if await self.database.is_configured():
+            try:
+                api_info = await self.database.check()
+            except (DatabaseConfigurationError, DatabaseUnavailable):
+                # SOAP remains the compatibility source when the optional API is unavailable.
+                pass
 
         title = info.get("name") or await self._server_display_name()
         embed = discord.Embed(title=title, color=await ctx.embed_color())
@@ -1097,12 +1104,15 @@ class AzerothCore(commands.Cog):
         if configured_realmlist:
             embed.add_field(name="Realmlist", value=str(configured_realmlist), inline=False)
 
-        if info.get("online") is not None and info.get("max_players") is not None:
+        if api_info is not None:
+            embed.add_field(name="Online Characters", value=f"{api_info['online']:,}", inline=True)
+            embed.add_field(name="Characters Created", value=f"{api_info['characters']:,}", inline=True)
+        elif info.get("online") is not None and info.get("max_players") is not None:
             embed.add_field(name="Population", value=f"{info.get('online')}/{info.get('max_players')}", inline=True)
         elif info.get("online") is not None:
-            embed.add_field(name="Online", value=str(info.get("online")), inline=True)
-        if info.get("characters") is not None:
-            embed.add_field(name="Characters", value=str(info.get("characters")), inline=True)
+            embed.add_field(name="Connected Sessions", value=str(info.get("online")), inline=True)
+        if api_info is None and info.get("characters") is not None:
+            embed.add_field(name="Characters in World", value=str(info.get("characters")), inline=True)
         if info.get("peak") is not None:
             embed.add_field(name="Peak", value=str(info.get("peak")), inline=True)
 
@@ -1122,12 +1132,15 @@ class AzerothCore(commands.Cog):
         fallback = [f"{title}"]
         if configured_realmlist:
             fallback.append(f"Realmlist: {configured_realmlist}")
-        if info.get("online") is not None and info.get("max_players") is not None:
+        if api_info is not None:
+            fallback.append(f"Online Characters: {api_info['online']:,}")
+            fallback.append(f"Characters Created: {api_info['characters']:,}")
+        elif info.get("online") is not None and info.get("max_players") is not None:
             fallback.append(f"Population: {info.get('online')}/{info.get('max_players')}")
         elif info.get("online") is not None:
-            fallback.append(f"Online: {info.get('online')}")
-        if info.get("characters") is not None:
-            fallback.append(f"Characters: {info.get('characters')}")
+            fallback.append(f"Connected Sessions: {info.get('online')}")
+        if api_info is None and info.get("characters") is not None:
+            fallback.append(f"Characters in World: {info.get('characters')}")
         if info.get("peak") is not None:
             fallback.append(f"Peak: {info.get('peak')}")
         if info.get("version"):

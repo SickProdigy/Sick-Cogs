@@ -102,6 +102,11 @@ command uses ac-api-v1 when configured so it can distinguish humans from Playerb
 falls back to SOAP on installations without the module. `[p]azerothcore apionline` explicitly
 requires the API.
 
+The `[p]azerothcore info` card always uses SOAP for server identity, build, and uptime. When
+ac-api-v1 is configured and reachable, it enriches the card with accurate `Online Characters`
+and `Characters Created` totals. Without the module, the card falls back to SOAP's `Connected
+Sessions` and `Characters in World` values.
+
 AI classification comes from ac-api-v1 authoritative Playerbots data. Human and AI
 leaderboards are requested separately with the API audience filter; the cog never infers AI
 status from character or account names. Online cards show at most 10 names per audience and summarize the
