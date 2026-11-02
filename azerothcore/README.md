@@ -99,9 +99,9 @@ Keep the two tokens distinct.
 Run [p]azerothcore apicheck to verify capability discovery and realm status. The legacy
 databasecheck and dbcheck names remain aliases during migration.
 
-AI classification is intentionally not inferred from ordinary character results. Until
-ac-api-v1 exposes authoritative Playerbots classification, [p]azerothcore playerbots uses
-the configured SOAP path and AI leaderboards report that they are unavailable.
+AI classification comes from ac-api-v1 authoritative Playerbots data. Human and AI
+leaderboards are requested separately with the API audience filter; the cog never infers AI
+status from character or account names.
 
 ## Troubleshooting
 
@@ -131,7 +131,7 @@ azerothcore set playerbotprefix clear
 
 Use `azerothcore onlineprobe` to test the default online-list command, chat-style `.account onlinelist`, and `server info` from Discord. To test a custom read-only command, run `azerothcore onlineprobe <command>`, then configure a working parser-friendly command with `azerothcore set onlinecommand <command>`.
 
-The cog intentionally has no direct database access. Named character and leaderboard data comes through the private ac-api-v1 module; SOAP remains the fallback for Playerbots until the API exposes authoritative AI classification.
+The cog intentionally has no direct database access. Named characters, separated human and AI online lists, and audience-filtered leaderboards come through the private ac-api-v1 module. SOAP remains available for administrative commands and legacy Playerbots output.
 
 `server info` can usually show connected players, characters in world, connection peak, uptime, and build/revision details, but it does not include character or account names. If your server has a custom command that lists character names, set it with:
 

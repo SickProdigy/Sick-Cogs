@@ -72,13 +72,20 @@ class ApiClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_online_limit_is_bounded(self):
         api = FakeApi(responses=[{"entries": []}])
         await api.online("humans", 1000)
-        self.assertEqual(api.requests[0][2]["params"]["limit"], 100)
+        self.assertEqual(
+            api.requests[0][2]["params"], {"audience": "humans", "limit": 100}
+        )
 
-    async def test_ai_results_are_not_guessed(self):
-        api = FakeApi()
-        self.assertEqual(await api.online("ai"), [])
-        self.assertEqual(await api.leaderboard("level", "ai"), [])
-        self.assertEqual(api.requests, [])
+    async def test_ai_audience_is_requested_and_mapped(self):
+        api = FakeApi(responses=[
+            {"entries": [{"character_id": 2, "name": "Bot", "player_type": "ai"}]},
+            {"entries": [{"character_id": 2, "name": "Bot", "player_type": "ai"}]},
+        ])
+        online = await api.online("ai")
+        leaders = await api.leaderboard("level", "ai")
+        self.assertEqual((online[0].player_type, leaders[0].player_type), ("ai", "ai"))
+        self.assertEqual(api.requests[0][2]["params"]["audience"], "ai")
+        self.assertEqual(api.requests[1][2]["params"]["audience"], "ai")
 
     async def test_leaderboard_maps_public_fields(self):
         api = FakeApi(responses=[{"entries": [{
@@ -86,7 +93,10 @@ class ApiClientTests(unittest.IsolatedAsyncioTestCase):
             "level": 80, "money_copper": 12345, "kills": 7, "quests": 900,
         }]}])
         records = await api.leaderboard("gold", "humans", 99)
-        self.assertEqual(api.requests[0][2]["params"], {"metric": "gold", "limit": 25, "offset": 0})
+        self.assertEqual(
+            api.requests[0][2]["params"],
+            {"metric": "gold", "audience": "humans", "limit": 25, "offset": 0},
+        )
         self.assertEqual((records[0].money, records[0].quests), (12345, 900))
 
     async def test_check_combines_capabilities_and_realm_status(self):

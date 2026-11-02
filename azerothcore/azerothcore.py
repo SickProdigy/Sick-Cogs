@@ -812,6 +812,7 @@ class AzerothCore(commands.Cog):
     def _player_type_label(player_type: str) -> str:
         return {
             "human": "Human Player",
+            "ai": "AI Companion",
             "random_ai": "Random AI Companion",
             "account_ai": "Account AI Companion",
             "unknown_ai": "Possible AI Companion",
@@ -828,27 +829,35 @@ class AzerothCore(commands.Cog):
         return f"level {record.level}"
 
     async def _send_api_online(self, ctx: commands.Context) -> None:
-        characters = await self.database.online("humans")
+        humans = await self.database.online("humans")
+        ai_companions = await self.database.online("ai")
         server_name = await self._server_display_name()
         embed = discord.Embed(title=f"{server_name} Online List", color=await ctx.embed_color())
         await self._decorate_server_embed(embed, with_banner=True)
-        lines = [record.name for record in characters]
-        visible = []
-        length = 0
-        for line in lines:
-            addition = len(line) + (1 if visible else 0)
-            if length + addition > 900:
-                break
-            visible.append(line)
-            length += addition
-        hidden = len(lines) - len(visible)
-        if hidden:
-            visible.append(f"...and {hidden} more.")
-        value = "\n".join(visible) or "No characters are online."
-        value += "\n\nPlayerbots are not separated until ac-api-v1 exposes authoritative AI classification."
-        embed.add_field(name=f"Online Characters: {len(characters)}", value=value, inline=False)
+
+        for label, records in (("Players", humans), ("AI Companions", ai_companions)):
+            visible = []
+            length = 0
+            for record in records:
+                addition = len(record.name) + (1 if visible else 0)
+                if length + addition > 900:
+                    break
+                visible.append(record.name)
+                length += addition
+            hidden = len(records) - len(visible)
+            if hidden:
+                visible.append(f"...and {hidden} more.")
+            embed.add_field(
+                name=f"Online {label}: {len(records)}",
+                value="\n".join(visible) or f"No {label.lower()} are online.",
+                inline=False,
+            )
+
         await self._send_embed_or_text(
-            ctx, embed, f"{server_name}\nOnline Characters: {len(characters)}", with_banner=True
+            ctx,
+            embed,
+            f"{server_name}\nOnline Players: {len(humans)}\nOnline AI Companions: {len(ai_companions)}",
+            with_banner=True,
         )
 
     async def _configured_playerbot_prefixes(self) -> List[str]:
@@ -1290,10 +1299,6 @@ class AzerothCore(commands.Cog):
             return await ctx.send("Statistic must be one of: level, gold, kills, quests.")
         if audience not in {"humans", "ai"}:
             return await ctx.send("Audience must be `humans` or `ai`.")
-        if audience == "ai":
-            return await ctx.send(
-                "AI leaderboards are unavailable until ac-api-v1 exposes authoritative Playerbots classification."
-            )
         if not await self.database.is_configured():
             return await ctx.send("The private AzerothCore API is not configured.")
         try:

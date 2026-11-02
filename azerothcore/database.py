@@ -187,6 +187,7 @@ class AzerothDatabase:
             money=int(raw.get("money_copper") or 0),
             total_kills=int(raw.get("kills") or 0),
             quests=int(raw.get("quests") or 0),
+            player_type=str(raw.get("player_type") or "human"),
         )
 
     async def check(self) -> Dict[str, Any]:
@@ -207,10 +208,10 @@ class AzerothDatabase:
     async def online(self, audience: str, limit: int = 100) -> List[CharacterRecord]:
         if audience not in {"humans", "ai"}:
             raise ValueError("Audience must be humans or ai.")
-        if audience == "ai":
-            return []
         payload = await self._request(
-            "GET", "/v1/characters/online", params={"limit": max(1, min(int(limit), 100))}
+            "GET",
+            "/v1/characters/online",
+            params={"audience": audience, "limit": max(1, min(int(limit), 100))},
         )
         return [self._record(item) for item in payload.get("entries", []) if isinstance(item, dict)]
 
@@ -221,12 +222,15 @@ class AzerothDatabase:
             raise ValueError("Unknown leaderboard statistic.")
         if audience not in {"humans", "ai"}:
             raise ValueError("Audience must be humans or ai.")
-        if audience == "ai":
-            return []
         payload = await self._request(
             "GET",
             "/v1/leaderboards/players",
-            params={"metric": stat, "limit": max(1, min(int(limit), 25)), "offset": 0},
+            params={
+                "metric": stat,
+                "audience": audience,
+                "limit": max(1, min(int(limit), 25)),
+                "offset": 0,
+            },
         )
         return [self._record(item) for item in payload.get("entries", []) if isinstance(item, dict)]
 
