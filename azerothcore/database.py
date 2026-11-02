@@ -176,11 +176,27 @@ class AzerothDatabase:
 
     async def check(self) -> Dict[str, Any]:
         capabilities = await self._request("GET", "/v1/capabilities")
-        realm = await self._request("GET", "/v1/realm/status")
+        realm = await self.realm_status("humans")
         return {
             "api_version": str(capabilities.get("api_version") or "unknown"),
-            "characters": int(realm.get("characters") or 0),
-            "online": int(realm.get("online_characters") or 0),
+            "characters": realm["characters"],
+            "online": realm["online"],
+        }
+
+    async def realm_status(self, audience: str = "humans") -> Dict[str, Any]:
+        if audience not in {"humans", "ai", "all"}:
+            raise ValueError("Audience must be humans, ai, or all.")
+        payload = await self._request(
+            "GET", "/v1/realm/status", params={"audience": audience}
+        )
+        if str(payload.get("audience") or "") != audience:
+            raise DatabaseUnavailable(
+                "The AzerothCore API does not support audience-filtered realm totals."
+            )
+        return {
+            "audience": audience,
+            "characters": int(payload.get("characters") or 0),
+            "online": int(payload.get("online_characters") or 0),
         }
 
     async def character(self, name: str) -> Optional[CharacterRecord]:

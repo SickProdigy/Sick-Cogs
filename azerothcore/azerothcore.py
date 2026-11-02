@@ -836,10 +836,6 @@ class AzerothCore(commands.Cog):
             visible.append(f"...and {hidden} more.")
         return "\n".join(visible)
 
-    @staticmethod
-    def _online_count_label(count: int, query_limit: int = 100) -> str:
-        return f"{count:,}+" if count >= query_limit else f"{count:,}"
-
     async def _send_api_online(self, ctx: commands.Context) -> None:
         humans = await self.database.online("humans")
         ai_companions = await self.database.online("ai")
@@ -1094,12 +1090,12 @@ class AzerothCore(commands.Cog):
             return await ctx.send(error)
 
         info = self._parse_server_info(out)
-        api_online = None
+        api_realms = None
         if await self.database.is_configured():
             try:
-                api_online = {
-                    "humans": len(await self.database.online("humans")),
-                    "ai": len(await self.database.online("ai")),
+                api_realms = {
+                    "humans": await self.database.realm_status("humans"),
+                    "ai": await self.database.realm_status("ai"),
                 }
             except (DatabaseConfigurationError, DatabaseUnavailable):
                 # SOAP remains the compatibility source when the optional API is unavailable.
@@ -1111,22 +1107,27 @@ class AzerothCore(commands.Cog):
         if configured_realmlist:
             embed.add_field(name="Realmlist", value=str(configured_realmlist), inline=False)
 
-        if api_online is not None:
+        if api_realms is not None:
             embed.add_field(
                 name="Players Online",
-                value=self._online_count_label(api_online["humans"]),
+                value=f"{api_realms['humans']['online']:,}",
                 inline=True,
             )
             embed.add_field(
                 name="AI Companions Online",
-                value=self._online_count_label(api_online["ai"]),
+                value=f"{api_realms['ai']['online']:,}",
+                inline=True,
+            )
+            embed.add_field(
+                name="Player Characters Created",
+                value=f"{api_realms['humans']['characters']:,}",
                 inline=True,
             )
         elif info.get("online") is not None and info.get("max_players") is not None:
             embed.add_field(name="Population", value=f"{info.get('online')}/{info.get('max_players')}", inline=True)
         elif info.get("online") is not None:
             embed.add_field(name="Connected Sessions", value=str(info.get("online")), inline=True)
-        if api_online is None and info.get("characters") is not None:
+        if api_realms is None and info.get("characters") is not None:
             embed.add_field(name="Characters in World", value=str(info.get("characters")), inline=True)
         if info.get("peak") is not None:
             embed.add_field(name="Peak", value=str(info.get("peak")), inline=True)
@@ -1147,16 +1148,17 @@ class AzerothCore(commands.Cog):
         fallback = [f"{title}"]
         if configured_realmlist:
             fallback.append(f"Realmlist: {configured_realmlist}")
-        if api_online is not None:
-            fallback.append(f"Players Online: {self._online_count_label(api_online['humans'])}")
+        if api_realms is not None:
+            fallback.append(f"Players Online: {api_realms['humans']['online']:,}")
+            fallback.append(f"AI Companions Online: {api_realms['ai']['online']:,}")
             fallback.append(
-                f"AI Companions Online: {self._online_count_label(api_online['ai'])}"
+                f"Player Characters Created: {api_realms['humans']['characters']:,}"
             )
         elif info.get("online") is not None and info.get("max_players") is not None:
             fallback.append(f"Population: {info.get('online')}/{info.get('max_players')}")
         elif info.get("online") is not None:
             fallback.append(f"Connected Sessions: {info.get('online')}")
-        if api_online is None and info.get("characters") is not None:
+        if api_realms is None and info.get("characters") is not None:
             fallback.append(f"Characters in World: {info.get('characters')}")
         if info.get("peak") is not None:
             fallback.append(f"Peak: {info.get('peak')}")

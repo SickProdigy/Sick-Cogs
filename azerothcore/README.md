@@ -104,9 +104,10 @@ requires the API.
 
 The `[p]azerothcore info` card always uses SOAP for server identity, build, and uptime. When
 ac-api-v1 is configured and reachable, it enriches the card with separately classified
-`Players Online` and `AI Companions Online` values. It does not display the API's mixed total
-character count as a player count. Without the module, the card falls back to SOAP's
-`Connected Sessions` and `Characters in World` values.
+`Players Online`, `AI Companions Online`, and human-only `Player Characters Created` values.
+Older API responses without authoritative audience-filtered realm totals are rejected rather
+than displayed as player counts. Without the module, the card falls back to SOAP's `Connected
+Sessions` and `Characters in World` values.
 
 AI classification comes from ac-api-v1 authoritative Playerbots data. Human and AI
 leaderboards are requested separately with the API audience filter; the cog never infers AI

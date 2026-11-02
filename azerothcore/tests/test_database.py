@@ -7,6 +7,7 @@ from azerothcore.database import (
     ApiSettings,
     AzerothDatabase,
     DatabaseConfigurationError,
+    DatabaseUnavailable,
 )
 
 
@@ -101,12 +102,28 @@ class ApiClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_check_combines_capabilities_and_realm_status(self):
         api = FakeApi(responses=[
             {"api_version": "v1"},
-            {"characters": 42, "online_characters": 3},
+            {"audience": "humans", "characters": 42, "online_characters": 3},
         ])
         self.assertEqual(
             await api.check(),
             {"api_version": "v1", "characters": 42, "online": 3},
         )
+        self.assertEqual(api.requests[1][2]["params"], {"audience": "humans"})
+
+    async def test_realm_status_requests_and_maps_ai_totals(self):
+        api = FakeApi(responses=[
+            {"audience": "ai", "characters": 1000, "online_characters": 50},
+        ])
+        self.assertEqual(
+            await api.realm_status("ai"),
+            {"audience": "ai", "characters": 1000, "online": 50},
+        )
+        self.assertEqual(api.requests[0][2]["params"], {"audience": "ai"})
+
+    async def test_realm_status_rejects_legacy_mixed_response(self):
+        api = FakeApi(responses=[{"characters": 1002, "online_characters": 0}])
+        with self.assertRaisesRegex(DatabaseUnavailable, "audience-filtered"):
+            await api.realm_status("humans")
 
 class OnlineSummaryTests(unittest.TestCase):
     def test_online_summary_shows_ten_names_and_remaining_count(self):
@@ -115,11 +132,6 @@ class OnlineSummaryTests(unittest.TestCase):
         self.assertEqual(summary.splitlines()[:2], ["Bot0", "Bot1"])
         self.assertEqual(summary.splitlines()[-2:], ["Bot9", "...and 90 more."])
         self.assertNotIn("Bot10", summary)
-
-    def test_online_count_marks_the_api_page_limit(self):
-        self.assertEqual(AzerothCore._online_count_label(99), "99")
-        self.assertEqual(AzerothCore._online_count_label(100), "100+")
-
 
 if __name__ == "__main__":
     unittest.main()
