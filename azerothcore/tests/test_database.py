@@ -116,6 +116,10 @@ class OnlineSummaryTests(unittest.TestCase):
         self.assertEqual(summary.splitlines()[-2:], ["Bot9", "...and 90 more."])
         self.assertNotIn("Bot10", summary)
 
+    def test_online_count_marks_the_api_page_limit(self):
+        self.assertEqual(AzerothCore._online_count_label(99), "99")
+        self.assertEqual(AzerothCore._online_count_label(100), "100+")
+
 
 if __name__ == "__main__":
     unittest.main()
