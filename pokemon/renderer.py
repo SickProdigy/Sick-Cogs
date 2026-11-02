@@ -849,8 +849,10 @@ class BattleRenderer:
         draw.ellipse((55, 300, 390, 390), fill=RETRO[2], outline=RETRO[0], width=4)
         front = self._retro(self._open(front_data,(210,185),trim=True,upscale=True))
         back = self._retro(self._open(back_data,(250,220),trim=True,upscale=True))
-        leader=self._gym_leader_sprite(battle.gym_key,(125,155)) if battle.battle_kind=="gym" else None
-        if leader:canvas.paste(leader,(720-leader.width//2,195-leader.height),leader)
+        leader=self._gym_leader_sprite(battle.gym_key,(62,72)) if battle.battle_kind=="gym" else None
+        if leader:
+            draw.ellipse((682,18,772,108),fill=RETRO[5],outline=RETRO[0],width=5)
+            canvas.paste(leader,(727-leader.width//2,100-leader.height),leader)
         canvas.paste(front, (595 - front.width // 2, 220 - front.height), front)
         canvas.paste(back, (205 - back.width // 2, 350 - back.height), back)
         wild = SPECIES[battle.wild_species_id]
