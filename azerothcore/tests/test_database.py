@@ -1,5 +1,8 @@
 import unittest
 
+from types import SimpleNamespace
+
+from azerothcore.azerothcore import AzerothCore
 from azerothcore.database import (
     ApiSettings,
     AzerothDatabase,
@@ -117,6 +120,15 @@ class ApiClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(path, "/v1/accounts")
         self.assertEqual(kwargs["scope"], "account")
         self.assertEqual(kwargs["idempotency_key"], "stable-key-123456")
+
+
+class OnlineSummaryTests(unittest.TestCase):
+    def test_online_summary_shows_ten_names_and_remaining_count(self):
+        records = [SimpleNamespace(name=f"Bot{index}") for index in range(100)]
+        summary = AzerothCore._online_name_summary(records)
+        self.assertEqual(summary.splitlines()[:2], ["Bot0", "Bot1"])
+        self.assertEqual(summary.splitlines()[-2:], ["Bot9", "...and 90 more."])
+        self.assertNotIn("Bot10", summary)
 
 
 if __name__ == "__main__":

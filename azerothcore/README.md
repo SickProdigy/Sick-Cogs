@@ -101,7 +101,8 @@ databasecheck and dbcheck names remain aliases during migration.
 
 AI classification comes from ac-api-v1 authoritative Playerbots data. Human and AI
 leaderboards are requested separately with the API audience filter; the cog never infers AI
-status from character or account names.
+status from character or account names. Online cards show at most 10 names per audience and summarize the
+remainder.
 
 ## Troubleshooting
 

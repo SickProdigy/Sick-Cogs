@@ -828,6 +828,14 @@ class AzerothCore(commands.Cog):
             return f"{record.quests:,} quests"
         return f"level {record.level}"
 
+    @staticmethod
+    def _online_name_summary(records: List[CharacterRecord], display_limit: int = 10) -> str:
+        visible = [record.name for record in records[:display_limit]]
+        hidden = len(records) - len(visible)
+        if hidden:
+            visible.append(f"...and {hidden} more.")
+        return "\n".join(visible)
+
     async def _send_api_online(self, ctx: commands.Context) -> None:
         humans = await self.database.online("humans")
         ai_companions = await self.database.online("ai")
@@ -836,22 +844,21 @@ class AzerothCore(commands.Cog):
         await self._decorate_server_embed(embed, with_banner=True)
 
         for label, records in (("Players", humans), ("AI Companions", ai_companions)):
-            visible = []
-            length = 0
-            for record in records:
-                addition = len(record.name) + (1 if visible else 0)
-                if length + addition > 900:
-                    break
-                visible.append(record.name)
-                length += addition
-            hidden = len(records) - len(visible)
-            if hidden:
-                visible.append(f"...and {hidden} more.")
             embed.add_field(
                 name=f"Online {label}: {len(records)}",
-                value="\n".join(visible) or f"No {label.lower()} are online.",
+                value=self._online_name_summary(records) or f"No {label.lower()} are online.",
                 inline=False,
             )
+
+        embed.add_field(
+            name="In-game Playerbots",
+            value=(
+                "Log in an altbot: `.playerbots bot add <name>`\n"
+                "Invite it: `/invite <name>`\n"
+                "Whisper `help` to a bot for its available commands."
+            ),
+            inline=False,
+        )
 
         await self._send_embed_or_text(
             ctx,
