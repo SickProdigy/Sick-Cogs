@@ -328,7 +328,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.1";__author__="SickProdigy"
+    __version__="1.4.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -840,6 +840,11 @@ class Pokemon(commands.Cog):
             embed,files=await self.rendered_battle(battle)
             await i.response.edit_message(embed=embed,attachments=files,view=BattleView(self,eid))
             raw.pop("message_sync_pending",None);encounters[str(eid)]=raw;await self.config.encounters.set(encounters)
+    @staticmethod
+    def battle_attachment_name(battle):
+        return (f"battle-{int(battle.encounter_id)}-{int(battle.action_count)}-{battle.state}-"
+                f"{int(battle.player.species_id)}-{int(battle.wild_species_id)}.png")
+
     async def rendered_battle(self,battle):
         embed=self.battle_embed(battle);avatar_data=None
         if battle.state in {"won","caught"}:
@@ -848,8 +853,9 @@ class Pokemon(commands.Cog):
                 try:avatar_data=await user.display_avatar.with_size(128).read()
                 except (discord.HTTPException,OSError):log.debug("Trainer avatar unavailable for battle result",exc_info=True)
         try:
-            image=await self.renderer.battle(battle,avatar_data=avatar_data);embed.set_image(url="attachment://battle.png")
-            return embed,[discord.File(image,filename="battle.png")]
+            image=await self.renderer.battle(battle,avatar_data=avatar_data);filename=self.battle_attachment_name(battle)
+            embed.set_image(url=f"attachment://{filename}")
+            return embed,[discord.File(image,filename=filename)]
         except RenderError:
             log.exception("Battle rendering failed")
             return embed,[]

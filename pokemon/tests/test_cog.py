@@ -427,6 +427,19 @@ class PokedexTests(unittest.TestCase):
         self.assertTrue(Pokemon.trade_reserved(trades,"outgoing"));self.assertFalse(Pokemon.trade_reserved(trades,"spare"));self.assertFalse(Pokemon.trade_reserved(trades,"outgoing",1))
 
 class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_battle_result_attachment_is_keyed_to_psyduck_and_electabuzz(self):
+        player=OwnedPokemon.create("psyduck",54,30,seed=7)
+        current=Battle(88,100,1,2,3,player,125,30,80,0,seed=9)
+        current.state="won";current.action_count=7;current.trainer_name="SickProdigy"
+        cog=Pokemon.__new__(Pokemon);cog.bot=SimpleNamespace(get_user=lambda _user_id:None)
+        cog.renderer=SimpleNamespace(battle=AsyncMock(return_value=io.BytesIO(b"image")))
+        embed,files=await cog.rendered_battle(current)
+        filename="battle-88-7-won-54-125.png"
+        self.assertEqual(embed.title,"SickProdigy defeated Electabuzz!")
+        self.assertEqual(embed.image.url,f"attachment://{filename}")
+        self.assertEqual(files[0].filename,filename)
+        cog.renderer.battle.assert_awaited_once_with(current,avatar_data=None)
+
     async def test_pokedex_registration_names_the_trainer(self):
         pokemon=OwnedPokemon.create("registration",39,3,seed=2)
         cog=Pokemon.__new__(Pokemon);cog.renderer=SimpleNamespace(pokedex_registration=AsyncMock(return_value=io.BytesIO(b"png")))
