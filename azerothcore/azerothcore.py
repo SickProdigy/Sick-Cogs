@@ -1528,7 +1528,11 @@ class AzerothCore(commands.Cog):
         for page in pagify(response, delims=["\n"], page_length=1800):
             await ctx.send(box(page, lang="text"))
 
-    @ac.command(name="createuser", aliases=("createaccount", "accountcreate"))
+    @ac.command(
+        name="createuser",
+        aliases=("createaccount", "accountcreate"),
+        usage="<username> [email] [@member]",
+    )
     @commands.guild_only()
     async def ac_createuser(self, ctx: commands.Context, username: str, *details: str):
         """Create a game account through SOAP and DM the credentials.
@@ -1538,6 +1542,16 @@ class AzerothCore(commands.Cog):
 
         If a Discord member is provided as the final argument, the bot DMs
         that member. Otherwise, it DMs the command author.
+
+        Optional arguments:
+        - `email`: associate an email address with the game account.
+        - `@member`: DM the generated credentials to that Discord member.
+
+        Examples (replace `[p]` with the bot prefix):
+        - `[p]wow createuser APITEST1102`
+        - `[p]wow createuser APITEST1102 player@example.com`
+        - `[p]wow createuser APITEST1102 @Player`
+        - `[p]wow createuser APITEST1102 player@example.com @Player`
         """
 
         if not await self._can_create_accounts(ctx):
