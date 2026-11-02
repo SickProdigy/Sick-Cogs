@@ -329,15 +329,25 @@ class BattleRenderer:
         else:draw.line((x,y+9,x+9,y+9),fill=fill,width=width)
 
     @staticmethod
-    def _pokeball(draw,center,radius):
+    def _pokeball(draw,center,radius,dimmed=False):
         cx,cy=center;box=(cx-radius,cy-radius,cx+radius,cy+radius)
-        draw.ellipse(box,fill=RETRO[7],outline=RETRO[0],width=5)
-        draw.pieslice(box,180,360,fill=(205,63,58),outline=RETRO[0],width=4)
-        draw.rectangle((cx-radius+3,cy-5,cx+radius-3,cy+6),fill=RETRO[0])
+        shell=(151,154,148) if dimmed else RETRO[7]
+        top=(95,99,96) if dimmed else (205,63,58)
+        band=(54,58,55) if dimmed else RETRO[0]
+        draw.ellipse(box,fill=shell,outline=band,width=5)
+        draw.pieslice(box,180,360,fill=top,outline=band,width=4)
+        draw.rectangle((cx-radius+3,cy-5,cx+radius-3,cy+6),fill=band)
         button=max(7,radius//3)
-        draw.ellipse((cx-button,cy-button,cx+button,cy+button),fill=RETRO[7],outline=RETRO[0],width=4)
+        draw.ellipse((cx-button,cy-button,cx+button,cy+button),fill=shell,outline=band,width=4)
         inner=max(3,button//2)
-        draw.ellipse((cx-inner,cy-inner,cx+inner,cy+inner),fill=RETRO[5],outline=RETRO[1],width=2)
+        draw.ellipse((cx-inner,cy-inner,cx+inner,cy+inner),fill=RETRO[5] if not dimmed else shell,outline=RETRO[1] if not dimmed else band,width=2)
+
+    @staticmethod
+    def _gym_party_markers(draw,battle):
+        total=min(6,max(0,int(battle.opponent_total)))
+        defeated=min(total,max(0,int(battle.opponent_index)))
+        for index in range(total):
+            BattleRenderer._pokeball(draw,(400+43*index,49),13,dimmed=index<defeated)
 
     def _starter_sync(self,pokemon,data,trainer_name,choice_species_id=None):
         canvas=Image.new("RGB",(800,450),(224,227,222));draw=ImageDraw.Draw(canvas)
@@ -850,6 +860,8 @@ class BattleRenderer:
         front = self._retro(self._open(front_data,(210,185),trim=True,upscale=True))
         back = self._retro(self._open(back_data,(250,220),trim=True,upscale=True))
         leader=self._gym_leader_sprite(battle.gym_key,(62,72)) if battle.battle_kind=="gym" else None
+        if battle.battle_kind=="gym":
+            self._gym_party_markers(draw,battle)
         if leader:
             draw.ellipse((682,18,772,108),fill=RETRO[5],outline=RETRO[0],width=5)
             canvas.paste(leader,(727-leader.width//2,100-leader.height),leader)
