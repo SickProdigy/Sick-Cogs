@@ -37,6 +37,15 @@ Copyright (c) 2019-2023 Trust Wallet.
 The source asset repository is distributed under the MIT License. Network names and
 marks remain the property of their respective owners.
 
+## Pokemon Gym Leader sprites
+
+The Brock and Misty trainer sprites under pokemon/assets/gym_leaders/ are original
+Pokemon FireRed and LeafGreen game sprites sourced from the
+[pret/pokefirered](https://github.com/pret/pokefirered) decompilation project.
+Pokemon character designs and game artwork remain the property of Nintendo,
+Game Freak, and The Pokemon Company. They are included for this unofficial,
+noncommercial fan project.
+
 ## Additional credited contributors
 
 UltimatePancake (DadJokes), Predä and aikaterna (NSFW), and TrustyJAID

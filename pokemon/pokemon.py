@@ -14,7 +14,7 @@ from .catalog import CatalogError,PokemonCatalog
 from .catalog_versions import CATALOG_VERSIONS
 from .data import EVOLUTIONS,MOVES,SPECIES,direct_moves_for_level,experience_to_next,generation_for,move_source_species,moves_for_level,sprite
 from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
-from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
+from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_leader_path,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
 from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,TradeLobbyView,TradeSelectionView,GymChallengeView,TradeCollectionView,ReleasePokemonView,MartView
@@ -328,7 +328,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.3";__author__="SickProdigy"
+    __version__="1.4.4";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -996,7 +996,8 @@ class Pokemon(commands.Cog):
         if section=="achievements":await interaction.response.send_message(embed=self.accomplishments_embed(user,conf),ephemeral=True);return
         if section=="gym":
             upcoming=next_gym(conf.get("badges",[]));view=GymChallengeView(self,user.id,upcoming.leader) if upcoming and upcoming.key in COMPLETED_GYMS else None
-            await interaction.response.send_message(embed=gym_status_embed(user,conf),view=view,ephemeral=True);return
+            leader_url,leader_files=self.gym_leader_attachment(upcoming)
+            await interaction.response.send_message(embed=gym_status_embed(user,conf,leader_image_url=leader_url),files=leader_files,view=view,ephemeral=True);return
         if section=="trade":
             await interaction.response.send_message("Start an exact trade with `poke trade  <your collection number> <their collection number>`. The other trainer must confirm before anything moves.",ephemeral=True);return
         if section=="mart":
@@ -1046,6 +1047,13 @@ class Pokemon(commands.Cog):
         else:
             embed=discord.Embed(title=f"{SPECIES[pokemon.species_id].name} did not learn {MOVES[new_move].name}.",color=discord.Color.gold())
             await interaction.response.edit_message(embed=embed,attachments=[],view=None)
+
+    @staticmethod
+    def gym_leader_attachment(gym):
+        path=gym_leader_path(gym.key) if gym else None
+        if path is None:return None,[]
+        filename=f"gym-leader-{gym.key}.png"
+        return f"attachment://{filename}",[discord.File(path,filename=filename)]
 
     @staticmethod
     def move_label(key):return MOVES[key].name[:80]
@@ -2024,8 +2032,8 @@ class Pokemon(commands.Cog):
     async def gym(self,ctx):
         """View your ordered Kanto Gym progress."""
         conf=await self.config.user(ctx.author).all();upcoming=next_gym(conf.get("badges",[]))
-        command=f"{getattr(ctx,'clean_prefix','[p]')}poke gym challenge"
-        await ctx.send(embed=gym_status_embed(ctx.author,conf,command),view=GymChallengeView(self,ctx.author.id,upcoming.leader) if upcoming and upcoming.key in COMPLETED_GYMS else None)
+        command=f"{getattr(ctx,'clean_prefix','[p]')}poke gym challenge";leader_url,leader_files=self.gym_leader_attachment(upcoming)
+        await ctx.send(embed=gym_status_embed(ctx.author,conf,command,leader_url),files=leader_files,view=GymChallengeView(self,ctx.author.id,upcoming.leader) if upcoming and upcoming.key in COMPLETED_GYMS else None)
 
     @gym.command(name="challenge")
     @commands.guild_only()
