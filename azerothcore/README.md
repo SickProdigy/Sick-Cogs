@@ -97,8 +97,10 @@ leaderboards. Account creation uses the separately configured SOAP connection.
 Run [p]azerothcore apicheck to verify capability discovery and realm status. The legacy
 databasecheck and dbcheck names remain aliases during migration.
 
-Existing SOAP commands remain on SOAP for compatibility. In particular, `[p]azerothcore
-online` uses SOAP; `[p]azerothcore apionline` provides the optional ac-api-v1 human/AI view.
+Existing SOAP features remain available without ac-api-v1. The `[p]azerothcore online`
+command uses ac-api-v1 when configured so it can distinguish humans from Playerbots, then
+falls back to SOAP on installations without the module. `[p]azerothcore apionline` explicitly
+requires the API.
 
 AI classification comes from ac-api-v1 authoritative Playerbots data. Human and AI
 leaderboards are requested separately with the API audience filter; the cog never infers AI

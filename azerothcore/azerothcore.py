@@ -1143,7 +1143,13 @@ class AzerothCore(commands.Cog):
 
     @ac.command(name="online")
     async def ac_online(self, ctx: commands.Context):
-        """Show online players through the compatible SOAP interface."""
+        """Show API-classified players, with SOAP compatibility fallback."""
+        if await self.database.is_configured():
+            try:
+                return await self._send_api_online(ctx)
+            except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
+                return await ctx.send(str(exc))
+
         server_name = await self._server_display_name()
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
