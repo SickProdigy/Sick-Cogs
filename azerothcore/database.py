@@ -1,18 +1,12 @@
 import asyncio
-import re
-import ssl
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional
+from urllib.parse import quote, urlsplit
 
-try:
-    import aiomysql
-except ImportError:  # pragma: no cover - Red installs requirements before loading the cog.
-    aiomysql = None
+import aiohttp
 
 
-TOKEN_NAMESPACE = "azerothcore_mysql"
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_]+$")
-_TRUE_VALUES = {"1", "true", "yes", "on", "required", "verify"}
+TOKEN_NAMESPACE = "azerothcore_api"
 RACE_NAMES = {
     1: "Human", 2: "Orc", 3: "Dwarf", 4: "Night Elf", 5: "Undead",
     6: "Tauren", 7: "Gnome", 8: "Troll", 10: "Blood Elf", 11: "Draenei",
@@ -20,12 +14,6 @@ RACE_NAMES = {
 CLASS_NAMES = {
     1: "Warrior", 2: "Paladin", 3: "Hunter", 4: "Rogue", 5: "Priest",
     6: "Death Knight", 7: "Shaman", 8: "Mage", 9: "Warlock", 11: "Druid",
-}
-LEADERBOARD_COLUMNS = {
-    "level": "c.`level`",
-    "gold": "c.`money`",
-    "kills": "c.`totalKills`",
-    "quests": "COALESCE(q.`quest_count`, 0)",
 }
 
 
@@ -38,75 +26,39 @@ class DatabaseUnavailable(RuntimeError):
 
 
 @dataclass(frozen=True)
-class DatabaseSettings:
-    host: str
-    port: int
-    user: str
-    password: str
-    characters_database: str
-    auth_database: str
-    playerbots_database: Optional[str]
-    connect_timeout: int
-    tls: bool
-    tls_ca: Optional[str]
+class ApiSettings:
+    base_url: str
+    community_token: str
+    account_token: Optional[str]
+    timeout: int
 
     @classmethod
-    def from_tokens(cls, tokens: Mapping[str, str]) -> "DatabaseSettings":
-        required = ("host", "user", "password", "characters_database", "auth_database")
-        missing = [key for key in required if not str(tokens.get(key, "")).strip()]
+    def from_tokens(cls, tokens: Mapping[str, str]) -> "ApiSettings":
+        base_url = str(tokens.get("base_url", "")).strip().rstrip("/")
+        community_token = str(tokens.get("community_token", "")).strip()
+        account_token = str(tokens.get("account_token", "")).strip() or None
+        missing = []
+        if not base_url:
+            missing.append("base_url")
+        if not community_token:
+            missing.append("community_token")
         if missing:
             raise DatabaseConfigurationError(
-                "MySQL is missing required shared-token fields: " + ", ".join(missing) + "."
+                "AzerothCore API is missing required shared-token fields: "
+                + ", ".join(missing) + "."
+            )
+        parsed = urlsplit(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+            raise DatabaseConfigurationError(
+                "AzerothCore API base_url must be an HTTP(S) URL without embedded credentials."
             )
         try:
-            port = int(tokens.get("port", 3306))
-            timeout = int(tokens.get("connect_timeout", 10))
+            timeout = int(tokens.get("timeout", 10))
         except (TypeError, ValueError) as exc:
-            raise DatabaseConfigurationError("MySQL port and connect_timeout must be integers.") from exc
-        if not 1 <= port <= 65535:
-            raise DatabaseConfigurationError("MySQL port must be between 1 and 65535.")
+            raise DatabaseConfigurationError("AzerothCore API timeout must be an integer.") from exc
         if not 3 <= timeout <= 60:
-            raise DatabaseConfigurationError("MySQL connect_timeout must be between 3 and 60 seconds.")
-
-        databases = {
-            "characters_database": str(tokens["characters_database"]).strip(),
-            "auth_database": str(tokens["auth_database"]).strip(),
-            "playerbots_database": str(tokens.get("playerbots_database", "")).strip() or None,
-        }
-        for label, value in databases.items():
-            if value is not None and not _IDENTIFIER_RE.fullmatch(value):
-                raise DatabaseConfigurationError(
-                    f"{label} may contain only letters, numbers, and underscores."
-                )
-
-        tls = str(tokens.get("tls", "false")).strip().casefold() in _TRUE_VALUES
-        tls_ca = str(tokens.get("tls_ca", "")).strip() or None
-        if tls_ca and not tls:
-            raise DatabaseConfigurationError("Set tls=true when tls_ca is configured.")
-        return cls(
-            host=str(tokens["host"]).strip(),
-            port=port,
-            user=str(tokens["user"]).strip(),
-            password=str(tokens["password"]),
-            characters_database=databases["characters_database"],
-            auth_database=databases["auth_database"],
-            playerbots_database=databases["playerbots_database"],
-            connect_timeout=timeout,
-            tls=tls,
-            tls_ca=tls_ca,
-        )
-
-    def ssl_context(self) -> Optional[ssl.SSLContext]:
-        if not self.tls:
-            return None
-        return ssl.create_default_context(cafile=self.tls_ca)
-
-    def fingerprint(self) -> Tuple[Any, ...]:
-        return (
-            self.host, self.port, self.user, self.password, self.characters_database,
-            self.auth_database, self.playerbots_database, self.connect_timeout,
-            self.tls, self.tls_ca,
-        )
+            raise DatabaseConfigurationError("AzerothCore API timeout must be between 3 and 60 seconds.")
+        return cls(base_url, community_token, account_token, timeout)
 
 
 @dataclass(frozen=True)
@@ -122,9 +74,9 @@ class CharacterRecord:
     money: int
     total_kills: int
     quests: int
-    account_name: str
-    account_type: Optional[int]
-    player_type: str
+    account_name: str = ""
+    account_type: Optional[int] = None
+    player_type: str = "human"
 
     @property
     def race_name(self) -> str:
@@ -136,219 +88,155 @@ class CharacterRecord:
 
 
 class AzerothDatabase:
+    """Compatibility-named client for the private ac-api-v1 service."""
+
     def __init__(
         self,
         token_getter: Callable[[], Awaitable[Mapping[str, str]]],
-        prefix_getter: Callable[[], Awaitable[Sequence[str]]],
+        prefix_getter: Optional[Callable[[], Awaitable[List[str]]]] = None,
     ):
         self._token_getter = token_getter
-        self._prefix_getter = prefix_getter
-        self._pool = None
-        self._pool_fingerprint: Optional[Tuple[Any, ...]] = None
-        self._pool_lock = asyncio.Lock()
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._lock = asyncio.Lock()
 
     async def is_configured(self) -> bool:
         tokens = await self._token_getter()
-        return all(
-            str(tokens.get(key, "")).strip()
-            for key in ("host", "user", "password", "characters_database", "auth_database")
-        )
+        return bool(str(tokens.get("base_url", "")).strip() and str(tokens.get("community_token", "")).strip())
 
-    async def settings(self) -> DatabaseSettings:
-        return DatabaseSettings.from_tokens(await self._token_getter())
+    async def has_account_access(self) -> bool:
+        if not await self.is_configured():
+            return False
+        return bool((await self.settings()).account_token)
+
+    async def settings(self) -> ApiSettings:
+        return ApiSettings.from_tokens(await self._token_getter())
 
     async def close(self) -> None:
-        async with self._pool_lock:
-            if self._pool is not None:
-                self._pool.close()
-                await self._pool.wait_closed()
-                self._pool = None
-                self._pool_fingerprint = None
+        async with self._lock:
+            if self._session is not None and not self._session.closed:
+                await self._session.close()
+            self._session = None
 
-    async def _get_pool(self):
-        if aiomysql is None:
-            raise DatabaseUnavailable("The aiomysql dependency is not installed.")
-        settings = await self.settings()
-        fingerprint = settings.fingerprint()
-        async with self._pool_lock:
-            if self._pool is not None and self._pool_fingerprint != fingerprint:
-                self._pool.close()
-                await self._pool.wait_closed()
-                self._pool = None
-            if self._pool is None:
-                try:
-                    self._pool = await aiomysql.create_pool(
-                        host=settings.host,
-                        port=settings.port,
-                        user=settings.user,
-                        password=settings.password,
-                        minsize=1,
-                        maxsize=3,
-                        autocommit=True,
-                        connect_timeout=settings.connect_timeout,
-                        pool_recycle=300,
-                        charset="utf8mb4",
-                        ssl=settings.ssl_context(),
-                    )
-                except Exception as exc:
-                    raise DatabaseUnavailable(
-                        "Could not connect to the configured AzerothCore database. "
-                        "Check the host, port, read-only credentials, firewall, and TLS settings."
-                    ) from exc
-                self._pool_fingerprint = fingerprint
-            return self._pool
+    async def _get_session(self) -> aiohttp.ClientSession:
+        async with self._lock:
+            if self._session is None or self._session.closed:
+                self._session = aiohttp.ClientSession()
+            return self._session
 
-    async def _query(self, sql: str, params: Sequence[Any] = ()) -> List[Dict[str, Any]]:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        scope: str = "community",
+        params: Optional[Dict[str, Any]] = None,
+        json: Optional[Dict[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
         settings = await self.settings()
-        pool = await self._get_pool()
+        token = settings.account_token if scope == "account" else settings.community_token
+        if not token:
+            raise DatabaseConfigurationError("AzerothCore API account_token is not configured.")
+        headers = {"Authorization": f"Bearer {token}"}
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
         try:
-            async with pool.acquire() as connection:
-                async with connection.cursor(aiomysql.DictCursor) as cursor:
-                    await asyncio.wait_for(
-                        cursor.execute(sql, tuple(params)), timeout=settings.connect_timeout
-                    )
-                    rows = await asyncio.wait_for(
-                        cursor.fetchall(), timeout=settings.connect_timeout
-                    )
-                    return [dict(row) for row in rows]
+            session = await self._get_session()
+            async with session.request(
+                method,
+                settings.base_url + path,
+                headers=headers,
+                params=params,
+                json=json,
+                timeout=aiohttp.ClientTimeout(total=settings.timeout),
+            ) as response:
+                try:
+                    payload = await response.json(content_type=None)
+                except (aiohttp.ContentTypeError, ValueError) as exc:
+                    raise DatabaseUnavailable(
+                        "The AzerothCore API returned an invalid response."
+                    ) from exc
+                if response.status >= 400:
+                    error = payload.get("error", {}) if isinstance(payload, dict) else {}
+                    code = str(error.get("code") or "api_error")
+                    message = str(error.get("message") or "The AzerothCore API rejected the request.")
+                    if code in {"character_not_found", "account_not_found"}:
+                        return {"_not_found": True}
+                    raise DatabaseUnavailable(f"AzerothCore API error ({code}): {message}")
+                if not isinstance(payload, dict):
+                    raise DatabaseUnavailable("The AzerothCore API returned an invalid response.")
+                return payload
         except asyncio.TimeoutError as exc:
-            raise DatabaseUnavailable("The AzerothCore database query timed out.") from exc
-        except Exception as exc:
+            raise DatabaseUnavailable("The AzerothCore API request timed out.") from exc
+        except aiohttp.ClientError as exc:
             raise DatabaseUnavailable(
-                "The AzerothCore database query failed. Verify the read-only grants and schema names."
+                "Could not reach the private AzerothCore API. Check its URL, network path, and listener."
             ) from exc
 
     @staticmethod
-    def classify_player(account_name: str, account_type: Optional[int], prefixes: Sequence[str]) -> str:
-        folded = (account_name or "").casefold()
-        prefix_match = any(folded.startswith(prefix.casefold()) for prefix in prefixes if prefix)
-        if prefix_match and account_type == 1:
-            return "random_ai"
-        if prefix_match and account_type == 2:
-            return "account_ai"
-        if prefix_match or account_type in {1, 2}:
-            return "unknown_ai"
-        return "human"
-
-    @staticmethod
-    def _quoted(name: str) -> str:
-        if not _IDENTIFIER_RE.fullmatch(name):
-            raise DatabaseConfigurationError(
-                "Database names may contain only letters, numbers, and underscores."
-            )
-        return f"`{name}`"
-
-    def _select_sql(self, settings: DatabaseSettings, *, where: str, order: str = "") -> str:
-        characters = self._quoted(settings.characters_database)
-        auth = self._quoted(settings.auth_database)
-        if settings.playerbots_database:
-            playerbots = self._quoted(settings.playerbots_database)
-            account_type = "pat.`account_type`"
-            playerbots_join = (
-                f"LEFT JOIN {playerbots}.`playerbots_account_type` pat "
-                "ON pat.`account_id` = c.`account`"
-            )
-        else:
-            account_type = "NULL"
-            playerbots_join = ""
-        return f"""
-            SELECT c.`guid`, c.`name`, c.`race`, c.`class`, c.`gender`, c.`level`,
-                   c.`online`, c.`totaltime`, c.`money`, c.`totalKills`,
-                   COALESCE(q.`quest_count`, 0) AS `quest_count`,
-                   a.`username` AS `account_name`, {account_type} AS `account_type`
-            FROM {characters}.`characters` c
-            INNER JOIN {auth}.`account` a ON a.`id` = c.`account`
-            LEFT JOIN (
-                SELECT `guid`, COUNT(`guid`) AS `quest_count`
-                FROM {characters}.`character_queststatus_rewarded`
-                WHERE `active` = 1
-                GROUP BY `guid`
-            ) q ON q.`guid` = c.`guid`
-            {playerbots_join}
-            WHERE c.`deleteDate` IS NULL AND ({where})
-            {order}
-        """
-
-    async def _records(self, rows: Sequence[Mapping[str, Any]]) -> List[CharacterRecord]:
-        prefixes = await self._prefix_getter()
-        records = []
-        for row in rows:
-            account_name = str(row.get("account_name") or "")
-            account_type = row.get("account_type")
-            account_type = int(account_type) if account_type is not None else None
-            records.append(CharacterRecord(
-                guid=int(row.get("guid") or 0),
-                name=str(row.get("name") or "Unknown"),
-                race=int(row.get("race") or 0),
-                character_class=int(row.get("class") or 0),
-                gender=int(row.get("gender") or 0),
-                level=int(row.get("level") or 0),
-                online=bool(row.get("online")),
-                total_time=int(row.get("totaltime") or 0),
-                money=int(row.get("money") or 0),
-                total_kills=int(row.get("totalKills") or 0),
-                quests=int(row.get("quest_count") or 0),
-                account_name=account_name,
-                account_type=account_type,
-                player_type=self.classify_player(account_name, account_type, prefixes),
-            ))
-        return records
+    def _record(raw: Mapping[str, Any]) -> CharacterRecord:
+        return CharacterRecord(
+            guid=int(raw.get("character_id") or 0),
+            name=str(raw.get("name") or "Unknown"),
+            race=int(raw.get("race") or 0),
+            character_class=int(raw.get("class") or 0),
+            gender=int(raw.get("gender") or 0),
+            level=int(raw.get("level") or 0),
+            online=bool(raw.get("online")),
+            total_time=int(raw.get("playtime_seconds") or 0),
+            money=int(raw.get("money_copper") or 0),
+            total_kills=int(raw.get("kills") or 0),
+            quests=int(raw.get("quests") or 0),
+        )
 
     async def check(self) -> Dict[str, Any]:
-        settings = await self.settings()
-        characters = self._quoted(settings.characters_database)
-        rows = await self._query(f"SELECT COUNT(`guid`) AS `characters` FROM {characters}.`characters`")
-        return {"characters": int(rows[0]["characters"]), "tls": settings.tls}
+        capabilities = await self._request("GET", "/v1/capabilities")
+        realm = await self._request("GET", "/v1/realm/status")
+        return {
+            "api_version": str(capabilities.get("api_version") or "unknown"),
+            "characters": int(realm.get("characters") or 0),
+            "online": int(realm.get("online_characters") or 0),
+        }
 
     async def character(self, name: str) -> Optional[CharacterRecord]:
-        settings = await self.settings()
-        sql = self._select_sql(settings, where="LOWER(c.`name`) = LOWER(%s)", order="LIMIT 1")
-        records = await self._records(await self._query(sql, (name,)))
-        return records[0] if records else None
+        payload = await self._request("GET", "/v1/characters/by-name/" + quote(name, safe=""))
+        if payload.get("_not_found"):
+            return None
+        return self._record(payload)
 
     async def online(self, audience: str, limit: int = 100) -> List[CharacterRecord]:
         if audience not in {"humans", "ai"}:
             raise ValueError("Audience must be humans or ai.")
-        settings = await self.settings()
-        prefixes = await self._prefix_getter()
-        audience_sql, params = self._audience_filter(settings, audience, prefixes)
-        limit = max(1, min(int(limit), 100))
-        sql = self._select_sql(
-            settings,
-            where=f"c.`online` = 1 AND {audience_sql}",
-            order="ORDER BY c.`name` LIMIT %s",
+        if audience == "ai":
+            return []
+        payload = await self._request(
+            "GET", "/v1/characters/online", params={"limit": max(1, min(int(limit), 100))}
         )
-        return await self._records(await self._query(sql, (*params, limit)))
-
-    @staticmethod
-    def _audience_filter(
-        settings: DatabaseSettings, audience: str, prefixes: Sequence[str]
-    ) -> Tuple[str, List[str]]:
-        signals = ["LOWER(a.`username`) LIKE LOWER(%s)" for prefix in prefixes if prefix]
-        params = [f"{prefix}%" for prefix in prefixes if prefix]
-        if settings.playerbots_database:
-            signals.append("pat.`account_type` IN (1, 2)")
-        if not signals:
-            return ("1 = 0", []) if audience == "ai" else ("1 = 1", [])
-        combined = " OR ".join(signals)
-        return (f"NOT ({combined})", params) if audience == "humans" else (f"({combined})", params)
+        return [self._record(item) for item in payload.get("entries", []) if isinstance(item, dict)]
 
     async def leaderboard(
         self, stat: str, audience: str = "humans", limit: int = 10
     ) -> List[CharacterRecord]:
-        if stat not in LEADERBOARD_COLUMNS:
+        if stat not in {"level", "gold", "kills", "quests"}:
             raise ValueError("Unknown leaderboard statistic.")
         if audience not in {"humans", "ai"}:
             raise ValueError("Audience must be humans or ai.")
-        settings = await self.settings()
-        prefixes = await self._prefix_getter()
-        audience_sql, params = self._audience_filter(settings, audience, prefixes)
-        limit = max(1, min(int(limit), 25))
-        column = LEADERBOARD_COLUMNS[stat]
-        sql = self._select_sql(
-            settings,
-            where=f"{column} > 0 AND {audience_sql}",
-            order=f"ORDER BY {column} DESC, c.`name` ASC LIMIT %s",
+        if audience == "ai":
+            return []
+        payload = await self._request(
+            "GET",
+            "/v1/leaderboards/players",
+            params={"metric": stat, "limit": max(1, min(int(limit), 25)), "offset": 0},
         )
-        rows = await self._query(sql, (*params, limit))
-        return await self._records(rows)
+        return [self._record(item) for item in payload.get("entries", []) if isinstance(item, dict)]
+
+    async def create_account(
+        self, username: str, password: str, idempotency_key: str
+    ) -> Dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/v1/accounts",
+            scope="account",
+            json={"username": username, "password": password},
+            idempotency_key=idempotency_key,
+        )

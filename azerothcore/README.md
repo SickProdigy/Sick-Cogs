@@ -69,82 +69,39 @@ The cog also supports Basic Auth credentials embedded in the URL, but separate `
 If `azerothcore info` or `azerothcore online` times out, check that the configured IP/hostname is reachable from the Discord bot host, the SOAP port is published or available on the Docker network, and SOAP is enabled in AzerothCore.
 Use `azerothcore soapcheck` to test the configured host and port from the bot before troubleshooting SOAP credentials or command permissions.
 
-## Optional read-only character database
+## Private ac-api-v1 connection
 
-AzerothCore 1.1 can read public character statistics directly from MariaDB/MySQL. SOAP remains
-independent and continues to handle server information and account creation. If MySQL is configured,
-`azerothcore online` shows human players and AI companions in separate sections.
+AzerothCore 1.2 uses the private ac-api-v1 module for character profiles, named online
+characters, leaderboards, and managed account creation. The Discord bot does not connect to
+MariaDB/MySQL and must never receive database credentials. SOAP remains independent and can
+continue to provide server information, raw administrative commands, and Playerbots output
+that the API does not yet expose.
 
-Commands:
-
-- `azerothcore player <name>` — show level, race/class, online state, playtime, money, honorable kills,
-  rewarded quests, and the human/AI classification.
-- `azerothcore leaderboard <level|gold|kills|quests> [humans|ai]` — show a bounded leaderboard.
-- `azerothcore databasecheck` — safely test the configured schema and connection.
-- `azerothcore playerbots` — use database classification when MySQL is configured.
-
-### Network placement
-
-Prefer placing Red and the AzerothCore database on the same private Docker network. Use the database
-service name (for example `ac-database`) and internal port `3306`; no host port needs to be published.
-For separate trusted LAN hosts, bind a unique host port to the LAN interface, restrict it to the Red
-host with a firewall, and use TLS certificate verification. A nonstandard port avoids collisions but
-is not a security control. Never expose an unrestricted database listener to the public internet.
-
-### Least-privilege account
-
-Create a dedicated account restricted to the bot container or host. Replace the example host, password,
-and schema names. These are the complete permissions required by the current adapter:
-
-```sql
-CREATE USER 'discord_readonly'@'BOT_HOST' IDENTIFIED BY 'LONG_GENERATED_PASSWORD';
-GRANT SELECT (`guid`, `account`, `name`, `race`, `class`, `gender`, `level`, `online`,
-              `totaltime`, `money`, `totalKills`, `deleteDate`)
-    ON `acore_characters`.`characters` TO 'discord_readonly'@'BOT_HOST';
-GRANT SELECT (`guid`, `active`)
-    ON `acore_characters`.`character_queststatus_rewarded` TO 'discord_readonly'@'BOT_HOST';
-GRANT SELECT (`id`, `username`)
-    ON `acore_auth`.`account` TO 'discord_readonly'@'BOT_HOST';
-GRANT SELECT (`account_id`, `account_type`)
-    ON `acore_playerbots`.`playerbots_account_type` TO 'discord_readonly'@'BOT_HOST';
-```
-
-Do not grant write, schema, file, process, or administrative privileges. For a cross-host TLS account,
-add the server-appropriate `REQUIRE SSL` or certificate requirement and configure a trusted CA below.
+Install and configure /sickprodigy/ac-api-v1 inside the AzerothCore worldserver first. The
+module needs its own dedicated SELECT-only CommunityDatabaseInfo account for
+acore_characters; that credential stays in the module configuration.
 
 ### Red shared API tokens
 
-Use Red's owner-only shared API token command in a private channel or DM. The namespace is
-`azerothcore_mysql`. Required keys are:
+Use Red's owner-only shared-token command in a private channel or DM. The namespace is
+azerothcore_api:
 
-```text
-host
-user
-password
-characters_database
-auth_database
-```
+    [p]set api azerothcore_api base_url http://ac-worldserver:8088
+    [p]set api azerothcore_api community_token REPLACE_WITH_COMMUNITY_READ_TOKEN
+    [p]set api azerothcore_api account_token REPLACE_WITH_ACCOUNT_WRITE_TOKEN
+    [p]set api azerothcore_api timeout 10
 
-Optional keys are `port` (default `3306`), `playerbots_database`, `connect_timeout` (default `10`),
-`tls` (`true` or `false`), and `tls_ca` (a CA file path readable by Red). Example key/value layout:
+Use the private Docker/LAN/WireGuard address on which ac-api-v1 listens. Never embed a token
+in base_url. community_token enables profiles, online characters, realm status, and
+leaderboards. account_token is optional but required for API-managed account creation.
+Keep the two tokens distinct.
 
-```text
-host ac-database port 3306 user discord_readonly password <generated password>
-characters_database acore_characters auth_database acore_auth
-playerbots_database acore_playerbots tls false
-```
+Run [p]azerothcore apicheck to verify capability discovery and realm status. The legacy
+databasecheck and dbcheck names remain aliases during migration.
 
-After saving the tokens, run `azerothcore databasecheck`. Configuration views report only whether
-MySQL and TLS are configured; they never display the host, username, password, or schema names.
-Changing shared tokens automatically retires the old connection pool and opens a new bounded pool.
-
-### AI classification limits
-
-Known random and add-class AI require agreement between the configured account prefix and Playerbots'
-`playerbots_account_type`. If only one signal identifies AI, the cog labels the character as a possible
-AI companion rather than silently treating it as human. Database data cannot reliably tell when a
-human-owned alternate character is temporarily AI-controlled; the future external connector tracked
-separately will need Playerbots runtime state for that distinction.
+AI classification is intentionally not inferred from ordinary character results. Until
+ac-api-v1 exposes authoritative Playerbots classification, [p]azerothcore playerbots uses
+the configured SOAP path and AI leaderboards report that they are unavailable.
 
 ## Troubleshooting
 
@@ -174,7 +131,7 @@ azerothcore set playerbotprefix clear
 
 Use `azerothcore onlineprobe` to test the default online-list command, chat-style `.account onlinelist`, and `server info` from Discord. To test a custom read-only command, run `azerothcore onlineprobe <command>`, then configure a working parser-friendly command with `azerothcore set onlinecommand <command>`.
 
-This cog intentionally does not ask for direct database access. If your AzerothCore build cannot return exact names through SOAP, the better long-term path is a small server-side module or API endpoint that exposes a safe online-player response.
+The cog intentionally has no direct database access. Named character and leaderboard data comes through the private ac-api-v1 module; SOAP remains the fallback for Playerbots until the API exposes authoritative AI classification.
 
 `server info` can usually show connected players, characters in world, connection peak, uptime, and build/revision details, but it does not include character or account names. If your server has a custom command that lists character names, set it with:
 

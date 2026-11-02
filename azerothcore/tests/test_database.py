@@ -1,130 +1,111 @@
 import unittest
 
 from azerothcore.database import (
+    ApiSettings,
     AzerothDatabase,
     DatabaseConfigurationError,
-    DatabaseSettings,
 )
 
 
 BASE_TOKENS = {
-    "host": "database.internal",
-    "port": "3306",
-    "user": "discord_readonly",
-    "password": "test-only-password",
-    "characters_database": "acore_characters",
-    "auth_database": "acore_auth",
-    "playerbots_database": "acore_playerbots",
-    "connect_timeout": "10",
+    "base_url": "http://ac-worldserver:8088",
+    "community_token": "community-token-for-tests",
+    "account_token": "account-token-for-tests",
+    "timeout": "10",
 }
 
 
-class FakeDatabase(AzerothDatabase):
-    def __init__(self, tokens=None, prefixes=("RNDBOT",)):
+class FakeApi(AzerothDatabase):
+    def __init__(self, tokens=None, responses=None):
         self.tokens = dict(tokens or BASE_TOKENS)
-        self.prefixes = list(prefixes)
-        self.queries = []
-        super().__init__(self.get_tokens, self.get_prefixes)
+        self.responses = list(responses or [])
+        self.requests = []
+        super().__init__(self.get_tokens)
 
     async def get_tokens(self):
         return self.tokens
 
-    async def get_prefixes(self):
-        return self.prefixes
-
-    async def _query(self, sql, params=()):
-        self.queries.append((sql, tuple(params)))
-        return []
+    async def _request(self, method, path, **kwargs):
+        self.requests.append((method, path, kwargs))
+        if self.responses:
+            response = self.responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
+        return {}
 
 
 class SettingsTests(unittest.TestCase):
-    def test_accepts_private_plaintext_configuration(self):
-        settings = DatabaseSettings.from_tokens(BASE_TOKENS)
-        self.assertEqual(settings.port, 3306)
-        self.assertFalse(settings.tls)
+    def test_accepts_private_http_configuration(self):
+        settings = ApiSettings.from_tokens(BASE_TOKENS)
+        self.assertEqual(settings.base_url, "http://ac-worldserver:8088")
+        self.assertEqual(settings.timeout, 10)
 
-    def test_accepts_verified_tls_configuration(self):
-        settings = DatabaseSettings.from_tokens({**BASE_TOKENS, "tls": "true"})
-        self.assertTrue(settings.tls)
+    def test_account_token_is_optional_for_community_reads(self):
+        settings = ApiSettings.from_tokens({**BASE_TOKENS, "account_token": ""})
+        self.assertIsNone(settings.account_token)
 
-    def test_rejects_missing_password(self):
-        tokens = {**BASE_TOKENS, "password": ""}
-        with self.assertRaisesRegex(DatabaseConfigurationError, "password"):
-            DatabaseSettings.from_tokens(tokens)
+    def test_rejects_missing_community_token(self):
+        with self.assertRaisesRegex(DatabaseConfigurationError, "community_token"):
+            ApiSettings.from_tokens({**BASE_TOKENS, "community_token": ""})
 
-    def test_rejects_database_identifier_injection(self):
-        tokens = {**BASE_TOKENS, "characters_database": "acore_characters; DROP DATABASE mysql"}
-        with self.assertRaisesRegex(DatabaseConfigurationError, "characters_database"):
-            DatabaseSettings.from_tokens(tokens)
+    def test_rejects_embedded_url_credentials(self):
+        with self.assertRaisesRegex(DatabaseConfigurationError, "without embedded credentials"):
+            ApiSettings.from_tokens({**BASE_TOKENS, "base_url": "http://user:pass@ac-api:8088"})
 
-    def test_rejects_ca_without_tls(self):
-        with self.assertRaisesRegex(DatabaseConfigurationError, "tls=true"):
-            DatabaseSettings.from_tokens({**BASE_TOKENS, "tls_ca": "/safe/ca.pem"})
+    def test_rejects_invalid_timeout(self):
+        with self.assertRaisesRegex(DatabaseConfigurationError, "between 3 and 60"):
+            ApiSettings.from_tokens({**BASE_TOKENS, "timeout": "90"})
 
 
-class ClassificationTests(unittest.TestCase):
-    def test_requires_prefix_and_type_for_known_random_ai(self):
-        self.assertEqual(AzerothDatabase.classify_player("RNDBOT42", 1, ["RNDBOT"]), "random_ai")
+class ApiClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_character_name_is_path_encoded(self):
+        api = FakeApi(responses=[{"character_id": 7, "name": "A B", "level": 10}])
+        record = await api.character("A B")
+        self.assertEqual(api.requests[0][1], "/v1/characters/by-name/A%20B")
+        self.assertEqual(record.name, "A B")
 
-    def test_classifies_addclass_ai(self):
-        self.assertEqual(AzerothDatabase.classify_player("RNDBOT42", 2, ["RNDBOT"]), "account_ai")
-
-    def test_marks_prefix_only_disagreement_unknown(self):
-        self.assertEqual(AzerothDatabase.classify_player("RNDBOT42", None, ["RNDBOT"]), "unknown_ai")
-
-    def test_marks_table_only_disagreement_unknown(self):
-        self.assertEqual(AzerothDatabase.classify_player("REALPLAYER", 1, ["RNDBOT"]), "unknown_ai")
-
-    def test_human_requires_no_ai_signal(self):
-        self.assertEqual(AzerothDatabase.classify_player("REALPLAYER", None, ["RNDBOT"]), "human")
-
-
-class QueryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_character_name_is_parameterized(self):
-        database = FakeDatabase()
-        await database.character("Name' OR 1=1 --")
-        sql, params = database.queries[0]
-        self.assertIn("LOWER(%s)", sql)
-        self.assertNotIn("Name' OR", sql)
-        self.assertEqual(params, ("Name' OR 1=1 --",))
+    async def test_not_found_character_returns_none(self):
+        api = FakeApi(responses=[{"_not_found": True}])
+        self.assertIsNone(await api.character("Missing"))
 
     async def test_online_limit_is_bounded(self):
-        database = FakeDatabase()
-        await database.online("humans", 10000)
-        sql, params = database.queries[0]
-        self.assertIn("c.`online` = 1", sql)
-        self.assertIn("NOT (", sql)
-        self.assertEqual(params, ("RNDBOT%", 100))
+        api = FakeApi(responses=[{"entries": []}])
+        await api.online("humans", 1000)
+        self.assertEqual(api.requests[0][2]["params"]["limit"], 100)
 
+    async def test_ai_results_are_not_guessed(self):
+        api = FakeApi()
+        self.assertEqual(await api.online("ai"), [])
+        self.assertEqual(await api.leaderboard("level", "ai"), [])
+        self.assertEqual(api.requests, [])
 
-    async def test_online_ai_is_bounded_independently(self):
-        database = FakeDatabase()
-        await database.online("ai", 50)
-        sql, params = database.queries[0]
-        self.assertIn("pat.`account_type` IN (1, 2)", sql)
-        self.assertEqual(params, ("RNDBOT%", 50))
+    async def test_leaderboard_maps_public_fields(self):
+        api = FakeApi(responses=[{"entries": [{
+            "character_id": 9, "name": "Prodigy", "race": 1, "class": 8,
+            "level": 80, "money_copper": 12345, "kills": 7, "quests": 900,
+        }]}])
+        records = await api.leaderboard("gold", "humans", 99)
+        self.assertEqual(api.requests[0][2]["params"], {"metric": "gold", "limit": 25, "offset": 0})
+        self.assertEqual((records[0].money, records[0].quests), (12345, 900))
 
-    async def test_human_leaderboard_filters_ai_in_sql(self):
-        database = FakeDatabase()
-        await database.leaderboard("gold", "humans", 10)
-        sql, params = database.queries[0]
-        self.assertIn("NOT (LOWER(a.`username`) LIKE LOWER(%s) OR pat.`account_type` IN (1, 2))", sql)
-        self.assertEqual(params, ("RNDBOT%", 10))
+    async def test_check_combines_capabilities_and_realm_status(self):
+        api = FakeApi(responses=[
+            {"api_version": "v1"},
+            {"characters": 42, "online_characters": 3},
+        ])
+        self.assertEqual(
+            await api.check(),
+            {"api_version": "v1", "characters": 42, "online": 3},
+        )
 
-    async def test_ai_leaderboard_filters_in_sql(self):
-        database = FakeDatabase()
-        await database.leaderboard("quests", "ai", 99)
-        sql, params = database.queries[0]
-        self.assertIn("COALESCE(q.`quest_count`, 0) > 0", sql)
-        self.assertNotIn("quest_count > 0", sql)
-        self.assertEqual(params, ("RNDBOT%", 25))
-
-    async def test_ai_leaderboard_without_signals_returns_no_rows(self):
-        tokens = {key: value for key, value in BASE_TOKENS.items() if key != "playerbots_database"}
-        database = FakeDatabase(tokens=tokens, prefixes=())
-        await database.leaderboard("level", "ai")
-        sql, _ = database.queries[0]
-        self.assertIn("1 = 0", sql)
+    async def test_account_creation_uses_account_scope_and_idempotency(self):
+        api = FakeApi(responses=[{"id": 12, "username": "PLAYER"}])
+        await api.create_account("PLAYER", "Password9!", "stable-key-123456")
+        _, path, kwargs = api.requests[0]
+        self.assertEqual(path, "/v1/accounts")
+        self.assertEqual(kwargs["scope"], "account")
+        self.assertEqual(kwargs["idempotency_key"], "stable-key-123456")
 
 
 if __name__ == "__main__":

@@ -58,7 +58,7 @@ DEFAULT_BANNER_FILENAME = "wow-status-banner.png"
 
 
 class AzerothCore(commands.Cog):
-    """Interact with an AzerothCore server through SOAP console commands."""
+    """Interact with AzerothCore through ac-api-v1 and optional SOAP commands."""
 
     def __init__(self, bot):
         self.bot = bot
@@ -827,42 +827,28 @@ class AzerothCore(commands.Cog):
             return f"{record.quests:,} quests"
         return f"level {record.level}"
 
-    async def _send_database_online(self, ctx: commands.Context, *, ai_only: bool = False) -> None:
-        humans = [] if ai_only else await self.database.online("humans")
-        companions = await self.database.online("ai")
+    async def _send_api_online(self, ctx: commands.Context) -> None:
+        characters = await self.database.online("humans")
         server_name = await self._server_display_name()
         embed = discord.Embed(title=f"{server_name} Online List", color=await ctx.embed_color())
         await self._decorate_server_embed(embed, with_banner=True)
-
-        def bounded_lines(lines: List[str], empty: str) -> str:
-            if not lines:
-                return empty
-            visible = []
-            length = 0
-            for line in lines:
-                addition = len(line) + (1 if visible else 0)
-                if length + addition > 960:
-                    break
-                visible.append(line)
-                length += addition
-            hidden = len(lines) - len(visible)
-            if hidden:
-                visible.append(f"…and {hidden} more.")
-            return "\n".join(visible)
-
-        if not ai_only:
-            human_text = bounded_lines([record.name for record in humans], "No human players are online.")
-            embed.add_field(name=f"Players: {len(humans)}", value=human_text, inline=False)
-        companion_text = bounded_lines(
-            [f"{record.name} — {self._player_type_label(record.player_type)}" for record in companions],
-            "No AI companions are online.",
-        )
-        embed.add_field(name=f"AI Companions: {len(companions)}", value=companion_text, inline=False)
+        lines = [record.name for record in characters]
+        visible = []
+        length = 0
+        for line in lines:
+            addition = len(line) + (1 if visible else 0)
+            if length + addition > 900:
+                break
+            visible.append(line)
+            length += addition
+        hidden = len(lines) - len(visible)
+        if hidden:
+            visible.append(f"...and {hidden} more.")
+        value = "\n".join(visible) or "No characters are online."
+        value += "\n\nPlayerbots are not separated until ac-api-v1 exposes authoritative AI classification."
+        embed.add_field(name=f"Online Characters: {len(characters)}", value=value, inline=False)
         await self._send_embed_or_text(
-            ctx,
-            embed,
-            f"{server_name}\nPlayers: {len(humans)}\nAI Companions: {len(companions)}",
-            with_banner=True,
+            ctx, embed, f"{server_name}\nOnline Characters: {len(characters)}", with_banner=True
         )
 
     async def _configured_playerbot_prefixes(self) -> List[str]:
@@ -1032,6 +1018,33 @@ class AzerothCore(commands.Cog):
         else:
             await recipient.send(embed=embed)
 
+    async def _confirm_account_created(
+        self, ctx: commands.Context, target: discord.Member, *, username: str,
+        password: str, email: Optional[str],
+    ) -> None:
+        try:
+            await self._send_account_welcome_dm(
+                target, username=username, password=password, email=email
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            if target.id == ctx.author.id:
+                await ctx.send(
+                    "Account created, but I could not DM you the password. "
+                    "Please enable DMs; an administrator must reset the password before it can be delivered."
+                )
+            else:
+                await ctx.send(
+                    f"Account created for {target.mention}, but I could not DM them the login details. "
+                    "Ask them to enable DMs; an administrator must reset the password before it can be delivered."
+                )
+        else:
+            if target.id == ctx.author.id:
+                await ctx.send("Account created. I sent the login details to you in DMs.")
+            else:
+                await ctx.send(
+                    f"Account created for {target.mention}. I sent the login details to them in DMs."
+                )
+
     async def _decorate_server_embed(self, embed: discord.Embed, *, with_banner: bool = False) -> None:
         configured_realmlist = await self.config.realmlist()
         if configured_realmlist:
@@ -1117,7 +1130,7 @@ class AzerothCore(commands.Cog):
         """Show online human players and AI companions separately."""
         if await self.database.is_configured():
             try:
-                return await self._send_database_online(ctx)
+                return await self._send_api_online(ctx)
             except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
                 return await ctx.send(str(exc))
 
@@ -1242,9 +1255,9 @@ class AzerothCore(commands.Cog):
 
     @ac.command(name="player", aliases=("character",))
     async def ac_player(self, ctx: commands.Context, *, name: str):
-        """Show a public character profile from the configured read-only database."""
+        """Show a public character profile from the configured AzerothCore API."""
         if not await self.database.is_configured():
-            return await ctx.send("The read-only AzerothCore database is not configured.")
+            return await ctx.send("The private AzerothCore API is not configured.")
         try:
             record = await self.database.character(name.strip())
         except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
@@ -1277,8 +1290,12 @@ class AzerothCore(commands.Cog):
             return await ctx.send("Statistic must be one of: level, gold, kills, quests.")
         if audience not in {"humans", "ai"}:
             return await ctx.send("Audience must be `humans` or `ai`.")
+        if audience == "ai":
+            return await ctx.send(
+                "AI leaderboards are unavailable until ac-api-v1 exposes authoritative Playerbots classification."
+            )
         if not await self.database.is_configured():
-            return await ctx.send("The read-only AzerothCore database is not configured.")
+            return await ctx.send("The private AzerothCore API is not configured.")
         try:
             records = await self.database.leaderboard(stat, audience)
         except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
@@ -1297,32 +1314,25 @@ class AzerothCore(commands.Cog):
         await self._decorate_server_embed(embed)
         await self._send_embed_or_text(ctx, embed, "\n".join(lines))
 
-    @ac.command(name="databasecheck", aliases=("dbcheck",))
+    @ac.command(name="apicheck", aliases=("databasecheck", "dbcheck"))
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def ac_databasecheck(self, ctx: commands.Context):
-        """Test the configured read-only AzerothCore database connection."""
+        """Test the configured private ac-api-v1 connection."""
         if not await self.database.is_configured():
-            return await ctx.send("The read-only AzerothCore database is not configured.")
+            return await ctx.send("The private AzerothCore API is not configured.")
         try:
             result = await self.database.check()
         except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
             return await ctx.send(str(exc))
-        transport = "verified TLS" if result["tls"] else "unencrypted private-network transport"
         await ctx.send(
-            f"Database connection succeeded with {transport}; "
-            f"the character schema contains {result['characters']:,} records."
+            f"AzerothCore API {result['api_version']} is ready; "
+            f"{result['characters']:,} characters exist and {result['online']:,} are online."
         )
 
     @ac.command(name="playerbots")
     async def ac_playerbots(self, ctx: commands.Context):
         """Show online Playerbots or AI companions."""
-        if await self.database.is_configured():
-            try:
-                return await self._send_database_online(ctx, ai_only=True)
-            except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
-                return await ctx.send(str(exc))
-
         server_name = await self._server_display_name()
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
@@ -1487,13 +1497,26 @@ class AzerothCore(commands.Cog):
         if target is None:
             return await ctx.send("I could not find that Discord member.")
 
-        # Use SOAP to create account
+        password = secrets.token_urlsafe(12)
+        if await self.database.has_account_access():
+            try:
+                result = await self.database.create_account(
+                    username, password, secrets.token_urlsafe(24)
+                )
+            except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
+                return await ctx.send(str(exc))
+            created_username = str(result.get("username") or username)
+            await self._confirm_account_created(
+                ctx, target, username=created_username, password=password, email=email
+            )
+            return
+
+        # Preserve SOAP account creation for installations not yet configured with an API account token.
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
         if not await self._configured_soap_url():
             return await ctx.send(self._missing_soap_url_message(ctx))
 
-        password = secrets.token_urlsafe(12)
         template = await self.config.soap_create_command_template()
         cmd = self._render_template(template, username=username, password=password, email=email or "")
         out, error = await self._soap_execute(cmd)
@@ -1502,23 +1525,9 @@ class AzerothCore(commands.Cog):
 
         lower_out = (out or "").lower()
         if ("created" in lower_out or "success" in lower_out) and "already" not in lower_out:
-            try:
-                await self._send_account_welcome_dm(target, username=username, password=password, email=email)
-            except (discord.Forbidden, discord.HTTPException):
-                if target.id == ctx.author.id:
-                    await ctx.send(
-                        "Account created, but I could not DM you the password. Please enable DMs and try again if needed."
-                    )
-                else:
-                    await ctx.send(
-                        f"Account created for {target.mention}, but I could not DM them the login details. "
-                        "Ask them to enable DMs, then create a new password if needed."
-                    )
-            else:
-                if target.id == ctx.author.id:
-                    await ctx.send("Account created. I sent the login details to you in DMs.")
-                else:
-                    await ctx.send(f"Account created for {target.mention}. I sent the login details to them in DMs.")
+            await self._confirm_account_created(
+                ctx, target, username=username, password=password, email=email
+            )
             return
 
         # Helpful hints
@@ -1548,11 +1557,11 @@ class AzerothCore(commands.Cog):
             "- `azerothcore set soap_auth <user> <pass>`\n"
             "- `azerothcore set view`\n"
             "- `azerothcore soapcheck`\n"
-            "- `azerothcore databasecheck`\n\n"
-            "**Read-only Character Database**\n"
-            "- Configure shared tokens under `azerothcore_mysql` with Red's owner-only `set api` command.\n"
-            "- Required: host, user, password, characters_database, auth_database.\n"
-            "- Optional: port, playerbots_database, tls, tls_ca, connect_timeout.\n\n"
+            "- `azerothcore apicheck`\n\n"
+            "**Private ac-api-v1**\n"
+            "- Configure shared tokens under `azerothcore_api` with Red's owner-only `set api` command.\n"
+            "- Required: base_url and community_token.\n"
+            "- Optional: account_token and timeout.\n\n"
             "**Display**\n"
             "- `azerothcore set servername <name>`\n"
             "- `azerothcore set realmlist <text>`\n"
@@ -1909,24 +1918,20 @@ class AzerothCore(commands.Cog):
         request_timeout = await self.config.request_timeout()
         allowed_roles = await self.config.guild(ctx.guild).allowed_roles()
 
-        database_tokens = await self.bot.get_shared_api_tokens(TOKEN_NAMESPACE)
-        database_configured = all(
-            str(database_tokens.get(key, "")).strip()
-            for key in ("host", "user", "password", "characters_database", "auth_database")
+        api_tokens = await self.bot.get_shared_api_tokens(TOKEN_NAMESPACE)
+        api_configured = all(
+            str(api_tokens.get(key, "")).strip()
+            for key in ("base_url", "community_token")
         )
+        account_api_configured = bool(str(api_tokens.get("account_token", "")).strip())
         embed = discord.Embed(title="AzerothCore Configuration", color=await ctx.embed_color())
         embed.add_field(name="SOAP URL", value=self._redact_url(soap_url), inline=False)
         embed.add_field(name="SOAP Auth", value=("Set" if soap_user else "Not set"), inline=True)
         embed.add_field(name="Timeout", value=f"{request_timeout}s", inline=True)
-        embed.add_field(name="Read-only MySQL", value="Configured" if database_configured else "Not set", inline=True)
+        embed.add_field(name="ac-api-v1", value="Configured" if api_configured else "Not set", inline=True)
         embed.add_field(
-            name="MySQL TLS",
-            value=(
-                "Enabled"
-                if str(database_tokens.get("tls", "")).casefold()
-                in {"1", "true", "yes", "on", "required", "verify"}
-                else "Disabled"
-            ),
+            name="API Account Writes",
+            value="Configured" if account_api_configured else "SOAP fallback",
             inline=True,
         )
         embed.add_field(name="Server Name", value=server_name or "Not set", inline=True)
