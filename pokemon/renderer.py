@@ -538,8 +538,17 @@ class BattleRenderer:
         draw.text((400-int(draw.textlength(badge,font=ImageFont.load_default(size=36)))//2,42),badge,fill=RETRO[0],font=ImageFont.load_default(size=36))
         image=self._open(data,(220,190),trim=True,upscale=True);canvas.paste(image,(365-image.width//2,300-image.height),image)
         if battle.gym_key=="boulder":
-            points=((610,125),(665,105),(714,140),(705,205),(650,242),(592,207),(580,150))
-            draw.polygon(points,fill=(126,126,112),outline=RETRO[0]);draw.line((607,144,648,128,687,151,674,195,632,211,604,188,607,144),fill=(201,192,151),width=6)
+            outer=((620,102),(680,102),(722,144),(722,204),(680,246),(620,246),(578,204),(578,144))
+            inner=((628,132),(672,132),(692,152),(692,196),(672,216),(628,216),(608,196),(608,152))
+            facets=((205,208,202),(171,175,170),(95,99,96),(132,136,132),(104,108,105),(82,86,84),(137,141,137),(188,192,186))
+            draw.polygon(outer,fill=(63,66,63),outline=RETRO[0])
+            for index,color in enumerate(facets):
+                following=(index+1)%len(outer)
+                draw.polygon((outer[index],outer[following],inner[following],inner[index]),fill=color)
+            draw.polygon(inner,fill=(151,154,148),outline=(72,76,73),width=4)
+            draw.line((632,138,668,138),fill=(224,226,220),width=4)
+            draw.line((686,156,686,191),fill=(111,115,111),width=4)
+            draw.line((*outer[0],*outer[1],*outer[2],*outer[3],*outer[4],*outer[5],*outer[6],*outer[7],*outer[0]),fill=RETRO[0],width=4)
         elif battle.gym_key=="cascade":
             points=((650,100),(708,171),(700,207),(680,232),(650,244),(620,232),(600,207),(592,171))
             draw.polygon(points,fill=(72,154,205),outline=RETRO[0]);draw.ellipse((610,154,690,230),fill=(91,181,225),outline=RETRO[0],width=4)

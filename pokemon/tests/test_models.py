@@ -417,7 +417,11 @@ class BattleTests(unittest.TestCase):
         with Image.open(center_treating) as treating,Image.open(center_complete) as complete:
             self.assertEqual(treating.size,(900,540));self.assertEqual(complete.size,(900,540));self.assertNotEqual(treating.getpixel((240,211)),complete.getpixel((240,211)));self.assertEqual(complete.getpixel((300,240)),(188,91,96));self.assertNotEqual(treating.getpixel((160,150)),complete.getpixel((160,150)))
         with Image.open(trainer_card) as image:self.assertEqual(image.size,(800,610))
-        with Image.open(gym_victory) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(gym_victory) as image:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((650,115)),(205,208,202))
+            self.assertEqual(image.getpixel((650,174)),(151,154,148))
+            self.assertEqual(image.getpixel((706,174)),(95,99,96))
         with Image.open(cascade_victory) as image:self.assertEqual(image.getpixel((650,190)),(91,181,225))
         with Image.open(evolution) as image:self.assertEqual(image.size,(800,450))
         with Image.open(move_card) as image:self.assertEqual(image.size,(800,450))
