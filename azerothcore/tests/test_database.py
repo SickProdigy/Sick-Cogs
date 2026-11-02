@@ -13,7 +13,6 @@ from azerothcore.database import (
 BASE_TOKENS = {
     "base_url": "http://ac-worldserver:8088",
     "community_token": "community-token-for-tests",
-    "account_token": "account-token-for-tests",
     "timeout": "10",
 }
 
@@ -43,10 +42,6 @@ class SettingsTests(unittest.TestCase):
         settings = ApiSettings.from_tokens(BASE_TOKENS)
         self.assertEqual(settings.base_url, "http://ac-worldserver:8088")
         self.assertEqual(settings.timeout, 10)
-
-    def test_account_token_is_optional_for_community_reads(self):
-        settings = ApiSettings.from_tokens({**BASE_TOKENS, "account_token": ""})
-        self.assertIsNone(settings.account_token)
 
     def test_rejects_missing_community_token(self):
         with self.assertRaisesRegex(DatabaseConfigurationError, "community_token"):
@@ -112,15 +107,6 @@ class ApiClientTests(unittest.IsolatedAsyncioTestCase):
             await api.check(),
             {"api_version": "v1", "characters": 42, "online": 3},
         )
-
-    async def test_account_creation_uses_account_scope_and_idempotency(self):
-        api = FakeApi(responses=[{"id": 12, "username": "PLAYER"}])
-        await api.create_account("PLAYER", "Password9!", "stable-key-123456")
-        _, path, kwargs = api.requests[0]
-        self.assertEqual(path, "/v1/accounts")
-        self.assertEqual(kwargs["scope"], "account")
-        self.assertEqual(kwargs["idempotency_key"], "stable-key-123456")
-
 
 class OnlineSummaryTests(unittest.TestCase):
     def test_online_summary_shows_ten_names_and_remaining_count(self):

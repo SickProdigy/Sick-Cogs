@@ -1510,20 +1510,6 @@ class AzerothCore(commands.Cog):
             return await ctx.send("I could not find that Discord member.")
 
         password = secrets.token_urlsafe(12)
-        if await self.database.has_account_access():
-            try:
-                result = await self.database.create_account(
-                    username, password, secrets.token_urlsafe(24)
-                )
-            except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
-                return await ctx.send(str(exc))
-            created_username = str(result.get("username") or username)
-            await self._confirm_account_created(
-                ctx, target, username=created_username, password=password, email=email
-            )
-            return
-
-        # Preserve SOAP account creation for installations not yet configured with an API account token.
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
         if not await self._configured_soap_url():
@@ -1573,7 +1559,7 @@ class AzerothCore(commands.Cog):
             "**Private ac-api-v1**\n"
             "- Configure shared tokens under `azerothcore_api` with Red's owner-only `set api` command.\n"
             "- Required: base_url and community_token.\n"
-            "- Optional: account_token and timeout.\n\n"
+            "- Optional: timeout. Account creation uses SOAP.\n\n"
             "**Display**\n"
             "- `azerothcore set servername <name>`\n"
             "- `azerothcore set realmlist <text>`\n"
@@ -1935,17 +1921,11 @@ class AzerothCore(commands.Cog):
             str(api_tokens.get(key, "")).strip()
             for key in ("base_url", "community_token")
         )
-        account_api_configured = bool(str(api_tokens.get("account_token", "")).strip())
         embed = discord.Embed(title="AzerothCore Configuration", color=await ctx.embed_color())
         embed.add_field(name="SOAP URL", value=self._redact_url(soap_url), inline=False)
         embed.add_field(name="SOAP Auth", value=("Set" if soap_user else "Not set"), inline=True)
         embed.add_field(name="Timeout", value=f"{request_timeout}s", inline=True)
         embed.add_field(name="ac-api-v1", value="Configured" if api_configured else "Not set", inline=True)
-        embed.add_field(
-            name="API Account Writes",
-            value="Configured" if account_api_configured else "SOAP fallback",
-            inline=True,
-        )
         embed.add_field(name="Server Name", value=server_name or "Not set", inline=True)
         embed.add_field(name="Realmlist", value=realmlist or "Not set", inline=True)
         embed.add_field(name="Info Description", value=info_description or "Not set", inline=False)

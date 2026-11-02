@@ -29,14 +29,12 @@ class DatabaseUnavailable(RuntimeError):
 class ApiSettings:
     base_url: str
     community_token: str
-    account_token: Optional[str]
     timeout: int
 
     @classmethod
     def from_tokens(cls, tokens: Mapping[str, str]) -> "ApiSettings":
         base_url = str(tokens.get("base_url", "")).strip().rstrip("/")
         community_token = str(tokens.get("community_token", "")).strip()
-        account_token = str(tokens.get("account_token", "")).strip() or None
         missing = []
         if not base_url:
             missing.append("base_url")
@@ -58,7 +56,7 @@ class ApiSettings:
             raise DatabaseConfigurationError("AzerothCore API timeout must be an integer.") from exc
         if not 3 <= timeout <= 60:
             raise DatabaseConfigurationError("AzerothCore API timeout must be between 3 and 60 seconds.")
-        return cls(base_url, community_token, account_token, timeout)
+        return cls(base_url, community_token, timeout)
 
 
 @dataclass(frozen=True)
@@ -103,11 +101,6 @@ class AzerothDatabase:
         tokens = await self._token_getter()
         return bool(str(tokens.get("base_url", "")).strip() and str(tokens.get("community_token", "")).strip())
 
-    async def has_account_access(self) -> bool:
-        if not await self.is_configured():
-            return False
-        return bool((await self.settings()).account_token)
-
     async def settings(self) -> ApiSettings:
         return ApiSettings.from_tokens(await self._token_getter())
 
@@ -128,18 +121,10 @@ class AzerothDatabase:
         method: str,
         path: str,
         *,
-        scope: str = "community",
         params: Optional[Dict[str, Any]] = None,
-        json: Optional[Dict[str, Any]] = None,
-        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         settings = await self.settings()
-        token = settings.account_token if scope == "account" else settings.community_token
-        if not token:
-            raise DatabaseConfigurationError("AzerothCore API account_token is not configured.")
-        headers = {"Authorization": f"Bearer {token}"}
-        if idempotency_key:
-            headers["Idempotency-Key"] = idempotency_key
+        headers = {"Authorization": f"Bearer {settings.community_token}"}
         try:
             session = await self._get_session()
             async with session.request(
@@ -147,7 +132,6 @@ class AzerothDatabase:
                 settings.base_url + path,
                 headers=headers,
                 params=params,
-                json=json,
                 timeout=aiohttp.ClientTimeout(total=settings.timeout),
             ) as response:
                 try:
@@ -233,14 +217,3 @@ class AzerothDatabase:
             },
         )
         return [self._record(item) for item in payload.get("entries", []) if isinstance(item, dict)]
-
-    async def create_account(
-        self, username: str, password: str, idempotency_key: str
-    ) -> Dict[str, Any]:
-        return await self._request(
-            "POST",
-            "/v1/accounts",
-            scope="account",
-            json={"username": username, "password": password},
-            idempotency_key=idempotency_key,
-        )

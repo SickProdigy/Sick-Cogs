@@ -6,7 +6,7 @@
     "disabled": false,
     "end_user_data_statement": "This cog stores guild settings and reads configured public character statistics. Private API credentials are kept in Red shared API tokens and are never included in Discord output.",
     "hidden": false,
-    "install_msg": "Configure the private ac-api-v1 base URL and scoped bearer tokens under the azerothcore_api shared-token namespace documented in the cog README. Run [p]azerothcore apicheck before using player or leaderboard commands. SOAP remains optional for compatible server-console features.",
+    "install_msg": "Configure the private ac-api-v1 base URL and community-read bearer token under the azerothcore_api shared-token namespace documented in the cog README. Run [p]azerothcore apicheck before using player or leaderboard commands. Configure SOAP for account creation and compatible server-console features.",
     "min_bot_version": "3.5.0",
     "permissions": [
         "embed_links"
@@ -23,5 +23,5 @@
         "azerothcore"
     ],
     "type": "COG",
-    "version": "1.2.3"
+    "version": "1.2.4"
 }

@@ -72,10 +72,10 @@ Use `azerothcore soapcheck` to test the configured host and port from the bot be
 ## Private ac-api-v1 connection
 
 AzerothCore 1.2 uses the private ac-api-v1 module for character profiles, named online
-characters, leaderboards, and managed account creation. The Discord bot does not connect to
+characters, and leaderboards. The Discord bot does not connect to
 MariaDB/MySQL and must never receive database credentials. SOAP remains independent and can
-continue to provide server information, raw administrative commands, and Playerbots output
-that the API does not yet expose.
+provide server information, account creation, raw administrative commands, and Playerbots
+output that the API does not yet expose.
 
 Install and configure /sickprodigy/ac-api-v1 inside the AzerothCore worldserver first. The
 module needs its own dedicated SELECT-only CommunityDatabaseInfo account for
@@ -88,13 +88,11 @@ azerothcore_api:
 
     [p]set api azerothcore_api base_url http://ac-worldserver:8088
     [p]set api azerothcore_api community_token REPLACE_WITH_COMMUNITY_READ_TOKEN
-    [p]set api azerothcore_api account_token REPLACE_WITH_ACCOUNT_WRITE_TOKEN
     [p]set api azerothcore_api timeout 10
 
 Use the private Docker/LAN/WireGuard address on which ac-api-v1 listens. Never embed a token
 in base_url. community_token enables profiles, online characters, realm status, and
-leaderboards. account_token is optional but required for API-managed account creation.
-Keep the two tokens distinct.
+leaderboards. Account creation uses the separately configured SOAP connection.
 
 Run [p]azerothcore apicheck to verify capability discovery and realm status. The legacy
 databasecheck and dbcheck names remain aliases during migration.
