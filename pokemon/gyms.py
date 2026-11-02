@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 
 import discord
 
@@ -34,6 +35,13 @@ KANTO_GYMS=(
 )
 GYMS={gym.key:gym for gym in KANTO_GYMS}
 COMPLETED_GYMS={"boulder","cascade"}
+GYM_LEADER_ASSETS={"boulder":"brock-frlg.png","cascade":"misty-frlg.png"}
+
+
+def gym_leader_path(key):
+    filename=GYM_LEADER_ASSETS.get(str(key))
+    path=Path(__file__).with_name("assets")/"gym_leaders"/filename if filename else None
+    return path if path and path.is_file() else None
 
 
 def earned_badges(raw):
@@ -59,9 +67,10 @@ def badge_case(raw):
     return " ".join(gym.symbol if gym.key in badges else "◻️" for gym in KANTO_GYMS)
 
 
-def gym_status_embed(user,conf,challenge_command="[p]poke gym challenge"):
+def gym_status_embed(user,conf,challenge_command="[p]poke gym challenge",leader_image_url=None):
     badges=earned_badges(conf.get("badges",[]));upcoming=next_gym(badges)
     embed=discord.Embed(title="Kanto Gym Challenge",color=discord.Color.gold())
+    if leader_image_url:embed.set_thumbnail(url=leader_image_url)
     names=", ".join(GYMS[key].badge for key in badges) or "No badges earned yet."
     embed.description=badge_case(badges)+"\n"+names
     embed.add_field(name="Badges",value=f"{len(badges)}/{len(KANTO_GYMS)}",inline=True)

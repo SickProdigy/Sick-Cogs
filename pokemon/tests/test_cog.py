@@ -350,8 +350,9 @@ class GymProgressionTests(unittest.TestCase):
         self.assertIn("1/8",profile.fields[0].name)
         self.assertIn("Misty",profile.footer.text);self.assertNotIn("Locked",profile.footer.text)
         self.assertEqual(badge_case(["boulder"]).count("◻️"),7)
-        status=gym_status_embed(user,conf,"!poke gym challenge")
+        status=gym_status_embed(user,conf,"!poke gym challenge","attachment://gym-leader-misty.png")
         self.assertIn("Misty",status.fields[1].value);self.assertIn("Staryu Lv. 18",status.fields[1].value);self.assertIn("Starmie Lv. 21",status.fields[1].value);self.assertIn("!poke gym challenge",status.footer.text)
+        self.assertEqual(status.thumbnail.url,"attachment://gym-leader-misty.png")
         locked=gym_status_embed(user,{**conf,"badges":["boulder","cascade"]},"!poke gym challenge")
         self.assertIn("Lt. Surge",locked.fields[1].value);self.assertIn("under development",locked.fields[1].value)
 
@@ -971,6 +972,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx=SimpleNamespace(author=SimpleNamespace(id=42),clean_prefix="!",send=AsyncMock())
         await Pokemon.gym.callback(cog,ctx)
         sent=ctx.send.await_args.kwargs;self.assertIn("!poke gym challenge",sent["embed"].footer.text);self.assertEqual(sent["view"].challenge.label,"Challenge Brock")
+        self.assertEqual(sent["embed"].thumbnail.url,"attachment://gym-leader-boulder.png");self.assertEqual(sent["files"][0].filename,"gym-leader-boulder.png");sent["files"][0].close()
 
     async def test_unfinished_next_gym_is_locked_in_ui_and_authoritative_path(self):
         conf={"badges":["boulder","cascade"],"collection":[],"party":[]};section=StoredSection(conf)

@@ -18,6 +18,7 @@ ITEM_SPRITES={key:key.replace("_","-") for key in ("poke_ball","great_ball","ult
 MAX_SPRITE_BYTES = 2 * 1024 * 1024
 MAX_RENDER_BYTES = 8 * 1024 * 1024
 MAX_COVER_BYTES = 6 * 1024 * 1024
+GYM_LEADER_SPRITES={"boulder":Path(__file__).with_name("assets")/"gym_leaders"/"brock-frlg.png","cascade":Path(__file__).with_name("assets")/"gym_leaders"/"misty-frlg.png"}
 KANTO_COVERS = (
     ("Red Version","Nintendo_-_Game_Boy","Pokemon - Red Version (USA, Europe) (SGB Enhanced).png"),
     ("Blue Version","Nintendo_-_Game_Boy","Pokemon - Blue Version (USA, Europe) (SGB Enhanced).png"),
@@ -528,6 +529,11 @@ class BattleRenderer:
         canvas.paste(avatar,(x,y),mask)
         return True
 
+    def _gym_leader_sprite(self,key,size):
+        path=GYM_LEADER_SPRITES.get(key)
+        if not path or not path.is_file():return None
+        return self._retro(self._open(path.read_bytes(),size,trim=True,upscale=True))
+
     def _gym_victory_sync(self,battle,data,avatar_data=None):
         labels={"boulder":"Boulder Badge","cascade":"Cascade Badge","thunder":"Thunder Badge","rainbow":"Rainbow Badge","soul":"Soul Badge","marsh":"Marsh Badge","volcano":"Volcano Badge","earth":"Earth Badge"}
         badge=labels.get(battle.gym_key,"Gym Badge");canvas=Image.new("RGB",(800,450),(229,214,145));draw=ImageDraw.Draw(canvas)
@@ -536,6 +542,8 @@ class BattleRenderer:
         draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
         self._trainer_portrait(canvas,draw,avatar_data,center=(125,190),diameter=112)
         draw.text((400-int(draw.textlength(badge,font=ImageFont.load_default(size=36)))//2,42),badge,fill=RETRO[0],font=ImageFont.load_default(size=36))
+        leader=self._gym_leader_sprite(battle.gym_key,(115,145))
+        if leader:canvas.paste(leader,(730-leader.width//2,325-leader.height),leader)
         image=self._open(data,(220,190),trim=True,upscale=True);canvas.paste(image,(365-image.width//2,300-image.height),image)
         if battle.gym_key=="boulder":
             outer=((620,102),(680,102),(722,144),(722,204),(680,246),(620,246),(578,204),(578,144))
@@ -841,6 +849,8 @@ class BattleRenderer:
         draw.ellipse((55, 300, 390, 390), fill=RETRO[2], outline=RETRO[0], width=4)
         front = self._retro(self._open(front_data,(210,185),trim=True,upscale=True))
         back = self._retro(self._open(back_data,(250,220),trim=True,upscale=True))
+        leader=self._gym_leader_sprite(battle.gym_key,(125,155)) if battle.battle_kind=="gym" else None
+        if leader:canvas.paste(leader,(720-leader.width//2,195-leader.height),leader)
         canvas.paste(front, (595 - front.width // 2, 220 - front.height), front)
         canvas.paste(back, (205 - back.width // 2, 350 - back.height), back)
         wild = SPECIES[battle.wild_species_id]
