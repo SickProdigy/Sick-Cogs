@@ -214,9 +214,9 @@ class BattleRenderer:
         try:return await self._render(self._mart_card_sync,items,balance,currency,scope,data)
         except (OSError,ValueError) as exc:raise RenderError("Poke Mart card rendering failed.") from exc
 
-    async def pokedex_registration(self,pokemon,trainer_name):
+    async def pokedex_registration(self,pokemon,trainer_name,registered_count,registered_total):
         data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
-        try:return await self._render(self._pokedex_registration_sync,pokemon,data,trainer_name)
+        try:return await self._render(self._pokedex_registration_sync,pokemon,data,trainer_name,registered_count,registered_total)
         except (OSError,ValueError) as exc:raise RenderError("Pokedex registration rendering failed.") from exc
 
     @staticmethod
@@ -667,7 +667,13 @@ class BattleRenderer:
         abilities=", ".join(str(value).replace("_"," ").title() for value in species.abilities) or "Unknown"
         return f"Type: {types}",f"Abilities: {abilities}"
 
-    def _pokedex_registration_sync(self,pokemon,data,trainer_name):
+
+    @staticmethod
+    def pokedex_registration_message(species,trainer_name,registered_count,registered_total):
+        trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer";total=max(1,int(registered_total));count=max(0,min(total,int(registered_count)))
+        return f"{species.name} was registered in {trainer}'s Pokedex. Pokedex progress: {count}/{total} registered."
+
+    def _pokedex_registration_sync(self,pokemon,data,trainer_name,registered_count,registered_total):
         species=SPECIES[pokemon.species_id];trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer";canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
         draw.rectangle((28,25,772,340),fill=RETRO[7],outline=RETRO[0],width=6)
         draw.rectangle((48,48,330,315),fill=RETRO[4],outline=RETRO[1],width=4)
@@ -677,7 +683,7 @@ class BattleRenderer:
         type_text,ability_text=self.pokedex_registration_details(species)
         draw.text((370,175),type_text,fill=RETRO[0],font=ImageFont.load_default(size=20))
         self._dialogue(draw,ability_text,(370,211),width=34,max_lines=2,size=18)
-        draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,f"{species.name} was registered in {trainer}'s Pokedex.",(25,382),width=84,size=19)
+        draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,self.pokedex_registration_message(species,trainer,registered_count,registered_total),(25,372),width=84,size=19)
         return self._save(canvas)
 
     def _main_menu_sync(self,user_name,conf,lead,data,style,cover_label=None,avatar_data=None):

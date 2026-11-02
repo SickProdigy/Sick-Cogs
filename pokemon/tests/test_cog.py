@@ -430,9 +430,9 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_pokedex_registration_names_the_trainer(self):
         pokemon=OwnedPokemon.create("registration",39,3,seed=2)
         cog=Pokemon.__new__(Pokemon);cog.renderer=SimpleNamespace(pokedex_registration=AsyncMock(return_value=io.BytesIO(b"png")))
-        embed,files=await cog.rendered_pokedex_registration(pokemon,"  SickProdigy  ")
+        embed,files=await cog.rendered_pokedex_registration(pokemon,"  SickProdigy  ",42)
         self.assertEqual(embed.description,"New Pokemon data was added to SickProdigy's Pokedex.")
-        cog.renderer.pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy")
+        cog.renderer.pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy",42,151)
         self.assertEqual(len(files),1)
 
 
