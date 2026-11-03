@@ -20,7 +20,8 @@ Commands can also be run with the short aliases `wow` or `ac`, such as `wow onli
 2. (Optional) Configure SOAP basic auth using `azerothcore set soap_auth <user> <pass>`.
 3. Check the current configuration with `azerothcore set view`, then test connectivity with `azerothcore soapcheck`.
 4. Add display text with `azerothcore set servername`, `azerothcore set realmlist`, and `azerothcore set infodescription`.
-5. Add the Discord roles that are allowed to create accounts with `azerothcore set accountcreationrole <role...>`.
+5. As the Red bot owner, enable account management in the trusted Discord server with `azerothcore trustguild true`.
+6. Add the Discord roles that are allowed to create accounts with `azerothcore set accountcreationrole <role...>`.
 6. (Optional) Adjust advanced SOAP behavior with `azerothcore set timeout`, `azerothcore set onlinecommand`, `azerothcore set infocommand`, or `azerothcore set createcommand`.
 
 ### Helpful examples
@@ -41,7 +42,7 @@ Account creation roles can be provided as role mentions, role IDs, or exact role
 
 ### Restricted Commands
 
-`azerothcore createuser`, `azerothcore accountcreate`, and `azerothcore raw` are restricted to server owners, server admins/managers, and configured account-creation roles.
+Account-changing commands default to disabled in every Discord server. The Red bot owner must run `azerothcore trustguild true` in each explicitly trusted guild. `azerothcore createuser`, `azerothcore accountcreate`, and `azerothcore raw` are then restricted to server owners, server admins/managers, and configured account-creation roles.
 
 `azerothcore createuser` and `azerothcore accountcreate` generate a password, create the AzerothCore account through SOAP, and DM a welcome packet with the username, password, configured realmlist, and bundled banner image. If a Discord member is provided as the final argument, that member gets the DM; otherwise the command author gets it. Public channel confirmations never include the generated password.
 

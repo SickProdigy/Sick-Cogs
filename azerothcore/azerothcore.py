@@ -80,7 +80,7 @@ class AzerothCore(commands.Cog):
             playerbot_account_prefixes=DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES,
             request_timeout=20,
         )
-        self.config.register_guild(allowed_roles=[])
+        self.config.register_guild(allowed_roles=[], trusted_backend=False)
         self.database = AzerothDatabase(
             lambda: self.bot.get_shared_api_tokens(TOKEN_NAMESPACE),
             self._configured_playerbot_prefixes,
@@ -704,8 +704,14 @@ class AzerothCore(commands.Cog):
             summary += f"\nConnection peak: {info['peak']}"
         return summary
 
+    async def _trusted_account_guild(self, ctx: commands.Context) -> bool:
+        return bool(ctx.guild and await self.config.guild(ctx.guild).trusted_backend())
+
     async def _can_create_accounts(self, ctx: commands.Context) -> bool:
         if ctx.guild is None:
+            return False
+
+        if not await self._trusted_account_guild(ctx):
             return False
 
         if ctx.guild.owner_id == ctx.author.id:
@@ -1518,6 +1524,15 @@ class AzerothCore(commands.Cog):
             "This only confirms the port is open; `azerothcore info` or `azerothcore online` still verifies the SOAP request."
         )
 
+    @ac.command(name="trustguild")
+    @commands.guild_only()
+    @commands.is_owner()
+    async def ac_trustguild(self, ctx: commands.Context, enabled: bool):
+        """Bot owner: enable or disable account management in this Discord server."""
+        await self.config.guild(ctx.guild).trusted_backend.set(enabled)
+        state = "enabled" if enabled else "disabled"
+        await ctx.send(f"AzerothCore account management is now {state} for this Discord server.")
+
     @ac.command(name="raw")
     @commands.guild_only()
     async def ac_raw(self, ctx: commands.Context, *, command: str):
@@ -1527,6 +1542,8 @@ class AzerothCore(commands.Cog):
         configured with `azerothcore set accountcreationrole`.
         """
 
+        if not await self._trusted_account_guild(ctx):
+            return await ctx.send("AzerothCore account management is not enabled for this Discord server.")
         if not await self._can_create_accounts(ctx):
             return await ctx.send("You do not have permission to run raw AzerothCore commands.")
         if not await self.config.use_soap():
@@ -1568,6 +1585,8 @@ class AzerothCore(commands.Cog):
         - `[p]wow createuser APITEST1102 player@example.com @Player`
         """
 
+        if not await self._trusted_account_guild(ctx):
+            return await ctx.send("AzerothCore account management is not enabled for this Discord server.")
         if not await self._can_create_accounts(ctx):
             return await ctx.send("You do not have permission to create accounts.")
 
@@ -1813,6 +1832,7 @@ class AzerothCore(commands.Cog):
     async def acset_rolelist(self, ctx: commands.Context):
         """Show the roles allowed to create accounts."""
 
+        trusted_backend = await self.config.guild(ctx.guild).trusted_backend()
         allowed_roles = await self.config.guild(ctx.guild).allowed_roles()
         if not allowed_roles:
             return await ctx.send("No roles are currently allowed to create accounts.")
@@ -1983,6 +2003,7 @@ class AzerothCore(commands.Cog):
         playerbot_prefixes = await self._configured_playerbot_prefixes()
         request_timeout = await self.config.request_timeout()
         allowed_roles = await self.config.guild(ctx.guild).allowed_roles()
+        trusted_backend = await self.config.guild(ctx.guild).trusted_backend()
 
         api_tokens = await self.bot.get_shared_api_tokens(TOKEN_NAMESPACE)
         api_configured = all(
@@ -1990,6 +2011,7 @@ class AzerothCore(commands.Cog):
             for key in ("base_url", "community_token")
         )
         embed = discord.Embed(title="AzerothCore Configuration", color=await ctx.embed_color())
+        embed.add_field(name="Account Management", value="Enabled" if trusted_backend else "Disabled", inline=True)
         embed.add_field(name="SOAP URL", value=self._redact_url(soap_url), inline=False)
         embed.add_field(name="SOAP Auth", value=("Set" if soap_user else "Not set"), inline=True)
         embed.add_field(name="Timeout", value=f"{request_timeout}s", inline=True)

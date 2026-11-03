@@ -63,6 +63,21 @@ class SettingsTests(unittest.TestCase):
         self.assertIsNone(AzerothCore._friendly_account_create_error("SOAP connection timed out"))
 
 
+class AccountPermissionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_account_management_requires_trusted_guild(self):
+        class Value:
+            def __init__(self,value):self.value=value
+            async def __call__(self):return self.value
+        class GuildConfig:
+            def __init__(self,trusted):self.trusted_backend=Value(trusted);self.allowed_roles=Value([])
+        guild=SimpleNamespace(owner_id=7);author=SimpleNamespace(id=7,guild_permissions=SimpleNamespace(administrator=False,manage_guild=False),roles=[])
+        ctx=SimpleNamespace(guild=guild,author=author);cog=AzerothCore.__new__(AzerothCore)
+        cog.config=SimpleNamespace(guild=lambda current:GuildConfig(False))
+        self.assertFalse(await cog._can_create_accounts(ctx))
+        cog.config=SimpleNamespace(guild=lambda current:GuildConfig(True))
+        self.assertTrue(await cog._can_create_accounts(ctx))
+
+
 class ApiClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_character_name_is_path_encoded(self):
         api = FakeApi(responses=[{"character_id": 7, "name": "A B", "level": 10}])
