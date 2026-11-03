@@ -529,10 +529,14 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(user=lambda user:section);cog.rendered_main_menu=AsyncMock(return_value=(discord.Embed(title="Modern menu"),[]))
         view=MainMenuView(cog,42);denied=SimpleNamespace(user=SimpleNamespace(id=7),response=SimpleNamespace(send_message=AsyncMock()))
         self.assertFalse(await view.interaction_check(denied));denied.response.send_message.assert_awaited_once()
-        response=SimpleNamespace(edit_message=AsyncMock());interaction=SimpleNamespace(user=SimpleNamespace(id=42,display_name="Trainer"),response=response)
+        response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock());interaction=SimpleNamespace(user=SimpleNamespace(id=42,display_name="Trainer"),response=response)
         await cog.open_menu_section(interaction,"style")
         self.assertEqual(section.value["menu_style"],"modern")
         response.edit_message.assert_awaited_once();self.assertIsInstance(response.edit_message.await_args.kwargs["view"],MainMenuView)
+        await cog.open_menu_section(interaction,"trade")
+        guidance=response.send_message.await_args.args[0]
+        self.assertIn("`poke trade`",guidance);self.assertIn("`poke trade @trainer <your collection number> <their collection number>`",guidance)
+        self.assertIn("`poke trade collection @trainer`",guidance)
 
     async def test_starter_picker_is_one_time_and_encounter_scoped(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()

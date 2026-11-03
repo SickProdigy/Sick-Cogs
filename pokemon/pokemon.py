@@ -333,7 +333,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.16";__author__="SickProdigy"
+    __version__="1.4.17";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1005,7 +1005,7 @@ class Pokemon(commands.Cog):
             leader_url,leader_files=self.gym_leader_attachment(upcoming)
             await interaction.response.send_message(embed=gym_status_embed(user,conf,leader_image_url=leader_url),files=leader_files,view=view,ephemeral=True);return
         if section=="trade":
-            await interaction.response.send_message("Start an exact trade with `poke trade  <your collection number> <their collection number>`. The other trainer must confirm before anything moves.",ephemeral=True);return
+            await interaction.response.send_message("Start an interactive trade with `poke trade`, or use `poke trade @trainer <your collection number> <their collection number>` for an exact numbered offer. Use `poke trade collection @trainer` to view their collection numbers.",ephemeral=True);return
         if section=="mart":
             if interaction.guild is None:await interaction.response.send_message("The Poke Mart is available inside a server.",ephemeral=True);return
             embed,files,view=await self.rendered_mart(user,interaction.guild)
