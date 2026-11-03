@@ -233,8 +233,14 @@ class BattleTests(unittest.TestCase):
 
     def test_run_finishes(self):
         b=battle();b.run()
-        self.assertEqual((b.state,b.result),("ran","Trainer got away safely!"))
+        self.assertEqual((b.state,b.escape_reason,b.result),("ran","","Trainer got away safely!"))
         with self.assertRaises(BattleError):b.run()
+
+    def test_forced_escape_move_is_not_recorded_as_trainer_run(self):
+        b=battle();moves=__import__("pokemon.data",fromlist=["MOVES"]).MOVES
+        b._status_action(moves["roar"],False,b.rng())
+        self.assertEqual((b.state,b.escape_reason),("ran","move:Roar"));self.assertIn("used Roar",b.result)
+        restored=Battle.from_raw(b.raw());self.assertEqual(restored.escape_reason,"move:Roar")
     def test_round_trip(self):
         b=battle();b.trainer_name="SickProdigy";b.wild_shiny=True;b.caught_count=5;b.use_move(0)
         self.assertEqual(Battle.from_raw(b.raw()).raw(),b.raw())
@@ -489,6 +495,9 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(BattleRenderer.battle_result_text(b),f"SickProdigy defeated {wild.name}!")
         b.state="ran"
         self.assertEqual(BattleRenderer.battle_result_text(b),"SickProdigy got away safely!")
+        b.escape_reason="move:Roar"
+        self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped!")
+        b.escape_reason=""
         b.state="lost"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
 

@@ -538,7 +538,7 @@ class BattleRenderer:
         if battle.state=="caught":return f"Gotcha! {wild.name} was caught by {trainer}!"
         if battle.state=="won":return f"{trainer} defeated {wild.name}!"
         if battle.state=="lost":return (f"Gym challenge lost, {trainer}! Go to a Pokemon Center to heal." if battle.gym_key else f"{wild.name} escaped from {trainer}! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
-        if battle.state=="ran":return f"{trainer} got away safely!"
+        if battle.state=="ran":return f"{wild.name} escaped!" if getattr(battle,"escape_reason","") else f"{trainer} got away safely!"
         return f"{wild.name} escaped from {trainer}!"
 
     @classmethod
@@ -602,7 +602,7 @@ class BattleRenderer:
             for y in range(0,315,12):draw.line((0,y,800,y),fill=RETRO[4])
             draw.ellipse((465,190,750,255),fill=RETRO[2],outline=RETRO[0],width=4)
             draw.ellipse((55,300,390,390),fill=RETRO[2],outline=RETRO[0],width=4)
-            heading="GOT AWAY SAFELY!";draw.text((400,45),heading,fill=RETRO[0],font=ImageFont.load_default(size=32),anchor="mt")
+            heading="WILD POKEMON ESCAPED!" if getattr(battle,"escape_reason","") else "GOT AWAY SAFELY!";draw.text((400,45),heading,fill=RETRO[0],font=ImageFont.load_default(size=32),anchor="mt")
             image=self._retro(self._open(data,(220,185),trim=True,upscale=True))
             sprite_left=625-image.width//2
             canvas.paste(image,(sprite_left,245-image.height),image)
