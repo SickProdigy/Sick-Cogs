@@ -468,6 +468,18 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog.renderer.pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy",42,151)
         self.assertEqual(len(files),1)
 
+    async def test_owner_can_preview_registration_without_mutating_progress(self):
+        pokemon=OwnedPokemon.create("registration",108,22,seed=2)
+        conf={"collection":[pokemon.raw()],"pokedex_caught":[25,108]}
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda _user:StoredSection(conf))
+        cog.rendered_pokedex_registration=AsyncMock(return_value=(discord.Embed(title="Lickitung was registered!"),[]))
+        author=SimpleNamespace(display_name="SickProdigy");ctx=SimpleNamespace(author=author,send=AsyncMock())
+        await Pokemon.preview_registration.callback(cog,ctx,species_name="Lickitung")
+        cog.rendered_pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy",2,len(SPECIES))
+        sent=ctx.send.await_args.kwargs
+        self.assertEqual(sent["embed"].footer.text,"Preview only - no Pokedex progress was changed.")
+        self.assertEqual(conf["pokedex_caught"],[25,108])
+
 
     async def test_timed_mode_tracks_recent_trainer_for_spawn_level_without_activity_points(self):
         conf={"enabled":True,"spawn_mode":"timed","channels":[10]}

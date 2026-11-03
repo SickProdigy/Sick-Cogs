@@ -333,7 +333,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.25";__author__="SickProdigy"
+    __version__="1.4.26";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -2193,6 +2193,24 @@ class Pokemon(commands.Cog):
     async def pokemon_owner_set(self,ctx):
         """Configure bot-wide Pokemon policy and owner overrides."""
         await ctx.send_help()
+
+    @pokemon_owner_set.command(name="previewregistration")
+    async def preview_registration(self,ctx,*,species_name:str=None):
+        """Preview a real Pokedex registration card without changing progress."""
+        conf=await self.config.user(ctx.author).all();owned=[OwnedPokemon.from_raw(raw) for raw in conf.get("collection",[])]
+        if not owned:
+            await ctx.send("Choose a starter or catch a Pokemon before previewing a registration card.");return
+        if species_name:
+            wanted=species_name.strip().casefold();matches=[pokemon for pokemon in owned if (pokemon.nickname or SPECIES[pokemon.species_id].name).casefold()==wanted]
+            if not matches:
+                await ctx.send("That Pokemon is not in your collection. Use an owned Pokemon's species name or nickname.");return
+            pokemon=matches[0]
+        else:
+            pokemon=owned[0]
+        caught_ids={int(value) for value in conf.get("pokedex_caught",[]) if str(value).isdigit() and int(value) in SPECIES}
+        embed,files=await self.rendered_pokedex_registration(pokemon,ctx.author.display_name,len(caught_ids),len(SPECIES))
+        embed.set_footer(text="Preview only - no Pokedex progress was changed.")
+        await ctx.send(embed=embed,files=files)
 
     @commands.group(name="pokemonset",aliases=["pokeset","pkmnset"],invoke_without_command=True)
     @commands.guild_only()
