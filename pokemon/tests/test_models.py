@@ -431,7 +431,11 @@ class BattleTests(unittest.TestCase):
             self.assertEqual(retro.size,(800,500));self.assertEqual(modern.size,(800,500));self.assertNotEqual(retro.getpixel((10,10)),modern.getpixel((10,10)))
         with Image.open(center_treating) as treating,Image.open(center_complete) as complete:
             self.assertEqual(treating.size,(900,540));self.assertEqual(complete.size,(900,540));self.assertNotEqual(treating.getpixel((240,211)),complete.getpixel((240,211)));self.assertEqual(complete.getpixel((300,240)),(188,91,96));self.assertNotEqual(treating.getpixel((160,150)),complete.getpixel((160,150)))
-        with Image.open(trainer_card) as image:self.assertEqual(image.size,(800,610))
+        with Image.open(trainer_card) as image:
+            self.assertEqual(image.size,(800,610))
+            self.assertEqual(image.getpixel((100,430)),(40,120,220))
+            earned=image.crop((54,181,102,229));locked=image.crop((120,181,168,229))
+            self.assertGreater(len(earned.getcolors(maxcolors=2305)),4);self.assertNotEqual(earned.tobytes(),locked.tobytes())
         with Image.open(scene) as ordinary,Image.open(gym_scene) as gym_battle,Image.open(gym_scene_switched) as switched:
             self.assertNotEqual(ordinary.crop((620,35,750,205)).tobytes(),gym_battle.crop((620,35,750,205)).tobytes())
             self.assertNotEqual(gym_battle.crop((48,128,112,152)).tobytes(),switched.crop((48,128,112,152)).tobytes())
