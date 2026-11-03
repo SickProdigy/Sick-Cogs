@@ -16,13 +16,16 @@ Commands can also be run with the short aliases `wow` or `ac`, such as `wow onli
 
 ## Setup
 
-1. Configure the SOAP endpoint the cog should use with `wowset soap_url <ip:port>`.
-2. (Optional) Configure SOAP basic auth using `wowset soap_auth <user> <pass>`.
-3. Check the current configuration with `wowset view`, then test connectivity with `azerothcore soapcheck`.
-4. Add display text with `wowset servername`, `wowset realmlist`, and `wowset infodescription`.
-5. As the Red bot owner, enable account management in the trusted Discord server with `azerothcore trustguild true`.
-6. Add the Discord roles that are allowed to create accounts with `wowset accountcreationrole <role...>`.
-6. (Optional) Adjust advanced SOAP behavior with `wowset timeout`, `wowset onlinecommand`, `wowset infocommand`, or `wowset createcommand`.
+Each Discord server has an isolated backend profile. Normal commands never fall back to the old global profile or another guild's credentials. The Red bot owner must configure and enable each guild explicitly.
+
+1. For an existing installation, run `wowset backend migratelegacy confirm` once in the intended guild. This copies the legacy profile and leaves its recovery source untouched. For a new guild, skip migration.
+2. Configure SOAP with `wowset soap_url <ip:port>` and `wowset soap_auth <user> <pass>` as the Red bot owner.
+3. If ac-api-v1 is installed, configure its guild-scoped credentials with `wowset backend api <base_url> <community_token> [timeout]`.
+4. Enable the profile with `wowset backend enable true`, then inspect it with `wowset backend` and `wowset view`.
+5. Enable account-changing commands separately with `wow trustguild true`.
+6. Configure staff roles with `wowset accountcreationrole` and first-account self-service roles with `wowset selfservicerole`.
+
+`wowset` is restricted to server administrators and members with Manage Server. Connection credentials, migration, and profile enablement additionally require the Red bot owner. Regular members use `wow` commands and do not need to see setup commands.
 
 ### Helpful examples
 
@@ -38,7 +41,7 @@ Commands can also be run with the short aliases `wow` or `ac`, such as `wow onli
 - `azerothcore accountcreate playername player@example.com @player`
 - `azerothcore onlineprobe`
 
-Account creation roles can be provided as role mentions, role IDs, or exact role names.
+Account creation roles can be provided as role mentions, role IDs, or exact role names. Staff may use `wow accountlink <username> [member]`, `wow accountunlink [member]`, and `wow accountstatus [member]`. Members may inspect their own link with `wow accountstatus` and reset a linked password with `wow resetpassword`. Password resets require a successful DM preflight and are limited to once every 15 minutes. Self-service roles may create only their own first linked account; staff-created accounts are linked automatically.
 
 ### Restricted Commands
 
@@ -65,7 +68,7 @@ AzerothCore's SOAP interface commonly listens on port 7878 inside the server/con
 `wowset soap_url 192.168.86.139:17878`
 `wowset soap_auth soapuser abcd1234`
 
-The cog also supports Basic Auth credentials embedded in the URL, but separate `soap_auth` configuration is preferred so the bot does not repeat credentials in normal setup responses.
+SOAP credentials must be configured separately with `wowset soap_auth`; credential-bearing URLs are rejected and deleted from command history.
 
 If `azerothcore info` or `azerothcore online` times out, check that the configured IP/hostname is reachable from the Discord bot host, the SOAP port is published or available on the Docker network, and SOAP is enabled in AzerothCore.
 Use `azerothcore soapcheck` to test the configured host and port from the bot before troubleshooting SOAP credentials or command permissions.
@@ -82,18 +85,13 @@ Install and configure /sickprodigy/ac-api-v1 inside the AzerothCore worldserver 
 module needs its own dedicated SELECT-only CommunityDatabaseInfo account for
 acore_characters; that credential stays in the module configuration.
 
-### Red shared API tokens
+### Guild-scoped API credentials
 
-Use Red's owner-only shared-token command in a private channel or DM. The namespace is
-azerothcore_api:
+The Red bot owner configures ac-api-v1 per Discord server with:
 
-    [p]set api azerothcore_api base_url http://ac-worldserver:8088
-    [p]set api azerothcore_api community_token REPLACE_WITH_COMMUNITY_READ_TOKEN
-    [p]set api azerothcore_api timeout 10
+    [p]wowset backend api http://ac-worldserver:8088 COMMUNITY_TOKEN 10
 
-Use the private Docker/LAN/WireGuard address on which ac-api-v1 listens. Never embed a token
-in base_url. community_token enables profiles, online characters, realm status, and
-leaderboards. Account creation uses the separately configured SOAP connection.
+Credentials are stored in the private `azerothcore_api_<guild_id>` shared-token namespace. They are never read from another guild or shown in Discord. Account creation and password reset continue to use the guild's separate SOAP connection.
 
 Run [p]azerothcore apicheck to verify capability discovery and realm status. The legacy
 databasecheck and dbcheck names remain aliases during migration.
@@ -211,4 +209,4 @@ services:
       - "${DOCKER_SOAP_EXTERNAL_PORT:-17878}:7878"
 ```
 
-Security note: SOAP credentials are sensitive. Prefer `wowset soap_auth` over embedding passwords in URLs or shell history.
+Security note: SOAP credentials are sensitive. Store them only with `wowset soap_auth`; the cog rejects credentials embedded in endpoint URLs.

@@ -1,11 +1,13 @@
 import asyncio
+import contextvars
 import errno
 import html
 import re
 import secrets
+import time
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import aiohttp
 import discord
@@ -80,18 +82,72 @@ class AzerothCore(commands.Cog):
             playerbot_account_prefixes=DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES,
             request_timeout=20,
         )
-        self.config.register_guild(allowed_roles=[], trusted_backend=False)
+        self.config.register_guild(
+            allowed_roles=[],
+            self_service_roles=[],
+            trusted_backend=False,
+            backend_enabled=False,
+            legacy_migrated=False,
+            account_links={},
+            account_creation_timestamps={},
+            password_reset_timestamps={},
+            server_name=None,
+            realmlist=None,
+            info_description=None,
+            use_soap=True,
+            soap_url=None,
+            soap_envelope_template=DEFAULT_SOAP_ENVELOPE_TEMPLATE,
+            soap_create_command_template="account create {username} {password}",
+            soap_info_command_template=DEFAULT_INFO_COMMAND,
+            soap_online_command_template=DEFAULT_ONLINE_COMMAND,
+            playerbot_account_prefixes=DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES,
+            request_timeout=20,
+        )
+        self._guild_context = contextvars.ContextVar("azerothcore_guild_id", default=None)
         self.database = AzerothDatabase(
-            lambda: self.bot.get_shared_api_tokens(TOKEN_NAMESPACE),
+            self._backend_tokens,
             self._configured_playerbot_prefixes,
         )
 
     async def cog_load(self):
         self.session = aiohttp.ClientSession()
 
+    async def cog_before_invoke(self, ctx: commands.Context) -> None:
+        self._guild_context.set(ctx.guild.id if ctx.guild else None)
+        root = ctx.command.root_parent or ctx.command
+        if root.name != "azerothcore" or ctx.command.name == "trustguild":
+            return
+        if not ctx.guild or not await self.config.guild(ctx.guild).backend_enabled():
+            raise commands.UserFeedbackCheckFailure(
+                "AzerothCore is not configured for this Discord server. A bot owner must enable its guild backend profile."
+            )
+
+    def _backend_guild_id(self) -> int:
+        guild_id = self._guild_context.get()
+        if guild_id is None:
+            raise RuntimeError("AzerothCore backend access requires a Discord guild context.")
+        return int(guild_id)
+
+    def _backend_config(self):
+        return self.config.guild_from_id(self._backend_guild_id())
+
+    def _backend_namespace(self, guild_id: Optional[int] = None) -> str:
+        return f"{TOKEN_NAMESPACE}_{int(guild_id or self._backend_guild_id())}"
+
+    async def _backend_tokens(self) -> Dict[str, str]:
+        return await self.bot.get_shared_api_tokens(self._backend_namespace())
+
     async def red_delete_data_for_user(self, **kwargs):
-        """Nothing to delete."""
-        return
+        """Remove Discord-account links and reset metadata for the requesting user."""
+        user_id = str(kwargs.get("user_id"))
+        for guild_id in (await self.config.all_guilds()):
+            guild_config = self.config.guild_from_id(int(guild_id))
+            async with guild_config.account_links() as links:
+                links.pop(user_id, None)
+            async with guild_config.account_creation_timestamps() as creation_timestamps:
+                creation_timestamps.pop(user_id, None)
+            async with guild_config.password_reset_timestamps() as timestamps:
+                timestamps.pop(user_id, None)
 
     def cog_unload(self):
         if self.session and not self.session.closed:
@@ -195,7 +251,7 @@ class AzerothCore(commands.Cog):
             pass
 
     async def _configured_soap_url(self) -> Optional[str]:
-        soap_url = await self.config.soap_url()
+        soap_url = await self._backend_config().soap_url()
         if not soap_url or soap_url == LEGACY_PLACEHOLDER_SOAP_URL:
             return None
 
@@ -205,22 +261,22 @@ class AzerothCore(commands.Cog):
             return soap_url
 
         if normalized_url != soap_url:
-            await self.config.soap_url.set(normalized_url)
+            await self._backend_config().soap_url.set(normalized_url)
         return normalized_url
 
     async def _configured_envelope_template(self) -> str:
-        envelope_template = await self.config.soap_envelope_template()
+        envelope_template = await self._backend_config().soap_envelope_template()
         if envelope_template == LEGACY_SOAP_ENVELOPE_TEMPLATE:
-            await self.config.soap_envelope_template.set(DEFAULT_SOAP_ENVELOPE_TEMPLATE)
+            await self._backend_config().soap_envelope_template.set(DEFAULT_SOAP_ENVELOPE_TEMPLATE)
             return DEFAULT_SOAP_ENVELOPE_TEMPLATE
         return envelope_template
 
     async def _configured_online_command_template(self) -> str:
-        command = await self.config.soap_online_command_template()
+        command = await self._backend_config().soap_online_command_template()
         if not command:
             return DEFAULT_ONLINE_COMMAND
         if command.strip().lower() == "players":
-            await self.config.soap_online_command_template.set(DEFAULT_ONLINE_COMMAND)
+            await self._backend_config().soap_online_command_template.set(DEFAULT_ONLINE_COMMAND)
             return DEFAULT_ONLINE_COMMAND
         return command
 
@@ -276,7 +332,7 @@ class AzerothCore(commands.Cog):
 
     async def _soap_execute(self, command: str) -> Tuple[Optional[str], Optional[str]]:
         """Execute a SOAP envelope against the configured SOAP endpoint and return the inner text."""
-        use_soap = await self.config.use_soap()
+        use_soap = await self._backend_config().use_soap()
         if not use_soap:
             return None, "SOAP is not enabled."
 
@@ -292,8 +348,9 @@ class AzerothCore(commands.Cog):
             "Accept": "text/xml",
             "SOAPAction": "urn:AC#executeCommand",
         }
-        soap_user = await self.config.soap_user()
-        soap_pass = await self.config.soap_pass()
+        backend_tokens = await self._backend_tokens()
+        soap_user = str(backend_tokens.get("soap_user", "")).strip()
+        soap_pass = str(backend_tokens.get("soap_pass", ""))
         auth = None
         request_url = soap_url
         if soap_user:
@@ -304,7 +361,7 @@ class AzerothCore(commands.Cog):
             self.session = aiohttp.ClientSession()
 
         try:
-            timeout_seconds = await self.config.request_timeout()
+            timeout_seconds = await self._backend_config().request_timeout()
             timeout = aiohttp.ClientTimeout(total=timeout_seconds)
             async with self.session.post(request_url, data=body.encode(), headers=headers, timeout=timeout, auth=auth) as resp:
                 text = await resp.text()
@@ -705,7 +762,10 @@ class AzerothCore(commands.Cog):
         return summary
 
     async def _trusted_account_guild(self, ctx: commands.Context) -> bool:
-        return bool(ctx.guild and await self.config.guild(ctx.guild).trusted_backend())
+        if not ctx.guild:
+            return False
+        guild_config = self.config.guild(ctx.guild)
+        return bool(await guild_config.backend_enabled() and await guild_config.trusted_backend())
 
     async def _can_create_accounts(self, ctx: commands.Context) -> bool:
         if ctx.guild is None:
@@ -726,6 +786,46 @@ class AzerothCore(commands.Cog):
 
         member_roles = {role.id for role in ctx.author.roles}
         return any(role_id in member_roles for role_id in allowed_role_ids)
+
+    async def _can_self_service(self, ctx: commands.Context) -> bool:
+        if not await self._trusted_account_guild(ctx):
+            return False
+        role_ids = await self.config.guild(ctx.guild).self_service_roles()
+        member_roles = {role.id for role in ctx.author.roles}
+        return any(role_id in member_roles for role_id in role_ids)
+
+    async def _linked_username(self, guild, member_id: int) -> Optional[str]:
+        links = await self.config.guild(guild).account_links()
+        value = links.get(str(member_id))
+        return str(value).strip() if value else None
+
+    async def _set_account_link(self, guild, member_id: int, username: Optional[str]) -> None:
+        async with self.config.guild(guild).account_links() as links:
+            if username:
+                links[str(member_id)] = username.strip().upper()
+            else:
+                links.pop(str(member_id), None)
+
+
+    async def _account_owner_id(self, guild, username: str) -> Optional[int]:
+        links = await self.config.guild(guild).account_links()
+        normalized = username.strip().casefold()
+        for member_id, linked_username in links.items():
+            if str(linked_username).strip().casefold() == normalized:
+                return int(member_id)
+        return None
+
+    @staticmethod
+    async def _dm_preflight(member: discord.Member, purpose: str) -> bool:
+        try:
+            await member.send(f"AzerothCore {purpose} requested. Your credentials will follow in another private message if it succeeds.")
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+        return True
+
+    @staticmethod
+    def _valid_account_name(username: str) -> bool:
+        return bool(re.fullmatch(r"[A-Za-z0-9_]{2,32}", username.strip()))
 
     @staticmethod
     def _clean_role_input(role_input: str) -> str:
@@ -811,7 +911,7 @@ class AzerothCore(commands.Cog):
             await ctx.send(text)
 
     async def _server_display_name(self) -> str:
-        return await self.config.server_name() or "World of Warcraft"
+        return await self._backend_config().server_name() or "World of Warcraft"
 
     @staticmethod
     def _format_money(copper: int) -> str:
@@ -886,9 +986,9 @@ class AzerothCore(commands.Cog):
         )
 
     async def _configured_playerbot_prefixes(self) -> List[str]:
-        prefixes = await self.config.playerbot_account_prefixes()
+        prefixes = await self._backend_config().playerbot_account_prefixes()
         if not isinstance(prefixes, list):
-            await self.config.playerbot_account_prefixes.set(DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES)
+            await self._backend_config().playerbot_account_prefixes.set(DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES)
             return list(DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES)
 
         cleaned = []
@@ -1026,7 +1126,7 @@ class AzerothCore(commands.Cog):
         email: Optional[str],
     ) -> None:
         server_name = await self._server_display_name()
-        realmlist = await self.config.realmlist()
+        realmlist = await self._backend_config().realmlist()
 
         embed = discord.Embed(
             title=f"Welcome to {server_name}",
@@ -1080,7 +1180,7 @@ class AzerothCore(commands.Cog):
                 )
 
     async def _decorate_server_embed(self, embed: discord.Embed, *, with_banner: bool = False) -> None:
-        configured_realmlist = await self.config.realmlist()
+        configured_realmlist = await self._backend_config().realmlist()
         if configured_realmlist:
             embed.set_footer(text=f"Realmlist: {configured_realmlist}")
         if with_banner and self.default_banner_path.exists():
@@ -1096,12 +1196,12 @@ class AzerothCore(commands.Cog):
     @ac.command(name="info")
     async def ac_info(self, ctx: commands.Context):
         """Show general server information."""
-        if not await self.config.use_soap():
+        if not await self._backend_config().use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
         if not await self._configured_soap_url():
             return await ctx.send(self._missing_soap_url_message(ctx))
 
-        cmd_template = await self.config.soap_info_command_template()
+        cmd_template = await self._backend_config().soap_info_command_template()
         cmd = self._render_template(cmd_template)
         out, error = await self._soap_execute(cmd)
         if error:
@@ -1121,7 +1221,7 @@ class AzerothCore(commands.Cog):
 
         title = info.get("name") or await self._server_display_name()
         embed = discord.Embed(title=title, color=await ctx.embed_color())
-        configured_realmlist = await self.config.realmlist()
+        configured_realmlist = await self._backend_config().realmlist()
         if configured_realmlist:
             embed.add_field(name="Realmlist", value=str(configured_realmlist), inline=False)
 
@@ -1159,7 +1259,7 @@ class AzerothCore(commands.Cog):
         if info.get("uptime"):
             embed.add_field(name="Uptime", value=str(info.get("uptime")), inline=True)
 
-        configured_description = await self.config.info_description()
+        configured_description = await self._backend_config().info_description()
         description = configured_description or info.get("description") or "Server information fetched successfully."
         embed.description = str(description)[:1900]
 
@@ -1201,7 +1301,7 @@ class AzerothCore(commands.Cog):
                 return await ctx.send(str(exc))
 
         server_name = await self._server_display_name()
-        if not await self.config.use_soap():
+        if not await self._backend_config().use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
         if not await self._configured_soap_url():
             return await ctx.send(self._missing_soap_url_message(ctx))
@@ -1406,7 +1506,7 @@ class AzerothCore(commands.Cog):
     async def ac_playerbots(self, ctx: commands.Context):
         """Show online Playerbots or AI companions."""
         server_name = await self._server_display_name()
-        if not await self.config.use_soap():
+        if not await self._backend_config().use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
         if not await self._configured_soap_url():
             return await ctx.send(self._missing_soap_url_message(ctx))
@@ -1460,7 +1560,7 @@ class AzerothCore(commands.Cog):
     async def ac_onlineprobe(self, ctx: commands.Context, *, command: Optional[str] = None):
         """Probe SOAP online-list commands and show parse/security results."""
 
-        if not await self.config.use_soap():
+        if not await self._backend_config().use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
         if not await self._configured_soap_url():
             return await ctx.send(self._missing_soap_url_message(ctx))
@@ -1495,7 +1595,7 @@ class AzerothCore(commands.Cog):
         if not host or port is None:
             return await ctx.send("SOAP URL must include a host and port.")
 
-        timeout_seconds = min(await self.config.request_timeout(), 10)
+        timeout_seconds = min(await self._backend_config().request_timeout(), 10)
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port),
@@ -1546,7 +1646,7 @@ class AzerothCore(commands.Cog):
             return await ctx.send("AzerothCore account management is not enabled for this Discord server.")
         if not await self._can_create_accounts(ctx):
             return await ctx.send("You do not have permission to run raw AzerothCore commands.")
-        if not await self.config.use_soap():
+        if not await self._backend_config().use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
         if not await self._configured_soap_url():
             return await ctx.send(self._missing_soap_url_message(ctx))
@@ -1587,7 +1687,11 @@ class AzerothCore(commands.Cog):
 
         if not await self._trusted_account_guild(ctx):
             return await ctx.send("AzerothCore account management is not enabled for this Discord server.")
-        if not await self._can_create_accounts(ctx):
+        if not self._valid_account_name(username):
+            return await ctx.send("Account names must be 2-32 letters, numbers, or underscores.")
+        is_staff = await self._can_create_accounts(ctx)
+        is_self_service = await self._can_self_service(ctx)
+        if not is_staff and not is_self_service:
             return await ctx.send("You do not have permission to create accounts.")
 
         email, target, parse_error = await self._parse_account_create_details(ctx, details)
@@ -1595,14 +1699,30 @@ class AzerothCore(commands.Cog):
             return await ctx.send(parse_error)
         if target is None:
             return await ctx.send("I could not find that Discord member.")
-
-        password = secrets.token_urlsafe(12)
-        if not await self.config.use_soap():
+        if not is_staff and target.id != ctx.author.id:
+            return await ctx.send("Self-service account creation can only create your own account.")
+        if await self._linked_username(ctx.guild, target.id):
+            return await ctx.send("That Discord member already has a linked AzerothCore account.")
+        existing_owner_id = await self._account_owner_id(ctx.guild, username)
+        if existing_owner_id is not None:
+            return await ctx.send("That AzerothCore account is already linked to a Discord member.")
+        if not await self._backend_config().use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
         if not await self._configured_soap_url():
             return await ctx.send(self._missing_soap_url_message(ctx))
+        if not await self._dm_preflight(target, "account creation"):
+            return await ctx.send("I could not DM the account recipient. Enable DMs before creating the account.")
+        creation_key = str(target.id)
+        attempted_at = int(time.time())
+        async with self.config.guild(ctx.guild).account_creation_timestamps() as attempts:
+            remaining = 300 - int(attempted_at - float(attempts.get(creation_key, 0) or 0))
+            if remaining > 0:
+                return await ctx.send(f"Another account-creation attempt for that member is available in {remaining // 60 + 1} minute(s).")
+            attempts[creation_key] = attempted_at
 
-        template = await self.config.soap_create_command_template()
+        password = secrets.token_urlsafe(12)
+
+        template = await self._backend_config().soap_create_command_template()
         cmd = self._render_template(template, username=username, password=password, email=email or "")
         out, error = await self._soap_execute(cmd)
         if error:
@@ -1610,6 +1730,7 @@ class AzerothCore(commands.Cog):
 
         lower_out = (out or "").lower()
         if ("created" in lower_out or "success" in lower_out) and "already" not in lower_out:
+            await self._set_account_link(ctx.guild, target.id, username)
             await self._confirm_account_created(
                 ctx, target, username=username, password=password, email=email
             )
@@ -1629,6 +1750,93 @@ class AzerothCore(commands.Cog):
         msg += f" Raw response: {out[:1000]}"
         await ctx.send(msg)
 
+    @ac.command(name="accountlink")
+    @commands.guild_only()
+    async def ac_accountlink(self, ctx: commands.Context, username: str, member: discord.Member, confirmation: str = ""):
+        """Staff: link a Discord member to an existing AzerothCore account."""
+        if not await self._can_create_accounts(ctx):
+            return await ctx.send("You do not have permission to manage account links.")
+        if not self._valid_account_name(username):
+            return await ctx.send("Account names must be 2-32 letters, numbers, or underscores.")
+        if confirmation.casefold() != "confirm":
+            return await ctx.send("Run `wow accountlink <username> <member> confirm` to confirm this existing-account link.")
+        target = member
+        if await self._linked_username(ctx.guild, target.id):
+            return await ctx.send("That Discord member already has a linked AzerothCore account. Unlink it first.")
+        existing_owner_id = await self._account_owner_id(ctx.guild, username)
+        if existing_owner_id is not None:
+            return await ctx.send("That AzerothCore account is already linked to another Discord member.")
+        await self._set_account_link(ctx.guild, target.id, username)
+        await ctx.send(f"Linked {target.mention} to AzerothCore account `{username.strip().upper()}`.")
+
+    @ac.command(name="accountunlink")
+    @commands.guild_only()
+    async def ac_accountunlink(self, ctx: commands.Context, member: Optional[discord.Member] = None):
+        """Staff: remove a Discord-to-AzerothCore account link."""
+        if not await self._can_create_accounts(ctx):
+            return await ctx.send("You do not have permission to manage account links.")
+        target = member or ctx.author
+        username = await self._linked_username(ctx.guild, target.id)
+        if not username:
+            return await ctx.send("That Discord member does not have a linked AzerothCore account.")
+        await self._set_account_link(ctx.guild, target.id, None)
+        await ctx.send(f"Removed the AzerothCore account link for {target.mention}.")
+
+    @ac.command(name="accountstatus")
+    @commands.guild_only()
+    async def ac_accountstatus(self, ctx: commands.Context, member: Optional[discord.Member] = None):
+        """Show your linked account, or let staff inspect another member."""
+        target = member or ctx.author
+        if target.id != ctx.author.id and not await self._can_create_accounts(ctx):
+            return await ctx.send("You do not have permission to inspect another member account link.")
+        username = await self._linked_username(ctx.guild, target.id)
+        if not username:
+            return await ctx.send(f"{target.mention} has no linked AzerothCore account.")
+        await ctx.send(f"{target.mention} is linked to AzerothCore account `{username}`.")
+
+    @ac.command(name="resetpassword", aliases=("passwordreset",))
+    @commands.guild_only()
+    async def ac_resetpassword(self, ctx: commands.Context):
+        """Reset the password for your linked AzerothCore account by DM."""
+        if not await self._trusted_account_guild(ctx):
+            return await ctx.send("AzerothCore account management is not enabled for this Discord server.")
+        username = await self._linked_username(ctx.guild, ctx.author.id)
+        if not username:
+            return await ctx.send("You do not have a linked AzerothCore account. Ask staff to link it first.")
+        user_key = str(ctx.author.id)
+        timestamps = await self.config.guild(ctx.guild).password_reset_timestamps()
+        remaining = 900 - int(time.time() - float(timestamps.get(user_key, 0) or 0))
+        if remaining > 0:
+            return await ctx.send(f"You can reset your password again in {remaining // 60 + 1} minute(s).")
+        if not await self._backend_config().use_soap():
+            return await ctx.send("SOAP transport is not enabled.")
+        if not await self._configured_soap_url():
+            return await ctx.send(self._missing_soap_url_message(ctx))
+        if not await self._dm_preflight(ctx.author, "password reset"):
+            return await ctx.send("I could not DM you. Enable DMs before resetting your password.")
+
+        reserved_at = int(time.time())
+        async with self.config.guild(ctx.guild).password_reset_timestamps() as stored:
+            last_reset = float(stored.get(user_key, 0) or 0)
+            remaining = 900 - int(reserved_at - last_reset)
+            if remaining > 0:
+                return await ctx.send(f"You can reset your password again in {remaining // 60 + 1} minute(s).")
+            stored[user_key] = reserved_at
+
+        password = secrets.token_urlsafe(12)
+        command = f"account set password {username} {password} {password}"
+        _, error = await self._soap_execute(command)
+        if error:
+            async with self.config.guild(ctx.guild).password_reset_timestamps() as stored:
+                if stored.get(user_key) == reserved_at:
+                    stored.pop(user_key, None)
+            return await ctx.send(error)
+        try:
+            await ctx.author.send(f"AzerothCore account: `{username}`\nNew password: `{password}`")
+        except (discord.Forbidden, discord.HTTPException):
+            return await ctx.send("The password changed, but the credential DM failed. Contact staff immediately.")
+        await ctx.send("Password reset complete. I sent the new password to you in DMs.")
+
     @commands.group(name="wowset", aliases=("azerothcoreset", "acset"), invoke_without_command=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
@@ -1637,16 +1845,18 @@ class AzerothCore(commands.Cog):
 
         message = (
             "**AzerothCore Module Settings**\n\n"
+            "**Backend Profile**\n"
+            "- `wowset backend`\n"
+            "- `wowset backend enable <true|false>` (bot owner)\n"
+            "- `wowset backend migratelegacy confirm` (bot owner)\n"
+            "- `wowset backend api <url> <token> [timeout]` (bot owner)\n\n"
             "**Basics**\n"
-            "- `wowset soap_url <ip:port>`\n"
+            "- `wowset soap_url <ip:port>` (bot owner)\n"
             "- `wowset soap_auth <user> <pass>`\n"
             "- `wowset view`\n"
             "- `azerothcore soapcheck`\n"
             "- `azerothcore apicheck`\n\n"
-            "**Private ac-api-v1**\n"
-            "- Configure shared tokens under `azerothcore_api` with Red's owner-only `set api` command.\n"
-            "- Required: base_url and community_token.\n"
-            "- Optional: timeout. Account creation uses SOAP.\n\n"
+
             "**Display**\n"
             "- `wowset servername <name>`\n"
             "- `wowset realmlist <text>`\n"
@@ -1654,7 +1864,10 @@ class AzerothCore(commands.Cog):
             "**Account Creation Roles**\n"
             "- `wowset accountcreationrole <role...>`\n"
             "- `wowset roleremove <role...>`\n"
-            "- `wowset rolelist`\n\n"
+            "- `wowset rolelist`\n"
+            "- `wowset selfservicerole <role...>`\n"
+            "- `wowset selfserviceroleremove <role...>`\n"
+            "- `wowset selfservicerolelist`\n\n"
             "**Advanced**\n"
             "- `wowset timeout <seconds>`\n"
             "- `wowset onlinecommand <command>`\n"
@@ -1667,6 +1880,81 @@ class AzerothCore(commands.Cog):
             "Example: `wowset soap_url 192.168.1.1:7878`"
         )
         await ctx.send(message)
+
+    @acset.group(name="backend", invoke_without_command=True)
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def acset_backend(self, ctx: commands.Context):
+        """Show this Discord server backend profile status."""
+        guild_config = self.config.guild(ctx.guild)
+        tokens = await self.bot.get_shared_api_tokens(self._backend_namespace(ctx.guild.id))
+        await ctx.send(
+            f"Backend: {'enabled' if await guild_config.backend_enabled() else 'disabled'}; "
+            f"account management: {'enabled' if await guild_config.trusted_backend() else 'disabled'}; "
+            f"SOAP: {'configured' if await guild_config.soap_url() else 'not configured'}; "
+            f"ac-api-v1: {'configured' if tokens.get('base_url') and tokens.get('community_token') else 'not configured'}; "
+            f"legacy migration: {'complete' if await guild_config.legacy_migrated() else 'not run'}."
+        )
+
+    @acset_backend.command(name="enable")
+    @commands.is_owner()
+    async def acset_backend_enable(self, ctx: commands.Context, enabled: bool):
+        """Bot owner: enable or disable this guild backend profile."""
+        await self.config.guild(ctx.guild).backend_enabled.set(enabled)
+        await ctx.send(f"This Discord server backend profile is now {'enabled' if enabled else 'disabled'}.")
+
+    @acset_backend.command(name="api")
+    @commands.is_owner()
+    async def acset_backend_api(self, ctx: commands.Context, base_url: str, community_token: str, timeout: int = 10):
+        """Bot owner: configure this guild private ac-api-v1 connection."""
+        if timeout < 3 or timeout > 60:
+            return await ctx.send("API timeout must be between 3 and 60 seconds.")
+        await self.bot.set_shared_api_tokens(
+            self._backend_namespace(ctx.guild.id), base_url=base_url,
+            community_token=community_token, timeout=str(timeout),
+        )
+        await self._try_delete_invocation(ctx)
+        await ctx.send("This Discord server ac-api-v1 connection was updated.")
+
+    @acset_backend.command(name="migratelegacy")
+    @commands.is_owner()
+    async def acset_backend_migratelegacy(self, ctx: commands.Context, confirmation: str = ""):
+        """Copy legacy global settings into this guild without deleting the source."""
+        guild_config = self.config.guild(ctx.guild)
+        if confirmation.casefold() != "confirm":
+            return await ctx.send("Run `wowset backend migratelegacy confirm` to copy the legacy profile into this server.")
+        if await guild_config.legacy_migrated():
+            return await ctx.send("Legacy settings were already migrated into this Discord server profile.")
+        embedded_user = None
+        embedded_pass = None
+        fields = (
+            "server_name", "realmlist", "info_description", "use_soap", "soap_url",
+            "soap_envelope_template", "soap_create_command_template",
+            "soap_info_command_template", "soap_online_command_template",
+            "playerbot_account_prefixes", "request_timeout",
+        )
+        for field in fields:
+            value = await getattr(self.config, field)()
+            if field == "soap_url" and value and self._url_contains_credentials(value):
+                parsed = urlsplit(value)
+                embedded_user = unquote(parsed.username or "")
+                embedded_pass = unquote(parsed.password or "")
+                value = self._strip_url_credentials(value)
+            await getattr(guild_config, field).set(value)
+        legacy_tokens = await self.bot.get_shared_api_tokens(TOKEN_NAMESPACE)
+        copied_tokens = {key: legacy_tokens[key] for key in ("base_url", "community_token", "timeout") if legacy_tokens.get(key)}
+        legacy_user = await self.config.soap_user()
+        legacy_pass = await self.config.soap_pass()
+        credential_user = legacy_user or embedded_user
+        credential_pass = legacy_pass if legacy_user else embedded_pass
+        if credential_user:
+            copied_tokens["soap_user"] = credential_user
+            copied_tokens["soap_pass"] = credential_pass or ""
+        if copied_tokens:
+            await self.bot.set_shared_api_tokens(self._backend_namespace(ctx.guild.id), **copied_tokens)
+        await guild_config.legacy_migrated.set(True)
+        await guild_config.backend_enabled.set(True)
+        await ctx.send("Legacy settings copied into this Discord server profile. The legacy source remains untouched.")
 
     @acset.command(name="baseurl", hidden=True)
     @commands.guild_only()
@@ -1683,11 +1971,11 @@ class AzerothCore(commands.Cog):
         """Set or clear the display name used by the info command."""
 
         if not server_name:
-            await self.config.server_name.clear()
+            await self._backend_config().server_name.clear()
             await ctx.send("Server name cleared.")
             return
 
-        await self.config.server_name.set(server_name)
+        await self._backend_config().server_name.set(server_name)
         await ctx.send(f"Server name set to {server_name}")
 
     @acset.command(name="realmlist")
@@ -1697,11 +1985,11 @@ class AzerothCore(commands.Cog):
         """Set or clear the realmlist shown to users."""
 
         if not realmlist:
-            await self.config.realmlist.clear()
+            await self._backend_config().realmlist.clear()
             await ctx.send("Realmlist cleared.")
             return
 
-        await self.config.realmlist.set(realmlist)
+        await self._backend_config().realmlist.set(realmlist)
         await ctx.send(f"Realmlist set to {realmlist}")
 
     @acset.command(name="infodescription")
@@ -1711,11 +1999,11 @@ class AzerothCore(commands.Cog):
         """Set or clear the default description shown by the info command."""
 
         if not info_description:
-            await self.config.info_description.clear()
+            await self._backend_config().info_description.clear()
             await ctx.send("Info description cleared.")
             return
 
-        await self.config.info_description.set(info_description)
+        await self._backend_config().info_description.set(info_description)
         await ctx.send("Info description updated.")
 
     @acset.command(name="token", hidden=True)
@@ -1850,14 +2138,54 @@ class AzerothCore(commands.Cog):
 
         await ctx.send(f"Roles allowed to create accounts: {humanize_list(role_mentions)}")
 
-    @acset.command(name="soap_url", aliases=("soapurl",))
+    @acset.command(name="selfservicerole", aliases=("viprole",))
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    async def acset_selfservicerole(self, ctx: commands.Context, *role_inputs: str):
+        """Allow roles to create one linked account for themselves."""
+        if not role_inputs:
+            return await ctx.send("You need to provide at least one role.")
+        roles, missing = self._resolve_role_inputs(ctx, role_inputs)
+        if missing:
+            return await ctx.send("I could not find every provided role.")
+        async with self.config.guild(ctx.guild).self_service_roles() as role_ids:
+            for role in roles:
+                if role.id not in role_ids:
+                    role_ids.append(role.id)
+        await ctx.send(f"Self-service roles updated: {humanize_list([role.mention for role in roles])}")
+
+    @acset.command(name="selfserviceroleremove", aliases=("viproleremove",))
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def acset_selfserviceroleremove(self, ctx: commands.Context, *role_inputs: str):
+        """Remove roles from first-account self-service."""
+        roles, missing = self._resolve_role_inputs(ctx, role_inputs)
+        if missing:
+            return await ctx.send("I could not find every provided role.")
+        async with self.config.guild(ctx.guild).self_service_roles() as role_ids:
+            for role in roles:
+                if role.id in role_ids:
+                    role_ids.remove(role.id)
+        await ctx.send("Self-service roles updated.")
+
+    @acset.command(name="selfservicerolelist", aliases=("viprolelist",))
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def acset_selfservicerolelist(self, ctx: commands.Context):
+        """Show roles allowed to create their first account."""
+        role_ids = await self.config.guild(ctx.guild).self_service_roles()
+        roles = [ctx.guild.get_role(role_id) for role_id in role_ids]
+        mentions = [role.mention for role in roles if role is not None]
+        await ctx.send(f"Self-service roles: {humanize_list(mentions) if mentions else 'None'}")
+
+    @acset.command(name="soap_url", aliases=("soapurl",))
+    @commands.guild_only()
+    @commands.is_owner()
     async def acset_soap_url(self, ctx: commands.Context, soap_url: Optional[str] = None):
         """Set or clear the SOAP endpoint URL."""
 
         if not soap_url:
-            await self.config.soap_url.clear()
+            await self._backend_config().soap_url.clear()
             return await ctx.send("SOAP URL cleared.")
 
         try:
@@ -1865,24 +2193,24 @@ class AzerothCore(commands.Cog):
         except ValueError as exc:
             return await ctx.send(str(exc))
 
-        await self.config.soap_url.set(normalized_url)
         if self._url_contains_credentials(normalized_url):
             await self._try_delete_invocation(ctx)
+            return await ctx.send("Do not embed SOAP credentials in the URL. Use `wowset soap_auth <user> <pass>`.")
+        await self._backend_config().soap_url.set(normalized_url)
         await ctx.send(f"SOAP URL set to {self._redact_url(normalized_url)}")
 
     @acset.command(name="soap_auth")
     @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
+    @commands.is_owner()
     async def acset_soap_auth(self, ctx: commands.Context, user: Optional[str] = None, password: Optional[str] = None):
         """Set or clear SOAP basic auth credentials. Run with no args to clear."""
 
+        namespace = self._backend_namespace(ctx.guild.id)
         if not user:
-            await self.config.soap_user.clear()
-            await self.config.soap_pass.clear()
+            await self.bot.set_shared_api_tokens(namespace, soap_user="", soap_pass="")
             return await ctx.send("SOAP credentials cleared.")
 
-        await self.config.soap_user.set(user)
-        await self.config.soap_pass.set(password or "")
+        await self.bot.set_shared_api_tokens(namespace, soap_user=user, soap_pass=password or "")
         await self._try_delete_invocation(ctx)
         await ctx.send("SOAP credentials updated.")
 
@@ -1893,13 +2221,13 @@ class AzerothCore(commands.Cog):
         """Set or show the SOAP request timeout in seconds."""
 
         if seconds is None:
-            timeout = await self.config.request_timeout()
+            timeout = await self._backend_config().request_timeout()
             return await ctx.send(f"SOAP request timeout is currently {timeout} seconds.")
 
         if seconds < 3 or seconds > 120:
             return await ctx.send("Timeout must be between 3 and 120 seconds.")
 
-        await self.config.request_timeout.set(seconds)
+        await self._backend_config().request_timeout.set(seconds)
         await ctx.send(f"SOAP request timeout set to {seconds} seconds.")
 
     @acset.command(name="onlinecommand")
@@ -1909,13 +2237,13 @@ class AzerothCore(commands.Cog):
         """Set, show, or reset the SOAP command used by azerothcore online."""
 
         if command is None:
-            current = await self.config.soap_online_command_template()
+            current = await self._backend_config().soap_online_command_template()
             return await ctx.send(f"SOAP online command is currently `{current}`.")
         if command.lower() == "reset":
-            await self.config.soap_online_command_template.clear()
+            await self._backend_config().soap_online_command_template.clear()
             return await ctx.send(f"SOAP online command reset to `{DEFAULT_ONLINE_COMMAND}`.")
 
-        await self.config.soap_online_command_template.set(command)
+        await self._backend_config().soap_online_command_template.set(command)
         await ctx.send(f"SOAP online command set to `{command}`.")
 
     @acset.command(name="playerbotprefix", aliases=("playerbotprefixes",))
@@ -1931,13 +2259,13 @@ class AzerothCore(commands.Cog):
 
         action = prefixes[0].casefold()
         if len(prefixes) == 1 and action == "reset":
-            await self.config.playerbot_account_prefixes.set(DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES)
+            await self._backend_config().playerbot_account_prefixes.set(DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES)
             return await ctx.send(
                 "Playerbot account prefixes reset to "
                 f"{humanize_list([f'`{prefix}`' for prefix in DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES])}."
             )
         if len(prefixes) == 1 and action in {"clear", "disable", "off", "none"}:
-            await self.config.playerbot_account_prefixes.set([])
+            await self._backend_config().playerbot_account_prefixes.set([])
             return await ctx.send("Playerbot account prefix filtering disabled.")
 
         cleaned = []
@@ -1949,7 +2277,7 @@ class AzerothCore(commands.Cog):
         if not cleaned:
             return await ctx.send("You need to provide at least one non-empty prefix.")
 
-        await self.config.playerbot_account_prefixes.set(cleaned)
+        await self._backend_config().playerbot_account_prefixes.set(cleaned)
         await ctx.send(f"Playerbot account prefixes set to {humanize_list([f'`{prefix}`' for prefix in cleaned])}.")
 
     @acset.command(name="infocommand")
@@ -1959,13 +2287,13 @@ class AzerothCore(commands.Cog):
         """Set, show, or reset the SOAP command used by azerothcore info."""
 
         if command is None:
-            current = await self.config.soap_info_command_template()
+            current = await self._backend_config().soap_info_command_template()
             return await ctx.send(f"SOAP info command is currently `{current}`.")
         if command.lower() == "reset":
-            await self.config.soap_info_command_template.clear()
+            await self._backend_config().soap_info_command_template.clear()
             return await ctx.send("SOAP info command reset to `server info`.")
 
-        await self.config.soap_info_command_template.set(command)
+        await self._backend_config().soap_info_command_template.set(command)
         await ctx.send(f"SOAP info command set to `{command}`.")
 
     @acset.command(name="createcommand")
@@ -1975,15 +2303,15 @@ class AzerothCore(commands.Cog):
         """Set, show, or reset the SOAP command template used by azerothcore createuser."""
 
         if command is None:
-            current = await self.config.soap_create_command_template()
+            current = await self._backend_config().soap_create_command_template()
             return await ctx.send(f"SOAP create command is currently `{current}`.")
         if command.lower() == "reset":
-            await self.config.soap_create_command_template.clear()
+            await self._backend_config().soap_create_command_template.clear()
             return await ctx.send("SOAP create command reset to `account create {username} {password}`.")
         if "{username}" not in command or "{password}" not in command:
             return await ctx.send("Create command must include `{username}` and `{password}` placeholders.")
 
-        await self.config.soap_create_command_template.set(command)
+        await self._backend_config().soap_create_command_template.set(command)
         await ctx.send("SOAP create command updated.")
 
     @acset.command(name="view")
@@ -1992,25 +2320,28 @@ class AzerothCore(commands.Cog):
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_view(self, ctx: commands.Context):
         """Show the current bridge configuration."""
-        server_name = await self.config.server_name()
-        realmlist = await self.config.realmlist()
-        info_description = await self.config.info_description()
-        soap_url = await self.config.soap_url()
-        soap_user = await self.config.soap_user()
+        server_name = await self._backend_config().server_name()
+        realmlist = await self._backend_config().realmlist()
+        info_description = await self._backend_config().info_description()
+        soap_url = await self._backend_config().soap_url()
         soap_envelope = await self._configured_envelope_template()
-        soap_create = await self.config.soap_create_command_template()
-        soap_online = await self.config.soap_online_command_template()
+        soap_create = await self._backend_config().soap_create_command_template()
+        soap_online = await self._backend_config().soap_online_command_template()
         playerbot_prefixes = await self._configured_playerbot_prefixes()
-        request_timeout = await self.config.request_timeout()
+        request_timeout = await self._backend_config().request_timeout()
         allowed_roles = await self.config.guild(ctx.guild).allowed_roles()
         trusted_backend = await self.config.guild(ctx.guild).trusted_backend()
+        backend_enabled = await self.config.guild(ctx.guild).backend_enabled()
+        self_service_roles = await self.config.guild(ctx.guild).self_service_roles()
 
-        api_tokens = await self.bot.get_shared_api_tokens(TOKEN_NAMESPACE)
+        api_tokens = await self._backend_tokens()
+        soap_user = str(api_tokens.get("soap_user", "")).strip()
         api_configured = all(
             str(api_tokens.get(key, "")).strip()
             for key in ("base_url", "community_token")
         )
         embed = discord.Embed(title="AzerothCore Configuration", color=await ctx.embed_color())
+        embed.add_field(name="Backend Profile", value="Enabled" if backend_enabled else "Disabled", inline=True)
         embed.add_field(name="Account Management", value="Enabled" if trusted_backend else "Disabled", inline=True)
         embed.add_field(name="SOAP URL", value=self._redact_url(soap_url), inline=False)
         embed.add_field(name="SOAP Auth", value=("Set" if soap_user else "Not set"), inline=True)
@@ -2036,4 +2367,6 @@ class AzerothCore(commands.Cog):
                 role_mentions.append(role.mention)
 
         embed.add_field(name="Allowed Roles", value=humanize_list(role_mentions) if role_mentions else "None", inline=False)
+        self_service_mentions = [role.mention for role_id in self_service_roles if (role := ctx.guild.get_role(role_id))]
+        embed.add_field(name="Self-Service Roles", value=humanize_list(self_service_mentions) if self_service_mentions else "None", inline=False)
         await ctx.send(embed=embed)

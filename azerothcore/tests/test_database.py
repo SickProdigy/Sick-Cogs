@@ -1,6 +1,7 @@
 import unittest
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from azerothcore.azerothcore import AzerothCore
 from azerothcore.database import (
@@ -74,13 +75,142 @@ class AccountPermissionTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self,value):self.value=value
             async def __call__(self):return self.value
         class GuildConfig:
-            def __init__(self,trusted):self.trusted_backend=Value(trusted);self.allowed_roles=Value([])
+            def __init__(self,trusted,enabled=True):self.trusted_backend=Value(trusted);self.backend_enabled=Value(enabled);self.allowed_roles=Value([]);self.self_service_roles=Value([])
         guild=SimpleNamespace(owner_id=7);author=SimpleNamespace(id=7,guild_permissions=SimpleNamespace(administrator=False,manage_guild=False),roles=[])
         ctx=SimpleNamespace(guild=guild,author=author);cog=AzerothCore.__new__(AzerothCore)
         cog.config=SimpleNamespace(guild=lambda current:GuildConfig(False))
         self.assertFalse(await cog._can_create_accounts(ctx))
-        cog.config=SimpleNamespace(guild=lambda current:GuildConfig(True))
+        cog.config=SimpleNamespace(guild=lambda current:GuildConfig(True,False))
+        self.assertFalse(await cog._can_create_accounts(ctx))
+        cog.config=SimpleNamespace(guild=lambda current:GuildConfig(True,True))
         self.assertTrue(await cog._can_create_accounts(ctx))
+
+
+class BackendIsolationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_guild_token_namespace_never_uses_legacy_global_namespace(self):
+        calls=[]
+        async def get_tokens(namespace):calls.append(namespace);return {"base_url":"http://one","community_token":"x"}
+        cog=AzerothCore.__new__(AzerothCore);cog.bot=SimpleNamespace(get_shared_api_tokens=get_tokens)
+        cog._guild_context=__import__("contextvars").ContextVar("test_guild",default=None);cog._guild_context.set(123)
+        await cog._backend_tokens()
+        self.assertEqual(calls,["azerothcore_api_123"]);self.assertNotIn("azerothcore_api",calls)
+
+    async def test_self_service_role_is_separate_from_staff_role(self):
+        class Value:
+            def __init__(self,value):self.value=value
+            async def __call__(self):return self.value
+        config=SimpleNamespace(backend_enabled=Value(True),trusted_backend=Value(True),self_service_roles=Value([44]),allowed_roles=Value([]))
+        cog=AzerothCore.__new__(AzerothCore);cog.config=SimpleNamespace(guild=lambda guild:config)
+        ctx=SimpleNamespace(guild=SimpleNamespace(owner_id=99),author=SimpleNamespace(id=7,roles=[SimpleNamespace(id=44)],guild_permissions=SimpleNamespace(administrator=False,manage_guild=False)))
+        self.assertTrue(await cog._can_self_service(ctx));self.assertFalse(await cog._can_create_accounts(ctx))
+
+
+class MigrationTests(unittest.IsolatedAsyncioTestCase):
+    class Field:
+        def __init__(self,value):self.value=value
+        def __call__(self):return self
+        def __await__(self):
+            async def value():return self.value
+            return value().__await__()
+        async def set(self,value):self.value=value
+
+    async def test_legacy_migration_is_copy_first_and_idempotent(self):
+        names=("server_name","realmlist","info_description","use_soap","soap_url","soap_envelope_template","soap_create_command_template","soap_info_command_template","soap_online_command_template","playerbot_account_prefixes","request_timeout")
+        legacy={name:self.Field(f"legacy-{name}") for name in names};legacy["use_soap"]=self.Field(True);legacy["request_timeout"]=self.Field(20);legacy["soap_url"]=self.Field("http://url-user:url-pass@soap:7878/")
+        legacy["soap_user"]=self.Field(None);legacy["soap_pass"]=self.Field(None)
+        guild_fields={name:self.Field(None) for name in names};guild_fields.update(legacy_migrated=self.Field(False),backend_enabled=self.Field(False))
+        guild_config=SimpleNamespace(**guild_fields)
+        config=SimpleNamespace(**legacy,guild=lambda guild:guild_config)
+        token_writes=[]
+        async def get_tokens(namespace):return {"base_url":"http://legacy","community_token":"token","timeout":"10"}
+        async def set_tokens(namespace,**tokens):token_writes.append((namespace,tokens))
+        cog=AzerothCore.__new__(AzerothCore);cog.config=config;cog.bot=SimpleNamespace(get_shared_api_tokens=get_tokens,set_shared_api_tokens=set_tokens)
+        ctx=SimpleNamespace(guild=SimpleNamespace(id=55),send=AsyncMock())
+        await AzerothCore.acset_backend_migratelegacy.callback(cog,ctx,"confirm")
+        self.assertEqual(guild_config.soap_url.value,"http://soap:7878/");self.assertTrue(guild_config.legacy_migrated.value);self.assertTrue(guild_config.backend_enabled.value)
+        self.assertEqual(legacy["soap_url"].value,"http://url-user:url-pass@soap:7878/");self.assertEqual(token_writes[0][0],"azerothcore_api_55");self.assertEqual(token_writes[0][1]["soap_user"],"url-user");self.assertEqual(token_writes[0][1]["soap_pass"],"url-pass")
+        await AzerothCore.acset_backend_migratelegacy.callback(cog,ctx,"confirm")
+        self.assertEqual(len(token_writes),1)
+
+
+class AccountCreationTests(unittest.IsolatedAsyncioTestCase):
+    class Stored:
+        def __init__(self,value=None):self.value=value or {}
+        def __call__(self):return self
+        def __await__(self):
+            async def value():return self.value
+            return value().__await__()
+        async def __aenter__(self):return self.value
+        async def __aexit__(self,*args):return False
+
+    async def test_vip_creation_auto_links_only_after_soap_success(self):
+        cog=AzerothCore.__new__(AzerothCore);target=SimpleNamespace(id=7)
+        cog._trusted_account_guild=AsyncMock(return_value=True);cog._can_create_accounts=AsyncMock(return_value=False);cog._can_self_service=AsyncMock(return_value=True)
+        cog._parse_account_create_details=AsyncMock(return_value=(None,target,None));cog._linked_username=AsyncMock(return_value=None);cog._account_owner_id=AsyncMock(return_value=None)
+        cog._backend_config=lambda:SimpleNamespace(use_soap=AsyncMock(return_value=True),soap_create_command_template=AsyncMock(return_value="account create {username} {password}"))
+        cog._configured_soap_url=AsyncMock(return_value="http://soap:7878/");cog._dm_preflight=AsyncMock(return_value=True);cog._soap_execute=AsyncMock(return_value=("Account created",None))
+        cog._set_account_link=AsyncMock();cog._confirm_account_created=AsyncMock();attempts=self.Stored()
+        cog.config=SimpleNamespace(guild=lambda guild:SimpleNamespace(account_creation_timestamps=attempts))
+        ctx=SimpleNamespace(guild=object(),author=target,send=AsyncMock())
+        await AzerothCore.ac_createuser.callback(cog,ctx,"PLAYER_1")
+        cog._set_account_link.assert_awaited_once_with(ctx.guild,7,"PLAYER_1");cog._confirm_account_created.assert_awaited_once()
+        await AzerothCore.ac_createuser.callback(cog,ctx,"PLAYER_1")
+        self.assertEqual(cog._soap_execute.await_count,1)
+
+    async def test_user_deletion_removes_links_and_cooldowns_only(self):
+        fields=SimpleNamespace(account_links=self.Stored({"7":"PLAYER_1","8":"OTHER"}),account_creation_timestamps=self.Stored({"7":10}),password_reset_timestamps=self.Stored({"7":20}))
+        cog=AzerothCore.__new__(AzerothCore);cog.config=SimpleNamespace(all_guilds=AsyncMock(return_value={55:{}}),guild_from_id=lambda guild_id:fields)
+        await cog.red_delete_data_for_user(user_id=7)
+        self.assertEqual(fields.account_links.value,{"8":"OTHER"});self.assertEqual(fields.account_creation_timestamps.value,{});self.assertEqual(fields.password_reset_timestamps.value,{})
+
+    async def test_reverse_lookup_enforces_one_discord_owner_per_account(self):
+        links=self.Stored({"7":"PLAYER_1"});cog=AzerothCore.__new__(AzerothCore);cog.config=SimpleNamespace(guild=lambda guild:SimpleNamespace(account_links=links))
+        self.assertEqual(await cog._account_owner_id(object(),"player_1"),7)
+        await cog._set_account_link(object(),8,"mixed_name")
+        self.assertEqual(links.value["8"],"MIXED_NAME")
+
+
+class PasswordResetTests(unittest.IsolatedAsyncioTestCase):
+    class Stored:
+        def __init__(self,value=None):self.value=value or {}
+        def __call__(self):return self
+        def __await__(self):
+            async def value():return self.value
+            return value().__await__()
+        async def __aenter__(self):return self.value
+        async def __aexit__(self,*args):return False
+
+    def make_case(self,dm_ready):
+        cog=AzerothCore.__new__(AzerothCore)
+        cog._trusted_account_guild=AsyncMock(return_value=True)
+        cog._linked_username=AsyncMock(return_value="PLAYER_1")
+        cog._backend_config=lambda:SimpleNamespace(use_soap=AsyncMock(return_value=True))
+        cog._configured_soap_url=AsyncMock(return_value="http://soap:7878/")
+        cog._missing_soap_url_message=lambda ctx:"missing"
+        cog._dm_preflight=AsyncMock(return_value=dm_ready)
+        cog._soap_execute=AsyncMock(return_value=("Password changed",None))
+        stored=self.Stored();cog.config=SimpleNamespace(guild=lambda guild:SimpleNamespace(password_reset_timestamps=stored))
+        author=SimpleNamespace(id=7,send=AsyncMock());ctx=SimpleNamespace(guild=object(),author=author,send=AsyncMock())
+        return cog,ctx,stored
+
+    async def test_dm_preflight_failure_prevents_password_mutation(self):
+        cog,ctx,_=self.make_case(False)
+        await AzerothCore.ac_resetpassword.callback(cog,ctx)
+        cog._soap_execute.assert_not_awaited()
+
+    async def test_successful_password_reset_is_scoped_and_rate_limited(self):
+        cog,ctx,stored=self.make_case(True)
+        await AzerothCore.ac_resetpassword.callback(cog,ctx)
+        command=cog._soap_execute.await_args.args[0]
+        self.assertTrue(command.startswith("account set password PLAYER_1 "))
+        self.assertIn("7",stored.value);ctx.author.send.assert_awaited_once()
+        await AzerothCore.ac_resetpassword.callback(cog,ctx)
+        self.assertEqual(cog._soap_execute.await_count,1)
+
+    def test_account_names_reject_soap_command_characters(self):
+        self.assertTrue(AzerothCore._valid_account_name("PLAYER_1"))
+        self.assertFalse(AzerothCore._valid_account_name("PLAYER set gmlevel"))
+        self.assertFalse(AzerothCore._valid_account_name("PLAYER\naccount delete X"))
 
 
 class ApiClientTests(unittest.IsolatedAsyncioTestCase):
