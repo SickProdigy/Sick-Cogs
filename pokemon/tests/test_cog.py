@@ -783,15 +783,17 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     def test_daily_research_rewards_three_bounded_tasks_once(self):
         conf={"pokedex_stats":{},"pokedex_caught":[],"recorded_battles":[],"achievement_rewards":[],"balls":0,"items":{}}
-        cog=Pokemon.__new__(Pokemon)
+        cog=Pokemon.__new__(Pokemon);rewards=[]
         for encounter_id,state in ((101,"won"),(102,"won"),(103,"caught")):
             current=battle();current.encounter_id=encounter_id;current.state=state
-            cog.record_battle_result(conf,current)
+            rewards.extend(cog.record_battle_result(conf,current))
         self.assertEqual(conf["balls"],2)
         self.assertEqual(conf["items"]["potion"],2)
         self.assertEqual(conf["items"]["great_ball"],1)
         self.assertEqual(set(conf["daily_research"]["claimed"]),{"encounters","victories","catches"})
         self.assertEqual(cog.grant_daily_research(conf),[])
+        self.assertTrue(all(" — " not in reward for reward in rewards))
+        self.assertTrue(all(reward.startswith("Research - ") for reward in rewards))
 
     def test_daily_research_resets_with_new_utc_day_baseline(self):
         conf={"pokedex_stats":{"1":{"battled":4,"defeated":2,"caught":1}}}
