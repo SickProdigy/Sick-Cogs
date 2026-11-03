@@ -75,9 +75,8 @@ def gym_status_embed(user,conf,challenge_command="[p]poke gym challenge",leader_
     embed.description=badge_case(badges)+"\n"+names
     embed.add_field(name="Badges",value=f"{len(badges)}/{len(KANTO_GYMS)}",inline=True)
     if upcoming:
-        party=" ".join("\N{LARGE RED CIRCLE}" for _ in upcoming.team)
         if upcoming.key in COMPLETED_GYMS:
-            embed.add_field(name="Next challenge",value=f"{upcoming.leader} · {upcoming.city}\nPoke Balls: {party}",inline=True);embed.set_footer(text=f"Use {challenge_command} when your party is ready, or press Challenge {upcoming.leader} below.")
+            embed.add_field(name="Next challenge",value=f"{upcoming.leader} · {upcoming.city}",inline=True);embed.set_footer(text=f"Use {challenge_command} when your party is ready, or press Challenge {upcoming.leader} below.")
         else:
             embed.add_field(name="Next challenge · Locked",value=f"{upcoming.leader} · {upcoming.city}\nThis Gym is still under development.",inline=True);embed.set_footer(text="Only completed Gym Leader battles can be challenged.")
     else:
