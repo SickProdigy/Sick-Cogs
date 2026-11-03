@@ -351,7 +351,7 @@ class GymProgressionTests(unittest.TestCase):
         self.assertIn("Misty",profile.footer.text);self.assertNotIn("Locked",profile.footer.text)
         self.assertEqual(badge_case(["boulder"]).count("◻️"),7)
         status=gym_status_embed(user,conf,"!poke gym challenge","attachment://gym-leader-misty.png")
-        self.assertIn("Misty",status.fields[1].value);self.assertIn("Poke Balls: \N{LARGE RED CIRCLE} \N{LARGE RED CIRCLE}",status.fields[1].value);self.assertNotIn("Staryu",status.fields[1].value);self.assertNotIn("Starmie",status.fields[1].value);self.assertIn("!poke gym challenge",status.footer.text)
+        self.assertEqual(status.fields[1].value,"Misty · Cerulean City");self.assertNotIn("Poke Balls",status.fields[1].value);self.assertNotIn("Staryu",status.fields[1].value);self.assertNotIn("Starmie",status.fields[1].value);self.assertIn("!poke gym challenge",status.footer.text)
         self.assertEqual(status.thumbnail.url,"attachment://gym-leader-misty.png")
         locked=gym_status_embed(user,{**conf,"badges":["boulder","cascade"]},"!poke gym challenge")
         self.assertIn("Lt. Surge",locked.fields[1].value);self.assertIn("under development",locked.fields[1].value)
