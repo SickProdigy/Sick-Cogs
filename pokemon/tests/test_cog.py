@@ -349,6 +349,8 @@ class GymProgressionTests(unittest.TestCase):
         self.assertIn("SickProdigy",profile.title)
         self.assertIn("1/8",profile.fields[0].name)
         self.assertIn("Misty",profile.footer.text);self.assertNotIn("Locked",profile.footer.text)
+        self.assertEqual([field.name for field in profile.fields],["Badge Case · 1/8","Pokedex","Collection","Partner"])
+        self.assertFalse(profile.fields[1].inline);self.assertFalse(profile.fields[2].inline)
         self.assertEqual(badge_case(["boulder"]).count("◻️"),7)
         status=gym_status_embed(user,conf,"!poke gym challenge","attachment://gym-leader-misty.png")
         self.assertEqual(status.fields[1].value,"Misty · Cerulean City");self.assertNotIn("Poke Balls",status.fields[1].value);self.assertNotIn("Staryu",status.fields[1].value);self.assertNotIn("Starmie",status.fields[1].value);self.assertIn("!poke gym challenge",status.footer.text)
