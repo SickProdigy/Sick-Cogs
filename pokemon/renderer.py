@@ -342,11 +342,20 @@ class BattleRenderer:
         draw.ellipse((cx-inner,cy-inner,cx+inner,cy+inner),fill=RETRO[5] if not dimmed else shell,outline=RETRO[1] if not dimmed else band,width=2)
 
     @staticmethod
-    def _gym_party_markers(draw,battle):
-        total=min(6,max(0,int(battle.opponent_total)))
-        defeated=min(total,max(0,int(battle.opponent_index)))
-        for index in range(total):
-            BattleRenderer._pokeball(draw,(400+43*index,49),13,dimmed=index<defeated)
+    def _party_markers(draw,states,origin):
+        x,y=origin
+        for index,conscious in enumerate(list(states)[:6]):
+            BattleRenderer._pokeball(draw,(x+34*index,y),10,dimmed=not conscious)
+
+    @staticmethod
+    def _battle_party_markers(draw,battle):
+        player_states=[]
+        for pokemon in battle.party[:6]:
+            hp=battle.player_hp if pokemon.instance_id==battle.player.instance_id else battle.party_hp.get(pokemon.instance_id,0)
+            player_states.append(int(hp)>0)
+        BattleRenderer._party_markers(draw,player_states,(450,374))
+        if battle.battle_kind=="gym":
+            BattleRenderer._party_markers(draw,(index>=battle.opponent_index for index in range(battle.opponent_total)),(60,140))
 
     def _starter_sync(self,pokemon,data,trainer_name,choice_species_id=None):
         canvas=Image.new("RGB",(800,450),(224,227,222));draw=ImageDraw.Draw(canvas)
@@ -859,8 +868,6 @@ class BattleRenderer:
         front = self._retro(self._open(front_data,(210,185),trim=True,upscale=True))
         back = self._retro(self._open(back_data,(250,220),trim=True,upscale=True))
         leader=self._gym_leader_sprite(battle.gym_key,(62,72)) if battle.battle_kind=="gym" else None
-        if battle.battle_kind=="gym":
-            self._gym_party_markers(draw,battle)
         if leader:
             draw.ellipse((682,18,772,108),fill=RETRO[5],outline=RETRO[0],width=5)
             canvas.paste(leader,(727-leader.width//2,100-leader.height),leader)
@@ -870,6 +877,7 @@ class BattleRenderer:
         player = SPECIES[battle.player.species_id]
         self._status_box(draw,(40,35),wild.name,battle.wild_level,battle.wild_hp,battle.wild_max_hp,battle.wild_status,battle.wild_gender)
         self._status_box(draw,(430,270),player.name,battle.player.level,battle.player_hp,battle.max_hp(battle.player),battle.player_status,battle.player.gender)
+        self._battle_party_markers(draw,battle)
         draw.rectangle((0, 390, 800, 450), fill=RETRO[5], outline=RETRO[0], width=5)
         text = battle.result or battle.last_action or f"What will {player.name} do?"
         self._dialogue(draw,text,(20,400))

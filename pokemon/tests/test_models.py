@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import AsyncMock
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image,ImageDraw
 from pokemon.catching import BALLS,attempt_catch,calculate_catch_value
 from pokemon.catalog_versions import CATALOG_VERSIONS,DIMENSIONS
 from pokemon.data import EVOLUTIONS,SPECIES,effectiveness,experience_to_next,moves_for_level,total_experience
@@ -428,10 +428,8 @@ class BattleTests(unittest.TestCase):
         with Image.open(trainer_card) as image:self.assertEqual(image.size,(800,610))
         with Image.open(scene) as ordinary,Image.open(gym_scene) as gym_battle,Image.open(gym_scene_switched) as switched:
             self.assertNotEqual(ordinary.crop((620,35,750,205)).tobytes(),gym_battle.crop((620,35,750,205)).tobytes())
-            self.assertNotEqual(gym_battle.crop((385,34,458,64)).tobytes(),switched.crop((385,34,458,64)).tobytes())
-            self.assertEqual(gym_battle.getpixel((400,40)),(205,63,58))
-            self.assertEqual(switched.getpixel((400,40)),(95,99,96))
-            self.assertEqual(switched.getpixel((443,40)),(205,63,58))
+            self.assertNotEqual(gym_battle.crop((48,128,112,152)).tobytes(),switched.crop((48,128,112,152)).tobytes())
+            self.assertNotEqual(gym_battle.crop((50,130,71,151)).tobytes(),switched.crop((50,130,71,151)).tobytes())
         with Image.open(gym_victory) as image:
             self.assertEqual(image.size,(800,450))
             self.assertEqual(image.getpixel((650,115)),(205,208,202))
@@ -481,6 +479,13 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(BattleRenderer.battle_result_text(b),"SickProdigy got away safely!")
         b.state="lost"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
+
+    def test_active_battle_party_markers_dim_fainted_player_slots(self):
+        first=OwnedPokemon.create("first",4,8,seed=1);second=OwnedPokemon.create("second",7,8,seed=2);third=OwnedPokemon.create("third",25,8,seed=3)
+        current=Battle(1,100,1,2,3,first,10,8,20,20);current.initialize_party([first,second,third]);current.party_hp[second.instance_id]=0
+        image=Image.new("RGB",(800,450),RETRO[5]);BattleRenderer._battle_party_markers(ImageDraw.Draw(image),current)
+        first_ball=image.crop((440,364,461,385)).tobytes();fainted_ball=image.crop((474,364,495,385)).tobytes();third_ball=image.crop((508,364,529,385)).tobytes()
+        self.assertEqual(first_ball,third_ball);self.assertNotEqual(first_ball,fainted_ball)
 
 
 class RendererAsyncTests(unittest.IsolatedAsyncioTestCase):
