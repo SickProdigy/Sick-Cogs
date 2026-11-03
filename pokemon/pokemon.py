@@ -333,7 +333,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.22";__author__="SickProdigy"
+    __version__="1.4.23";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1165,7 +1165,7 @@ class Pokemon(commands.Cog):
         for key,target,reward,label in DAILY_RESEARCH_TASKS:
             progress=max(0,totals[key]-int(baseline.get(key,0)))
             if progress<target or key in claimed:continue
-            claimed.add(key);awarded.append(f"Research — {label}: "+", ".join(grant_supply_items(conf,reward)))
+            claimed.add(key);awarded.append(f"Research - {label}: "+", ".join(grant_supply_items(conf,reward)))
         state["claimed"]=sorted(claimed);conf["daily_research"]=state
         return awarded
 
