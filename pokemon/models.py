@@ -194,6 +194,7 @@ class Battle:
     opponent_party: list = field(default_factory=list)
     opponent_index: int = 0
     opponents_defeated: list = field(default_factory=list)
+    victory_player_id: str = ""
 
     def __post_init__(self):
         if not self.party:
@@ -281,6 +282,10 @@ class Battle:
                 self.switch_to((start + offset) % len(self.party))
                 return
         raise BattleError("No conscious party Pokemon remain.")
+
+    def victory_player(self):
+        identity=self.victory_player_id or self.player.instance_id
+        return next((pokemon for pokemon in self.party if pokemon.instance_id==identity),self.player)
 
     def rng(self):
         self.rolls += 1
@@ -599,6 +604,7 @@ class Battle:
                     self.result=f"{defeated_name} fainted."+detail+f" Gym Leader sent out {SPECIES[self.wild_species_id].name}!"
                     return
             self.state = "won"
+            self.victory_player_id=self.player.instance_id
             self.result=f"{defeated_name} fainted."+detail
         elif self.player_hp == 0:
             self.party_hp[self.player.instance_id]=0
@@ -737,6 +743,7 @@ class Battle:
         data.setdefault("opponent_party",[])
         data.setdefault("opponent_index",0)
         data.setdefault("opponents_defeated",[])
+        data.setdefault("victory_player_id",data["player"].instance_id if data.get("state")=="won" else "")
         battle=cls(**data)
         if not battle.party:battle.party=[battle.player]
         return battle

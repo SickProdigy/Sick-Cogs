@@ -333,7 +333,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.9";__author__="SickProdigy"
+    __version__="1.4.10";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -847,8 +847,9 @@ class Pokemon(commands.Cog):
             raw.pop("message_sync_pending",None);encounters[str(eid)]=raw;await self.config.encounters.set(encounters)
     @staticmethod
     def battle_attachment_name(battle):
+        player=battle.victory_player() if battle.state=="won" else battle.player
         return (f"battle-{int(battle.encounter_id)}-{int(battle.action_count)}-{battle.state}-"
-                f"{int(battle.player.species_id)}-{int(battle.wild_species_id)}.png")
+                f"{int(player.species_id)}-{int(battle.wild_species_id)}.png")
 
     async def rendered_battle(self,battle):
         embed=self.battle_embed(battle);avatar_data=None
@@ -1063,7 +1064,7 @@ class Pokemon(commands.Cog):
     @staticmethod
     def move_label(key):return MOVES[key].name[:80]
     def battle_embed(self,b):
-        player=SPECIES[b.player.species_id];wild=SPECIES[b.wild_species_id];wild_name=("Shiny " if b.wild_shiny else "")+wild.name
+        active=b.victory_player() if b.state=="won" else b.player;player=SPECIES[active.species_id];wild=SPECIES[b.wild_species_id];wild_name=("Shiny " if b.wild_shiny else "")+wild.name
         gym=GYMS.get(b.gym_key) if b.battle_kind=="gym" else None
         if b.state!="active":
             trainer=" ".join(str(b.trainer_name or "Trainer").split())[:24] or "Trainer"
@@ -1076,9 +1077,10 @@ class Pokemon(commands.Cog):
             if b.state in {"ran","lost"}:return e
             e.set_thumbnail(url=sprite(wild.id,shiny=b.wild_shiny))
             if b.state=="caught":e.add_field(name="Caught Pokemon",value=f"{wild_name} · Lv. {b.wild_level}\nCaught: **{max(1,int(b.caught_count))}**",inline=True)
-            e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
-            needed=experience_to_next(b.player.species_id,b.player.level)
-            e.add_field(name="Experience",value="MAX" if not needed else f"{b.player.experience}/{needed} XP",inline=True)
+            active_hp=b.player_hp if active.instance_id==b.player.instance_id else int(b.party_hp.get(active.instance_id,b.max_hp(active)))
+            e.add_field(name=f"{player.name} HP",value=f"{active_hp}/{b.max_hp(active)}",inline=True)
+            needed=experience_to_next(active.species_id,active.level)
+            e.add_field(name="Experience",value="MAX" if not needed else f"{active.experience}/{needed} XP",inline=True)
             return e
         title=f"Gym Leader {gym.leader} · {wild.name} Lv. {b.wild_level} · Pokemon {b.opponent_index+1}/{b.opponent_total}" if gym else f"Wild {wild_name} · Lv. {b.wild_level}"
         e=discord.Embed(title=title,description=b.result or b.last_action or f"Turn {b.turn}",color=discord.Color.gold() if gym else discord.Color.blurple())

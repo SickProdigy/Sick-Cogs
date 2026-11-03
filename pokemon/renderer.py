@@ -260,11 +260,10 @@ class BattleRenderer:
         if battle.state!="active":
             participant_sprites=None
             if battle.state=="won" and battle.gym_key:
-                result_sprite=await self.get_sprite(battle.player.species_id,shiny=battle.player.shiny)
+                winner=battle.victory_player();result_sprite=await self.get_sprite(winner.species_id,shiny=winner.shiny)
             elif battle.state=="won":
                 result_sprite=await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
-                used=[item for item in battle.party if item.instance_id in set(battle.participants)][:6]
-                participant_sprites=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in used))
+                winner=battle.victory_player();participant_sprites=[await self.get_sprite(winner.species_id,shiny=winner.shiny)]
             else:
                 result_sprite=await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
             ball_sprite=None
@@ -636,7 +635,7 @@ class BattleRenderer:
             gray=ImageOps.autocontrast(ImageOps.grayscale(defeated),mask=alpha);defeated=ImageOps.colorize(gray,(35,42,25),(242,235,188)).convert("RGBA");defeated.putalpha(alpha)
             canvas.paste(defeated,(590-defeated.width//2,195-defeated.height),defeated)
             draw.ellipse((45,215,405,330),fill=(169,188,132),outline=RETRO[0],width=4)
-            used=[item for item in battle.party if item.instance_id in set(battle.participants)][:6]
+            used=[battle.victory_player()]
             sprites=list(participant_data or [data])[:len(used)]
             layouts={1:[(225,292)],2:[(170,292),(280,292)],3:[(225,250),(150,300),(300,300)],4:[(170,250),(280,250),(155,302),(295,302)],5:[(170,245),(280,245),(120,302),(225,312),(330,302)],6:[(130,245),(225,235),(320,245),(120,302),(225,312),(330,302)]}
             for raw,(x,bottom) in zip(sprites,layouts.get(len(sprites),[])):

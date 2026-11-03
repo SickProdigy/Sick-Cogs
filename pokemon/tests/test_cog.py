@@ -441,6 +441,14 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(files[0].filename,filename)
         cog.renderer.battle.assert_awaited_once_with(current,avatar_data=None)
 
+    async def test_victory_embed_attachment_and_renderer_use_the_same_switched_winner(self):
+        first=OwnedPokemon.create("first",4,20,seed=1);second=OwnedPokemon.create("second",7,20,seed=2);current=Battle(89,100,1,2,3,first,125,30,1,20,seed=9,trainer_name="SickProdigy")
+        current.initialize_party([first,second]);current.player_hp=0;current._finish_if_needed();current.switch_to(1);current.wild_hp=0;current._finish_if_needed()
+        cog=Pokemon.__new__(Pokemon);cog.bot=SimpleNamespace(get_user=lambda _user_id:None);cog.renderer=SimpleNamespace(battle=AsyncMock(return_value=io.BytesIO(b"image")))
+        embed,files=await cog.rendered_battle(current);filename=f"battle-89-{current.action_count}-won-7-125.png"
+        self.assertEqual(embed.fields[0].name,"Squirtle HP");self.assertEqual(embed.image.url,f"attachment://{filename}");self.assertEqual(files[0].filename,filename)
+        self.assertEqual(current.victory_player_id,"second");cog.renderer.battle.assert_awaited_once_with(current,avatar_data=None)
+
     async def test_pokedex_registration_names_the_trainer(self):
         pokemon=OwnedPokemon.create("registration",39,3,seed=2)
         cog=Pokemon.__new__(Pokemon);cog.renderer=SimpleNamespace(pokedex_registration=AsyncMock(return_value=io.BytesIO(b"png")))
