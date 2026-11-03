@@ -503,12 +503,15 @@ class BattleTests(unittest.TestCase):
 
 
 class RendererAsyncTests(unittest.IsolatedAsyncioTestCase):
-    async def test_victory_result_fetches_defeated_opponent_and_actual_winner_sprite(self):
-        renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();second=OwnedPokemon.create("second",7,5,seed=2);third=OwnedPokemon.create("third",25,5,seed=3);current.initialize_party([current.player,second,third]);current.player=third;current.victory_player_id=third.instance_id;current.state="won"
-        renderer.get_sprite=AsyncMock(side_effect=[b"wild",b"third"]);renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
+    async def test_victory_result_fetches_defeated_opponent_and_up_to_six_participants(self):
+        renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();party=[current.player]+[OwnedPokemon.create(f"party-{index}",species,5,seed=index) for index,species in enumerate((7,25,39,52,54),start=2)];current.initialize_party(party)
+        for index in range(1,6):current.switch_to(index)
+        current.victory_player_id=party[-1].instance_id;current.state="won"
+        renderer.get_sprite=AsyncMock(side_effect=[b"wild"]+[f"party-{index}".encode() for index in range(6)]);renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
         await renderer.battle(current)
-        self.assertEqual([call.args[0] for call in renderer.get_sprite.await_args_list],[current.wild_species_id,third.species_id])
-        self.assertEqual(renderer._render.await_args.args[-1],[b"third"])
+        self.assertEqual([call.args[0] for call in renderer.get_sprite.await_args_list],[current.wild_species_id]+[item.species_id for item in party])
+        self.assertEqual(renderer._render.await_args.args[-1],[f"party-{index}".encode() for index in range(6)])
+        self.assertEqual(current.victory_player().instance_id,party[-1].instance_id)
 
     async def test_gym_victory_fetches_every_participating_party_sprite(self):
         renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();second=OwnedPokemon.create("second",7,5,seed=2);third=OwnedPokemon.create("third",25,5,seed=3);current.initialize_party([current.player,second,third]);current.switch_to(1);current.state="won";current.gym_key="boulder"
