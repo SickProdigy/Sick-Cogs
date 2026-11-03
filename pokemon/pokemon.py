@@ -333,7 +333,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.19";__author__="SickProdigy"
+    __version__="1.4.20";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -981,6 +981,8 @@ class Pokemon(commands.Cog):
             for slot,item in enumerate(party,1):
                 maximum=pokemon_max_hp(item);current=maximum if item.current_hp is None else item.current_hp;lines.append(f"{slot}. {item.nickname or SPECIES[item.species_id].name} · Lv. {item.level} · HP {current}/{maximum}")
             trainer=getattr(user,"display_name","Trainer");embed=discord.Embed(title=f"{trainer}’s Party",description="\n".join(lines) or "Empty",color=discord.Color.gold())
+            avatar=getattr(getattr(user,"display_avatar",None),"url",None)
+            if avatar:embed.set_thumbnail(url=avatar)
             try:image=await self.renderer.party_card(party,trainer);embed.set_image(url="attachment://party.png");files=[discord.File(image,filename="party.png")]
             except RenderError:files=[]
             await interaction.response.send_message(embed=embed,files=files,ephemeral=True);return
@@ -1766,6 +1768,8 @@ class Pokemon(commands.Cog):
             lines.append(f"{slot}. {name} · Lv. {item.level} · HP {current}/{maximum}")
         trainer=getattr(ctx.author,"display_name",getattr(ctx.author,"name",str(ctx.author)))
         embed=discord.Embed(title=f"{trainer}'s Party",description="\n".join(lines) or "Empty",color=discord.Color.gold())
+        avatar=getattr(getattr(ctx.author,"display_avatar",None),"url",None)
+        if avatar:embed.set_thumbnail(url=avatar)
         try:
             image=await self.renderer.party_card(party,trainer);embed.set_image(url="attachment://party.png");files=[discord.File(image,filename="party.png")]
         except RenderError:
