@@ -333,7 +333,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.26";__author__="SickProdigy"
+    __version__="1.4.27";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -2194,23 +2194,53 @@ class Pokemon(commands.Cog):
         """Configure bot-wide Pokemon policy and owner overrides."""
         await ctx.send_help()
 
+    async def _preview_card(self,ctx,scene,species_name=None):
+        conf=await self.config.user(ctx.author).all();owned=[OwnedPokemon.from_raw(raw) for raw in conf.get("collection",[])]
+        if not owned:
+            await ctx.send("Choose a starter or catch a Pokemon before previewing cards.");return
+        wanted=(species_name or "").strip().casefold();matches=[pokemon for pokemon in owned if not wanted or SPECIES[pokemon.species_id].name.casefold()==wanted or (pokemon.nickname or "").casefold()==wanted]
+        if wanted and not matches:
+            await ctx.send("That Pokemon is not in your collection. Use an owned Pokemon species name or nickname.");return
+        pokemon=matches[0] if matches else owned[0];scene=str(scene or "").casefold().replace("_","").replace("-","")
+        caught_ids={int(value) for value in conf.get("pokedex_caught",[]) if str(value).isdigit() and int(value) in SPECIES}
+        if scene in {"registration","pokedex"}:
+            embed,files=await self.rendered_pokedex_registration(pokemon,ctx.author.display_name,len(caught_ids),len(SPECIES))
+        else:
+            collection={item.instance_id:item for item in owned};party=[OwnedPokemon.from_raw(collection[key].raw()) for key in conf.get("party",[]) if key in collection] or [OwnedPokemon.from_raw(pokemon.raw())]
+            if scene in {"center","centertreating","centercomplete","healed"}:
+                if scene in {"centercomplete","healed"}:
+                    for item in party:item.current_hp=pokemon_max_hp(item);item.status="";item.status_turns=0
+                elif party:
+                    party[0].current_hp=max(0,pokemon_max_hp(party[0])//3);party[0].status="poison"
+                embed,files=await self.rendered_center(ctx.author,party,complete=scene in {"centercomplete","healed"})
+            else:
+                gym_key=scene if scene in COMPLETED_GYMS else "";wild_id=GYMS[gym_key].species_id if gym_key else pokemon.species_id;wild_level=GYMS[gym_key].level if gym_key else pokemon.level
+                battle=Battle(0,ctx.author.id,ctx.guild.id,ctx.channel.id,0,party[0],wild_id,wild_level,pokemon_max_hp(party[0]),max(1,SPECIES[wild_id].hp+wild_level*2),seed=1,battle_kind="gym" if gym_key else "wild",gym_key=gym_key,trainer_name=ctx.author.display_name)
+                battle.initialize_party(party);battle.participants=[item.instance_id for item in party]
+                if gym_key:
+                    battle.initialize_opponents(GYMS[gym_key].team);battle.state="won";battle.wild_hp=0;battle.victory_player_id=battle.player.instance_id;battle.result=f"Gym Leader {GYMS[gym_key].leader} was defeated. Earned the {GYMS[gym_key].badge}!"
+                elif scene in {"caught","catch"}:
+                    battle.state="caught";battle.last_ball="ultra_ball";battle.caught_count=1;battle.result=f"Gotcha! {SPECIES[wild_id].name} was caught!"
+                elif scene in {"victory","win"}:
+                    battle.state="won";battle.wild_hp=0;battle.victory_player_id=battle.player.instance_id;battle.result=f"{ctx.author.display_name} defeated {SPECIES[wild_id].name}!"
+                elif scene in {"escape","forcedescape","roar"}:
+                    battle.state="ran";battle.escape_reason="move:Roar";battle.result=f"{SPECIES[wild_id].name} used Roar. {SPECIES[wild_id].name} escaped!"
+                else:
+                    await ctx.send("Choose: registration, caught, victory, escape, boulder, cascade, center, or centercomplete.");return
+                embed,files=await self.rendered_battle(battle)
+        embed.set_footer(text="Owner preview only - no Pokemon progress was changed.");await ctx.send(embed=embed,files=files)
+
+    @pokemon_owner_set.command(name="previewcard",aliases=["preview"])
+    async def preview_card(self,ctx,scene:str=None,*,species_name:str=None):
+        """Preview production Pokemon cards without changing game progress."""
+        if not scene:
+            await ctx.send("Choose: registration, caught, victory, escape, boulder, cascade, center, or centercomplete.");return
+        await self._preview_card(ctx,scene,species_name)
+
     @pokemon_owner_set.command(name="previewregistration")
     async def preview_registration(self,ctx,*,species_name:str=None):
         """Preview a real Pokedex registration card without changing progress."""
-        conf=await self.config.user(ctx.author).all();owned=[OwnedPokemon.from_raw(raw) for raw in conf.get("collection",[])]
-        if not owned:
-            await ctx.send("Choose a starter or catch a Pokemon before previewing a registration card.");return
-        if species_name:
-            wanted=species_name.strip().casefold();matches=[pokemon for pokemon in owned if (pokemon.nickname or SPECIES[pokemon.species_id].name).casefold()==wanted]
-            if not matches:
-                await ctx.send("That Pokemon is not in your collection. Use an owned Pokemon's species name or nickname.");return
-            pokemon=matches[0]
-        else:
-            pokemon=owned[0]
-        caught_ids={int(value) for value in conf.get("pokedex_caught",[]) if str(value).isdigit() and int(value) in SPECIES}
-        embed,files=await self.rendered_pokedex_registration(pokemon,ctx.author.display_name,len(caught_ids),len(SPECIES))
-        embed.set_footer(text="Preview only - no Pokedex progress was changed.")
-        await ctx.send(embed=embed,files=files)
+        await self._preview_card(ctx,"registration",species_name)
 
     @commands.group(name="pokemonset",aliases=["pokeset","pkmnset"],invoke_without_command=True)
     @commands.guild_only()
