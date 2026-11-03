@@ -262,6 +262,18 @@ class AzerothCore(commands.Cog):
 
         return "".join(root.itertext()).strip()
 
+    @staticmethod
+    def _friendly_account_create_error(error: str) -> Optional[str]:
+        lowered = " ".join(str(error or "").casefold().split())
+        if "account" in lowered and "already" in lowered and (
+            "exist" in lowered or "used" in lowered
+        ):
+            return (
+                "That AzerothCore account name is already in use. Choose a different username. "
+                "Existing accounts are not automatically linked to Discord."
+            )
+        return None
+
     async def _soap_execute(self, command: str) -> Tuple[Optional[str], Optional[str]]:
         """Execute a SOAP envelope against the configured SOAP endpoint and return the inner text."""
         use_soap = await self.config.use_soap()
@@ -1575,7 +1587,7 @@ class AzerothCore(commands.Cog):
         cmd = self._render_template(template, username=username, password=password, email=email or "")
         out, error = await self._soap_execute(cmd)
         if error:
-            return await ctx.send(error)
+            return await ctx.send(self._friendly_account_create_error(error) or error)
 
         lower_out = (out or "").lower()
         if ("created" in lower_out or "success" in lower_out) and "already" not in lower_out:

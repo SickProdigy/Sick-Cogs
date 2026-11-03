@@ -56,6 +56,12 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(DatabaseConfigurationError, "between 3 and 60"):
             ApiSettings.from_tokens({**BASE_TOKENS, "timeout": "90"})
 
+    def test_duplicate_account_fault_is_user_friendly(self):
+        error="SOAP request failed with HTTP 500: SOAP-ENV:Client: Account with this name already exist!"
+        message=AzerothCore._friendly_account_create_error(error)
+        self.assertIn("already in use",message);self.assertNotIn("SOAP",message);self.assertNotIn("HTTP 500",message)
+        self.assertIsNone(AzerothCore._friendly_account_create_error("SOAP connection timed out"))
+
 
 class ApiClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_character_name_is_path_encoded(self):
