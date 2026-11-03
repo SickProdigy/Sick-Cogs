@@ -16,7 +16,7 @@ from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
 from pokemon.pokemon import BIOMES, GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, biome_weight, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeLobbyView, TradeCollectionView, GymChallengeView
+from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, FieldBagView, FieldMedicineView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeLobbyView, TradeCollectionView, GymChallengeView
 
 
 class StoredValue:
@@ -641,10 +641,20 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_bag_command_uses_trainer_name(self):
         section=StoredSection({"balls":8,"items":{"great_ball":6,"ultra_ball":1,"potion":10,"revive":2}})
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section);cog.renderer=SimpleNamespace(bag_card=AsyncMock(return_value=io.BytesIO(b"card")))
-        ctx=SimpleNamespace(author=SimpleNamespace(display_name="SickProdigy"),send=AsyncMock())
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42,display_name="SickProdigy"),send=AsyncMock())
         await Pokemon.pokemon_bag.callback(cog,ctx)
         sent=ctx.send.await_args.kwargs;self.assertEqual(sent["embed"].title,"SickProdigy’s Poke Bag");self.assertIsNone(sent["embed"].description);self.assertEqual(len(sent["files"]),1)
+        self.assertIsInstance(sent["view"],FieldBagView);self.assertEqual([item.label for item in sent["view"].children],["Potion x10","Revive x2"])
         items,trainer=cog.renderer.bag_card.await_args.args;self.assertEqual(trainer,"SickProdigy");self.assertIn(("great_ball","Great Ball",6),items);self.assertIn(("moon_stone","Moon Stone",0),items)
+
+    def test_field_medicine_targets_only_eligible_party_pokemon(self):
+        healthy=OwnedPokemon.create("healthy",4,5,seed=1);hurt=OwnedPokemon.create("hurt",7,6,seed=2);fainted=OwnedPokemon.create("fainted",25,7,seed=3);boxed=OwnedPokemon.create("boxed",1,8,seed=4)
+        hurt.current_hp=1;fainted.current_hp=0;boxed.current_hp=1
+        conf={"collection":[healthy.raw(),hurt.raw(),fainted.raw(),boxed.raw()],"party":["healthy","hurt","fainted"]}
+        self.assertEqual([item[1] for item in Pokemon.field_medicine_targets(conf,"potion")],["hurt"])
+        self.assertEqual([item[1] for item in Pokemon.field_medicine_targets(conf,"revive")],["fainted"])
+        view=FieldMedicineView(SimpleNamespace(),42,"potion",Pokemon.field_medicine_targets(conf,"potion"))
+        selector=next(item for item in view.children if isinstance(item,discord.ui.Select));self.assertEqual(selector.options[0].label,"2. Squirtle · Lv.6")
 
     async def test_owner_reset_requires_confirmation_and_releases_battle(self):
         section=StoredSection({"collection":[{"instance_id":"starter"}],"starter_chosen":True})
@@ -772,7 +782,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         pokemon=OwnedPokemon.create("medicine",7,10,seed=4)
         maximum=Battle.stat(pokemon,"hp");pokemon.current_hp=1
         section=StoredSection({"collection":[pokemon.raw()],"party":["medicine"],"items":{"potion":1,"revive":1}})
-        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(user=lambda user:section)
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(user=lambda user:section)
         ctx=SimpleNamespace(author=SimpleNamespace(id=42),send=AsyncMock())
         await Pokemon.use_potion.callback(cog,ctx,"1")
         restored=OwnedPokemon.from_raw(section.value["collection"][0])
@@ -783,6 +793,12 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         revived=OwnedPokemon.from_raw(section.value["collection"][0])
         self.assertEqual(revived.current_hp,max(1,maximum//2))
         self.assertEqual(section.value["items"]["revive"],0)
+
+    async def test_field_medicine_is_blocked_during_active_battle(self):
+        pokemon=OwnedPokemon.create("medicine",7,10,seed=4);pokemon.current_hp=1;section=StoredSection({"collection":[pokemon.raw()],"party":["medicine"],"items":{"potion":1}})
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={1:SimpleNamespace(user_id=42,state="active")};cog.config=SimpleNamespace(user=lambda user:section)
+        success,message=await cog.apply_field_medicine(SimpleNamespace(id=42),"potion","medicine")
+        self.assertFalse(success);self.assertIn("active battle",message);self.assertEqual(section.value["items"]["potion"],1)
 
     def test_legacy_underleveled_evolution_move_repair_is_targeted(self):
         rapidash=OwnedPokemon.create("rapidash",78,40,seed=4);rapidash.level=3;rapidash.moves=("stomp","tail_whip","growl","ember");rapidash.move_pp={key:1 for key in rapidash.moves}
