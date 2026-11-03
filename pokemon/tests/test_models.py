@@ -361,6 +361,15 @@ class BattleTests(unittest.TestCase):
         self.assertGreater(b.player_hp,0)
         self.assertEqual(b.turn,turn)
         self.assertEqual(b.last_action,"Go, Squirtle!")
+
+    def test_victory_records_second_and_third_slot_winners(self):
+        for winning_slot in (1,2):
+            with self.subTest(winning_slot=winning_slot+1):
+                party=[OwnedPokemon.create(f"slot-{index}",species,8,seed=index+10) for index,species in enumerate((4,7,25))]
+                b=Battle(20+winning_slot,100,1,2,3,party[0],10,8,1,20,seed=5);b.initialize_party(party)
+                b.player_hp=0;b._finish_if_needed();b.switch_to(winning_slot);b.wild_hp=0;b._finish_if_needed()
+                self.assertEqual((b.state,b.player.instance_id,b.victory_player_id),("won",party[winning_slot].instance_id,party[winning_slot].instance_id))
+                restored=Battle.from_raw(b.raw());self.assertEqual(restored.victory_player().instance_id,party[winning_slot].instance_id)
     def test_renderer_trims_and_upscales_small_padded_sprites(self):
         source=io.BytesIO();image=Image.new("RGBA",(96,96),(0,0,0,0))
         for x in range(40,56):
@@ -475,12 +484,12 @@ class BattleTests(unittest.TestCase):
 
 
 class RendererAsyncTests(unittest.IsolatedAsyncioTestCase):
-    async def test_victory_result_fetches_defeated_opponent_and_used_party_sprites(self):
-        renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();second=OwnedPokemon.create("second",7,5,seed=2);current.initialize_party([current.player,second]);current.participants=[current.player.instance_id,second.instance_id];current.state="won"
-        renderer.get_sprite=AsyncMock(side_effect=[b"wild",b"first",b"second"]);renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
+    async def test_victory_result_fetches_defeated_opponent_and_actual_winner_sprite(self):
+        renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();second=OwnedPokemon.create("second",7,5,seed=2);third=OwnedPokemon.create("third",25,5,seed=3);current.initialize_party([current.player,second,third]);current.player=third;current.victory_player_id=third.instance_id;current.state="won"
+        renderer.get_sprite=AsyncMock(side_effect=[b"wild",b"third"]);renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
         await renderer.battle(current)
-        self.assertEqual([call.args[0] for call in renderer.get_sprite.await_args_list],[current.wild_species_id,current.player.species_id,second.species_id])
-        self.assertEqual(renderer._render.await_args.args[-1],[b"first",b"second"])
+        self.assertEqual([call.args[0] for call in renderer.get_sprite.await_args_list],[current.wild_species_id,third.species_id])
+        self.assertEqual(renderer._render.await_args.args[-1],[b"third"])
 
     async def test_catch_result_uses_the_thrown_ball_sprite(self):
         renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();current.state="caught";current.last_ball="ultra_ball"
