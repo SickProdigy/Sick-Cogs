@@ -477,8 +477,20 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await Pokemon.preview_registration.callback(cog,ctx,species_name="Lickitung")
         cog.rendered_pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy",2,len(SPECIES))
         sent=ctx.send.await_args.kwargs
-        self.assertEqual(sent["embed"].footer.text,"Preview only - no Pokedex progress was changed.")
+        self.assertEqual(sent["embed"].footer.text,"Owner preview only - no Pokemon progress was changed.")
         self.assertEqual(conf["pokedex_caught"],[25,108])
+
+
+    async def test_owner_card_preview_builds_terminal_scene_without_mutating_party(self):
+        first=OwnedPokemon.create("first",25,7,seed=2);second=OwnedPokemon.create("second",66,8,seed=3);first.current_hp=4
+        conf={"collection":[first.raw(),second.raw()],"party":["first","second"],"pokedex_caught":[25,66]}
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda _user:StoredSection(conf));cog.rendered_battle=AsyncMock(return_value=(discord.Embed(title="Victory!"),[]))
+        author=SimpleNamespace(id=7,display_name="SickProdigy");ctx=SimpleNamespace(author=author,guild=SimpleNamespace(id=8),channel=SimpleNamespace(id=9),send=AsyncMock())
+        await cog._preview_card(ctx,"victory","Pikachu")
+        battle=cog.rendered_battle.await_args.args[0]
+        self.assertEqual((battle.state,battle.wild_species_id,battle.participants),("won",25,["first","second"]))
+        self.assertEqual(conf["collection"][0]["current_hp"],4)
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].footer.text,"Owner preview only - no Pokemon progress was changed.")
 
 
     async def test_timed_mode_tracks_recent_trainer_for_spawn_level_without_activity_points(self):
