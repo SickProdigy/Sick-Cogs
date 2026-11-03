@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import COMPLETED_GYMS,KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
-from pokemon.pokemon import BIOMES, GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, biome_weight, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
+from pokemon.pokemon import BIOMES, GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_center_cooldown, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, biome_weight, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, FieldBagView, FieldMedicineView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeLobbyView, TradeCollectionView, GymChallengeView
@@ -308,7 +308,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemonownerset timermin",owner_names)
         self.assertIs(Pokemon.pokemon_owner_set.get_command("globalstatus"),Pokemon.pokemon_owner_set.get_command("settings"))
         self.assertIs(Pokemon.pokemon_owner_set.get_command("globalstatus"),Pokemon.pokemon_owner_set.get_command("status"))
-        self.assertNotIn("pokemonset centercooldown",admin_names)
+        self.assertIn("pokemonset centercooldown",admin_names)
         self.assertIn("pokemonownerset centercooldown",owner_names)
         self.assertNotIn("pokemonset rarity",admin_names)
         self.assertIn("pokemonownerset rarity",owner_names)
@@ -936,11 +936,11 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         party=OwnedPokemon.create("party",4,10,seed=3);party.current_hp=0;party.status="burn";party.move_pp={key:0 for key in party.moves}
         boxed=OwnedPokemon.create("boxed",7,10,seed=4);boxed.current_hp=1
         section=StoredSection({"collection":[party.raw(),boxed.raw()],"party":["party"],"items":{},"center_last_at":None})
-        center=StoredValue(55)
+        center=StoredValue(55);guild_section=StoredSection({**GUILD,"center_channel":55})
         message=SimpleNamespace(edit=AsyncMock());cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(
             user=lambda user:section,
-            guild=lambda guild:SimpleNamespace(center_channel=center),
-            center_cooldown=StoredValue(1800),
+            guild=lambda guild:SimpleNamespace(center_channel=center,all=guild_section.all),
+            all=AsyncMock(return_value={"center_cooldown":1800}),
         );cog.rendered_center=AsyncMock(side_effect=lambda user,party,complete=False:(discord.Embed(title="Complete" if complete else "Healing"),[]))
         ctx=SimpleNamespace(author=SimpleNamespace(id=42,display_name="Trainer"),guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=55),send=AsyncMock(return_value=message))
         with patch("pokemon.pokemon.asyncio.sleep",new=AsyncMock()) as sleep:
@@ -970,7 +970,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cooldown=StoredValue(1800);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(center_cooldown=cooldown);ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.center_cooldown.callback(cog,ctx,45)
         self.assertEqual(cooldown.value,2700)
-        self.assertIn("Bot-wide Pokemon Center cooldown",ctx.send.await_args.args[0]);self.assertIn("from **30m** to **45m**",ctx.send.await_args.args[0])
+        self.assertIn("Bot-wide inherited Pokemon Center cooldown",ctx.send.await_args.args[0]);self.assertIn("from **30m** to **45m**",ctx.send.await_args.args[0])
 
     async def test_finished_battle_persists_hp_and_status(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
@@ -1191,6 +1191,18 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(effective_timer_minutes({"timer_minutes":10},{"minimum_timer":30}),30)
         self.assertEqual(effective_timer_minutes({"timer_minutes":10,"timer_owner_override":True},{"minimum_timer":30}),10)
 
+    def test_effective_center_cooldown_uses_server_override_or_inherited_default(self):
+        self.assertEqual(effective_center_cooldown({"center_cooldown":None},{"center_cooldown":1800}),1800)
+        self.assertEqual(effective_center_cooldown({"center_cooldown":900},{"center_cooldown":1800}),900)
+        self.assertEqual(effective_center_cooldown({"center_cooldown":1},{"center_cooldown":1800}),60)
+
+    async def test_server_admin_can_override_and_restore_center_cooldown(self):
+        cooldown=StoredValue(None);policy={"center_cooldown":1800}
+        section=SimpleNamespace(center_cooldown=cooldown,all=AsyncMock(side_effect=lambda:{**GUILD,"center_cooldown":cooldown.value}))
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section,all=AsyncMock(return_value=policy));ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
+        await Pokemon.server_center_cooldown.callback(cog,ctx,"15");self.assertEqual(cooldown.value,900);self.assertIn("15m server override",ctx.send.await_args.args[0])
+        ctx.send.reset_mock();await Pokemon.server_center_cooldown.callback(cog,ctx,"inherit");self.assertIsNone(cooldown.value);self.assertIn("inherited bot-wide default of **30m**",ctx.send.await_args.args[0])
+
     async def test_server_concurrency_respects_owner_ceiling_and_owner_override(self):
         slots=StoredValue(1);override=StoredValue(False);section=SimpleNamespace(max_active_encounters=slots,concurrency_owner_override=override,spawn_profile=StoredValue("balanced"))
         ceiling=StoredValue(2);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section,maximum_concurrency=ceiling)
@@ -1213,7 +1225,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         policy={"encounter_timeout":120,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"center_cooldown":1800,"minimum_threshold":8,"minimum_cooldown":120,"maximum_concurrency":3,"minimum_timer":30,"allowed_generations":[1],"rarity_profile":"friendly","allow_special_species":False,"pokedex_default_style":"retro","mart_prices":{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400}}
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(all=AsyncMock(return_value=policy));ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.global_status.callback(cog,ctx);text=ctx.send.await_args.args[0]
-        for expected in ("Pokemon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Encounter lifetime: bot-wide default **2m** · server range **1–15m**","Global free-Center cooldown: current **30m**","VIP benefits: guild **not set** · role **not set** · storage **240/480** + **6** party","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokedex style: **Retro**","Poke Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
+        for expected in ("Pokemon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Encounter lifetime: bot-wide default **2m** · server range **1–15m**","Inherited free-Center cooldown: current **30m**","server-admin overrides **1–1,440m**","VIP benefits: guild **not set** · role **not set** · storage **240/480** + **6** party","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokedex style: **Retro**","Poke Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
         self.assertNotIn("current server",text.casefold());self.assertNotIn("spawn channels",text.casefold())
 
     async def test_sub_hour_timer_uses_owner_command_group(self):

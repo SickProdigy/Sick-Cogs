@@ -35,7 +35,7 @@ Ongoing battles retain their controls when a saved move needs a Discord-message 
 
 1. Load the cog.
 2. Grant Embed Links and Attach Files in spawn channels.
-3. Enable a spawn channel with `[p]pokemonset channel #channel` and designate any existing healing channel with `[p]pokemonset center #chat`.
+3. Enable a spawn channel with `[p]pokemonset channel #channel` and designate any existing healing channel with `[p]pokemonset center #chat`. Server administrators or members with Manage Server may set `[p]pokemonset centercooldown <minutes>` or restore the inherited bot-wide default with `inherit`.
 4. Review settings with `[p]pokemonset settings` (or `status`). Use `[p]pokemonset pace active|normal|relaxed` to apply defaults for the current mode in one command. New servers use **normal** timed settings: a 30-minute jittered timer, 15-minute encounter lifetime, 15-minute battle inactivity limit, and two simultaneous encounters. Timed presets (timer/encounter/battle/slots) are **active** 10m/5m/15m/3, **normal** 30m/15m/15m/2, and **relaxed** 60m/20m/20m/1. Activity presets (points/cooldown) are **active** 5–9/60s, **normal** 8–15/120s, and **relaxed** 18–30/300s. Bot-wide limits adjust these values; the response reports the effective settings. With default limits, timed active uses 15m rather than 10m and relaxed uses a 15m rather than 20m encounter lifetime. `[p]pokemonownerset pace <name>` applies exact timed presets with per-server owner overrides; activity floors still apply. Presets do not switch modes or change channels, notifications, Center settings, generations, or rarity. `profile` and `balanced` are no longer command choices. Existing saved settings need no migration.
 5. Members choose `[p]pokemon starter bulbasaur|charmander|squirtle`.
 
