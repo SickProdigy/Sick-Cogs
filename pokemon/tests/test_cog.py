@@ -247,7 +247,10 @@ class CogPolicyTests(unittest.TestCase):
         self.assertEqual(escaped.title,"SickProdigy got away safely!")
         self.assertEqual(escaped.fields,[])
         self.assertIsNone(escaped.thumbnail.url)
-        current.state="lost"
+        current.escape_reason="move:Roar";current.result=f"{wild.name} used Roar. {wild.name} escaped!"
+        forced=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
+        self.assertEqual(forced.title,f"{wild.name} escaped!");self.assertIn("used Roar",forced.description)
+        current.escape_reason="";current.state="lost"
         current.result=f"{wild.name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
         embed=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
         self.assertEqual(embed.title,f"{wild.name} escaped from SickProdigy!")
