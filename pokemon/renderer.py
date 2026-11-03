@@ -784,7 +784,7 @@ class BattleRenderer:
             x=left+index*(slot_width+gap);draw.rounded_rectangle((x,370,x+slot_width,550),12,fill=paper,outline=ink,width=3)
             if index>=len(party):
                 label="EMPTY";font=ImageFont.load_default(size=14);draw.text((x+(slot_width-int(draw.textlength(label,font=font)))//2,447),label,fill=ink,font=font);continue
-            pokemon=party[index];image=self._open(data[index],(104,108),trim=True,upscale=True);canvas.paste(image,(x+slot_width//2-image.width//2,486-image.height),image)
+            pokemon=party[index];image=self._open(data[index],(96,100),trim=True,upscale=True);canvas.paste(image,(x+slot_width//2-image.width//2,483-image.height),image)
             name=pokemon.nickname or SPECIES[pokemon.species_id].name;font=ImageFont.load_default(size=14);name=name[:13]
             draw.text((x+(slot_width-int(draw.textlength(name,font=font)))//2,495),name,fill=ink,font=font)
             level=f"Lv. {pokemon.level}";small=ImageFont.load_default(size=12);draw.text((x+10,526),level,fill=ink,font=small)
