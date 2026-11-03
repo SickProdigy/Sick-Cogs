@@ -284,7 +284,7 @@ class BattleRenderer:
                 battle.player.species_id, shiny=battle.player.shiny
             )
         try:
-            return await self._render(self._battle_sync, battle, front, back)
+            return await self._render(self._battle_sync, battle, front, back, avatar_data)
         except (OSError, ValueError) as exc:
             raise RenderError("Battle rendering failed.") from exc
 
@@ -857,7 +857,7 @@ class BattleRenderer:
         draw.rectangle((0,360,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,message,(25,382),width=84,size=19)
         return self._save(canvas)
 
-    def _battle_sync(self, battle, front_data, back_data):
+    def _battle_sync(self, battle, front_data, back_data, avatar_data=None):
         canvas = Image.new("RGB", (800, 450), RETRO[4])
         draw = ImageDraw.Draw(canvas)
         draw.rectangle((0, 0, 800, 315), fill=RETRO[5])
@@ -871,6 +871,8 @@ class BattleRenderer:
         if leader:
             draw.ellipse((682,18,772,108),fill=RETRO[5],outline=RETRO[0],width=5)
             canvas.paste(leader,(727-leader.width//2,100-leader.height),leader)
+        if battle.battle_kind=="gym" and avatar_data:
+            self._trainer_portrait(canvas,draw,avatar_data,center=(62,255),diameter=68)
         canvas.paste(front, (595 - front.width // 2, 220 - front.height), front)
         canvas.paste(back, (205 - back.width // 2, 350 - back.height), back)
         wild = SPECIES[battle.wild_species_id]

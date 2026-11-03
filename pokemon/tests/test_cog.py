@@ -449,6 +449,12 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.fields[0].name,"Squirtle HP");self.assertEqual(embed.image.url,f"attachment://{filename}");self.assertEqual(files[0].filename,filename)
         self.assertEqual(current.victory_player_id,"second");cog.renderer.battle.assert_awaited_once_with(current,avatar_data=None)
 
+    async def test_active_gym_battle_uses_the_trainer_avatar(self):
+        current=battle();current.battle_kind="gym";current.gym_key="boulder";avatar=SimpleNamespace(with_size=lambda size:SimpleNamespace(read=AsyncMock(return_value=b"avatar")));user=SimpleNamespace(display_avatar=avatar)
+        cog=Pokemon.__new__(Pokemon);cog.bot=SimpleNamespace(get_user=lambda user_id:user);cog.renderer=SimpleNamespace(battle=AsyncMock(return_value=io.BytesIO(b"image")))
+        await cog.rendered_battle(current)
+        cog.renderer.battle.assert_awaited_once_with(current,avatar_data=b"avatar")
+
     async def test_pokedex_registration_names_the_trainer(self):
         pokemon=OwnedPokemon.create("registration",39,3,seed=2)
         cog=Pokemon.__new__(Pokemon);cog.renderer=SimpleNamespace(pokedex_registration=AsyncMock(return_value=io.BytesIO(b"png")))
