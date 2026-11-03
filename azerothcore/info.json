@@ -2,7 +2,7 @@
     "author": [
         "SickProdigy"
     ],
-    "description": "Connect Discord to AzerothCore through ac-api-v1, with optional SOAP compatibility for server console information.",
+    "description": "Connect Discord to an AzerothCore World of Warcraft (WoW) server with player information, account self-service, ac-api-v1, and optional SOAP tools.",
     "disabled": false,
     "end_user_data_statement": "This cog stores per-guild backend settings, Discord-to-AzerothCore account links, and password-reset timestamps. User deletion removes their links and reset metadata. Private API and SOAP credentials remain in guild-scoped Red shared API tokens and are never included in Discord output.",
     "hidden": false,
@@ -15,13 +15,14 @@
     "requirements": [
         "aiohttp"
     ],
-    "short": "AzerothCore private API and optional SOAP tools",
+    "short": "AzerothCore World of Warcraft (WoW) server tools",
     "tags": [
         "api",
         "gaming",
         "world-of-warcraft",
+        "wow",
         "azerothcore"
     ],
     "type": "COG",
-    "version": "1.3.0"
+    "version": "1.3.1"
 }
