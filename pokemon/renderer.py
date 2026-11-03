@@ -19,6 +19,7 @@ MAX_SPRITE_BYTES = 2 * 1024 * 1024
 MAX_RENDER_BYTES = 8 * 1024 * 1024
 MAX_COVER_BYTES = 6 * 1024 * 1024
 GYM_LEADER_SPRITES={"boulder":Path(__file__).with_name("assets")/"gym_leaders"/"brock-frlg.png","cascade":Path(__file__).with_name("assets")/"gym_leaders"/"misty-frlg.png"}
+KANTO_BADGE_SPRITES=Path(__file__).with_name("assets")/"badges-frlg.png"
 KANTO_COVERS = (
     ("Red Version","Nintendo_-_Game_Boy","Pokemon - Red Version (USA, Europe) (SGB Enhanced).png"),
     ("Blue Version","Nintendo_-_Game_Boy","Pokemon - Blue Version (USA, Europe) (SGB Enhanced).png"),
@@ -761,9 +762,20 @@ class BattleRenderer:
             vip_font=ImageFont.load_default(size=22);draw.rounded_rectangle((650,48,744,91),12,fill=(214,165,52),outline=ink,width=3);draw.text((675,58),"VIP",fill=ink,font=vip_font)
         draw.text((55,150),f"BADGES  {len(conf.get('badges',[]))}/8",fill=ink,font=ImageFont.load_default(size=20))
         badge_keys=("boulder","cascade","thunder","rainbow","soul","marsh","volcano","earth")
+        try:
+            with Image.open(KANTO_BADGE_SPRITES) as source:badge_sheet=source.convert("RGBA")
+        except (OSError,ValueError):badge_sheet=None
+        earned=set(conf.get("badges",[]))
         for index,key in enumerate(badge_keys):
-            x=62+index*65;color=(214,165,52) if key in conf.get("badges",[]) else (170,174,151)
-            draw.ellipse((x,185,x+40,225),fill=color,outline=ink,width=3)
+            x=54+index*66
+            if badge_sheet is None:
+                color=(214,165,52) if key in earned else (170,174,151);draw.ellipse((x+4,185,x+44,225),fill=color,outline=ink,width=3);continue
+            tile=badge_sheet.crop((index*16,0,index*16+16,16));background=tile.getpixel((0,0))[:3]
+            tile.putdata([(*pixel[:3],0 if pixel[:3]==background else pixel[3]) for pixel in tile.get_flattened_data()])
+            icon=tile.resize((48,48),Image.Resampling.NEAREST)
+            if key not in earned:
+                alpha=icon.getchannel("A");gray=ImageOps.grayscale(icon.convert("RGB"));icon=ImageOps.colorize(gray,(93,105,91),(190,198,178)).convert("RGBA");icon.putalpha(alpha)
+            canvas.paste(icon,(x,181),icon)
         draw.text((55,252),f"POKEDEX  {len(conf.get('pokedex_caught',[]))} caught / {len(conf.get('pokedex_seen',[]))} seen",fill=ink,font=ImageFont.load_default(size=19))
         draw.text((55,284),f"COLLECTION  {len(conf.get('collection',[]))}    PARTY  {len(party)}/6",fill=ink,font=ImageFont.load_default(size=19))
         draw.line((48,322,752,322),fill=ink,width=3);draw.text((55,333),"CURRENT PARTY",fill=ink,font=ImageFont.load_default(size=20))
@@ -772,7 +784,7 @@ class BattleRenderer:
             x=left+index*(slot_width+gap);draw.rounded_rectangle((x,370,x+slot_width,550),12,fill=paper,outline=ink,width=3)
             if index>=len(party):
                 label="EMPTY";font=ImageFont.load_default(size=14);draw.text((x+(slot_width-int(draw.textlength(label,font=font)))//2,447),label,fill=ink,font=font);continue
-            pokemon=party[index];image=self._retro(self._open(data[index],(96,100),trim=True,upscale=True));canvas.paste(image,(x+slot_width//2-image.width//2,483-image.height),image)
+            pokemon=party[index];image=self._open(data[index],(104,108),trim=True,upscale=True);canvas.paste(image,(x+slot_width//2-image.width//2,486-image.height),image)
             name=pokemon.nickname or SPECIES[pokemon.species_id].name;font=ImageFont.load_default(size=14);name=name[:13]
             draw.text((x+(slot_width-int(draw.textlength(name,font=font)))//2,495),name,fill=ink,font=font)
             level=f"Lv. {pokemon.level}";small=ImageFont.load_default(size=12);draw.text((x+10,526),level,fill=ink,font=small)

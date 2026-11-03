@@ -39,8 +39,9 @@ marks remain the property of their respective owners.
 
 ## Pokemon Gym Leader sprites
 
-The Brock and Misty trainer sprites under pokemon/assets/gym_leaders/ are original
-Pokemon FireRed and LeafGreen game sprites sourced from the
+The Brock and Misty trainer sprites under pokemon/assets/gym_leaders/ and the Kanto
+badge sheet at pokemon/assets/badges-frlg.png are original Pokemon FireRed and
+LeafGreen game sprites sourced from the
 [pret/pokefirered](https://github.com/pret/pokefirered) decompilation project.
 Pokemon character designs and game artwork remain the property of Nintendo,
 Game Freak, and The Pokemon Company. They are included for this unofficial,
