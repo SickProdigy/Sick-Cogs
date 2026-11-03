@@ -21,7 +21,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FieldB
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"encounter_owner_override":False,"battle_timeout":900,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","spawn_profile":"balanced","timer_minutes":30,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":2,"concurrency_owner_override":False,"timer_owner_override":False,"notification_mode":"silent","notification_role_id":None,"quiet_timezone":None,"quiet_start":None,"quiet_end":None,"channel_biomes":{}}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"encounter_owner_override":False,"battle_timeout":900,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"center_cooldown":None,"spawn_mode":"timed","spawn_profile":"balanced","timer_minutes":30,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":2,"concurrency_owner_override":False,"timer_owner_override":False,"notification_mode":"silent","notification_role_id":None,"quiet_timezone":None,"quiet_start":None,"quiet_end":None,"channel_biomes":{}}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{},"menu_style":"retro","vip_reward_month":None}
 MART_ITEMS={
     "poke_ball":("Poke Ball","balls",50),
@@ -144,6 +144,11 @@ def effective_timer_minutes(conf,policy):
     if conf.get("timer_owner_override",False):return requested
     floor=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(policy.get("minimum_timer",GLOBAL["minimum_timer"]))))
     return max(requested,floor)
+
+def effective_center_cooldown(conf,policy):
+    selected=conf.get("center_cooldown")
+    if selected is None:selected=policy.get("center_cooldown",GLOBAL["center_cooldown"])
+    return max(60,min(86400,int(selected)))
 
 def jittered_spawn_due(now,minutes,rng=None):
     rng=rng or random.SystemRandom()
@@ -328,7 +333,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.7";__author__="SickProdigy"
+    __version__="1.4.8";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1967,7 +1972,7 @@ class Pokemon(commands.Cog):
     @commands.guild_only()
     async def pokemon_center(self,ctx):
         """Heal your party at this server’s Pokemon Center."""
-        center=await self.config.guild(ctx.guild).center_channel()
+        guild_section=self.config.guild(ctx.guild);center=await guild_section.center_channel()
         if not center:await ctx.send("This server has not configured a Pokemon Center.");return
         if ctx.channel.id!=int(center):await ctx.send(f"Visit <#{center}> to use this server’s Pokemon Center.");return
         async with self.lock(("user",ctx.author.id)):
@@ -1979,7 +1984,7 @@ class Pokemon(commands.Cog):
             if not any(pokemon_needs_center(pokemon) for pokemon in before_party):await ctx.send("Your party is already in perfect health!");return
             last=conf.get("center_last_at");now=datetime.now(timezone.utc)
             if last:
-                try:remaining=max(60,int(await self.config.center_cooldown()))-(now-datetime.fromisoformat(last)).total_seconds()
+                try:remaining=effective_center_cooldown(await guild_section.all(),await self.config.all())-(now-datetime.fromisoformat(last)).total_seconds()
                 except (TypeError,ValueError):remaining=0
                 if remaining>0:
                     seconds=int(remaining)+1;minutes,seconds=divmod(seconds,60);wait=f"{minutes}m {seconds}s" if minutes else f"{seconds}s";await ctx.send(f"The Pokemon Center will be ready again in {wait}.");return
@@ -2217,7 +2222,22 @@ class Pokemon(commands.Cog):
         """Set the bot-wide free Pokemon Center cooldown."""
         if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes.");return
         previous=max(60,int(await self.config.center_cooldown()))//60;await self.config.center_cooldown.set(minutes*60)
-        await ctx.send(f"Bot-wide Pokemon Center cooldown changed from **{previous}m** to **{minutes}m** per user. This affects every server.")
+        await ctx.send(f"Bot-wide inherited Pokemon Center cooldown changed from **{previous}m** to **{minutes}m** per user. Servers using an explicit override are unchanged.")
+
+    @pokemon_set.command(name="centercooldown",aliases=["healcooldown"])
+    async def server_center_cooldown(self,ctx,value:str):
+        """Set this server's free Center cooldown to 1–1,440 minutes.
+
+        Use ``inherit`` to restore the bot-wide default.
+        """
+        section=self.config.guild(ctx.guild);conf=await section.all();policy=await self.config.all();previous=effective_center_cooldown(conf,policy)//60
+        if value.casefold() in {"inherit","default","reset","clear"}:
+            await section.center_cooldown.set(None);inherited=effective_center_cooldown({"center_cooldown":None},policy)//60
+            await ctx.send(f"This server: Pokemon Center cooldown changed from **{previous}m** to the inherited bot-wide default of **{inherited}m** per user.");return
+        try:minutes=int(value)
+        except ValueError:await ctx.send("Use 1–1440 minutes, or `inherit`.");return
+        if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes, or `inherit`.");return
+        await section.center_cooldown.set(minutes*60);await ctx.send(f"This server: Pokemon Center cooldown changed from **{previous}m** to a **{minutes}m server override** per user. Other servers are unchanged.")
 
     @pokemon_set.command(name="status",aliases=["settings"])
     async def spawn_status(self,ctx):
@@ -2225,7 +2245,7 @@ class Pokemon(commands.Cog):
         conf=await self.config.guild(ctx.guild).all();policy=await self.config.all();mode=conf.get("spawn_mode","timed")
         minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
         channels=", ".join(f"<#{value}>" for value in conf.get("channels",[])) or "None"
-        center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None";active=await self.guild_encounters(ctx.guild.id,conf);slot_limit=effective_concurrency(conf,policy)
+        center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None";center_minutes=effective_center_cooldown(conf,policy)//60;center_source="server override" if conf.get("center_cooldown") is not None else "inherited bot-wide default";active=await self.guild_encounters(ctx.guild.id,conf);slot_limit=effective_concurrency(conf,policy)
         selected_slots=max(1,min(5,int(conf.get("max_active_encounters",1))));concurrency_ceiling=max(1,min(5,int(policy.get("maximum_concurrency",5))));concurrency_source="bot-owner override" if conf.get("concurrency_owner_override") else f"server selected {selected_slots}; bot-wide ceiling {concurrency_ceiling}"
         if mode=="timed":
             minutes=effective_timer_minutes(conf,policy);due_text="Scheduling now"
@@ -2247,7 +2267,7 @@ class Pokemon(commands.Cog):
             quiet_state="active now" if quiet_hours_active(conf) else "inactive now";quiet_text=f"{format_quiet_clock(conf['quiet_start'])}–{format_quiet_clock(conf['quiet_end'])} {conf['quiet_timezone']} ({quiet_state})"
         else:quiet_text="disabled"
         await ctx.send(
-            f"**Pokemon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}** · Pace: **{selected_pace(conf)}**\nSpawn channels: {channels}\nPokemon Center: {center} · Free-heal cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m**\n"
+            f"**Pokemon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}** · Pace: **{selected_pace(conf)}**\nSpawn channels: {channels}\nPokemon Center: {center} · Free-heal cooldown: **{center_minutes}m** ({center_source})\n"
             f"{progress}\nConcurrency limit: **{slot_limit}** ({concurrency_source}) · Active encounters: **{len(active)}/{slot_limit}** · Next spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** ({encounter_source}) · Battle lifetime: **{battle_minutes}m**\n"
             f"Notifications: **{notification_mode}** · Alert role: {notification_role} · Quiet hours: **{quiet_text}**\n"
             f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nChannel biomes: {biomes}\nExpired unattended cards: **{expired_cards}**\nCatalog species: **{len(SPECIES)}**"
@@ -2589,7 +2609,7 @@ class Pokemon(commands.Cog):
             f"Fresh-install defaults: admin timer floor **{GLOBAL['minimum_timer']}m** · wild lifetime **{GLOBAL['encounter_timeout']//60}m** · Center cooldown **{GLOBAL['center_cooldown']//60}m** · admin concurrency ceiling **{GLOBAL['maximum_concurrency']}**\n"
             f"Timer limits: server administrators **{minimum_timer}–{SERVER_TIMER_MINUTES[1]:,}m** · bot-owner override **{OWNER_TIMER_MINUTES[0]}–{OWNER_TIMER_MINUTES[1]:,}m**\n"
             f"Encounter lifetime: bot-wide default **{effective_encounter_timeout({'encounter_timeout':None},policy)//60}m** · server range **{max(60,min(900,int(policy.get('minimum_encounter_timeout',60))))//60}–{max(60,min(900,int(policy.get('maximum_encounter_timeout',900))))//60}m** (owner-configured; hard range **1–15m**)\n"
-            f"Global free-Center cooldown: current **{max(60,int(policy.get('center_cooldown',1800)))//60}m** · owner-set range **1–1,440m**\n"
+            f"Inherited free-Center cooldown: current **{max(60,int(policy.get('center_cooldown',1800)))//60}m** · owner-set range **1–1,440m** · server-admin overrides **1–1,440m**\n"
             f"Activity-mode floors: **{policy.get('minimum_threshold',8)} points** · **{policy.get('minimum_cooldown',120)}s cooldown**\n"
             f"Concurrency limits: server-admin ceiling **{max(1,min(5,int(policy.get('maximum_concurrency',5))))}** (owner-set range **1–5**) · per-server owner override **1–5**\n"
             f"Allowed generations: **{generations}** · Rarity: **{policy.get('rarity_profile','friendly')}** · Special species: **{'enabled' if policy.get('allow_special_species') else 'event-only'}**\n"
