@@ -261,7 +261,9 @@ class BattleRenderer:
         if battle.state!="active":
             participant_sprites=None
             if battle.state=="won" and battle.gym_key:
-                winner=battle.victory_player();result_sprite=await self.get_sprite(winner.species_id,shiny=winner.shiny)
+                used=[item for item in battle.party if item.instance_id in battle.participants]
+                if not used:used=[battle.victory_player()]
+                result_sprite=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in used))
             elif battle.state=="won":
                 result_sprite=await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
                 winner=battle.victory_player();participant_sprites=[await self.get_sprite(winner.species_id,shiny=winner.shiny)]
@@ -554,33 +556,34 @@ class BattleRenderer:
         if not path or not path.is_file():return None
         return self._open(path.read_bytes(),size,trim=True,upscale=True)
 
-    def _gym_victory_sync(self,battle,data,avatar_data=None):
+    def _gym_victory_sync(self,battle,participant_data,avatar_data=None):
         labels={"boulder":"Boulder Badge","cascade":"Cascade Badge","thunder":"Thunder Badge","rainbow":"Rainbow Badge","soul":"Soul Badge","marsh":"Marsh Badge","volcano":"Volcano Badge","earth":"Earth Badge"}
+        badge_keys=("boulder","cascade","thunder","rainbow","soul","marsh","volcano","earth")
         badge=labels.get(battle.gym_key,"Gym Badge");canvas=Image.new("RGB",(800,450),(229,214,145));draw=ImageDraw.Draw(canvas)
         for y in range(450):
             ratio=y/449;draw.line((0,y,800,y),fill=(int(244-49*ratio),int(232-58*ratio),int(174-69*ratio)))
         draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
-        self._trainer_portrait(canvas,draw,avatar_data,center=(125,190),diameter=112)
-        draw.text((400-int(draw.textlength(badge,font=ImageFont.load_default(size=36)))//2,42),badge,fill=RETRO[0],font=ImageFont.load_default(size=36))
-        leader=self._gym_leader_sprite(battle.gym_key,(115,145))
-        if leader:canvas.paste(leader,(730-leader.width//2,325-leader.height),leader)
-        image=self._open(data,(220,190),trim=True,upscale=True);canvas.paste(image,(365-image.width//2,300-image.height),image)
-        if battle.gym_key=="boulder":
-            outer=((620,102),(680,102),(722,144),(722,204),(680,246),(620,246),(578,204),(578,144))
-            inner=((628,132),(672,132),(692,152),(692,196),(672,216),(628,216),(608,196),(608,152))
-            facets=((205,208,202),(171,175,170),(95,99,96),(132,136,132),(104,108,105),(82,86,84),(137,141,137),(188,192,186))
-            draw.polygon(outer,fill=(63,66,63),outline=RETRO[0])
-            for index,color in enumerate(facets):
-                following=(index+1)%len(outer)
-                draw.polygon((outer[index],outer[following],inner[following],inner[index]),fill=color)
-            draw.polygon(inner,fill=(151,154,148),outline=(72,76,73),width=4)
-            draw.line((632,138,668,138),fill=(224,226,220),width=4)
-            draw.line((686,156,686,191),fill=(111,115,111),width=4)
-            draw.line((*outer[0],*outer[1],*outer[2],*outer[3],*outer[4],*outer[5],*outer[6],*outer[7],*outer[0]),fill=RETRO[0],width=4)
-        elif battle.gym_key=="cascade":
-            points=((650,100),(708,171),(700,207),(680,232),(650,244),(620,232),(600,207),(592,171))
-            draw.polygon(points,fill=(72,154,205),outline=RETRO[0]);draw.ellipse((610,154,690,230),fill=(91,181,225),outline=RETRO[0],width=4)
-            draw.line((625,180,637,151,654,128),fill=(210,239,244),width=7)
+        title_font=ImageFont.load_default(size=36);draw.text((400-int(draw.textlength(badge,font=title_font))//2,42),badge,fill=RETRO[0],font=title_font)
+
+        self._trainer_portrait(canvas,draw,avatar_data,center=(135,145),diameter=108)
+        draw.ellipse((42,240,258,326),fill=(169,188,132),outline=RETRO[0],width=4)
+        used=[item for item in battle.party if item.instance_id in battle.participants]
+        sprites=list(participant_data or [])[:len(used)]
+        layouts={1:[(150,312)],2:[(105,312),(195,312)],3:[(82,305),(150,318),(218,305)],4:[(105,278),(195,278),(105,318),(195,318)],5:[(82,278),(150,286),(218,278),(115,322),(190,322)],6:[(82,278),(150,286),(218,278),(82,322),(150,326),(218,322)]}
+        for raw,(x,bottom) in zip(sprites,layouts.get(len(sprites),[])):
+            image=self._open(raw,(62,58),trim=True,upscale=True);canvas.paste(image,(x-image.width//2,bottom-image.height),image)
+
+        try:
+            with Image.open(KANTO_BADGE_SPRITES) as source:sheet=source.convert("RGBA")
+            index=badge_keys.index(battle.gym_key);icon=sheet.crop((index*16,0,index*16+16,16));background=icon.getpixel((0,0))[:3]
+            icon.putdata([(*pixel[:3],0 if pixel[:3]==background else pixel[3]) for pixel in icon.get_flattened_data()]);icon=icon.resize((176,176),Image.Resampling.NEAREST)
+            canvas.paste(icon,(400-icon.width//2,102),icon)
+        except (OSError,ValueError):
+            draw.ellipse((320,102,480,262),fill=(151,154,148),outline=RETRO[0],width=6)
+        earned_font=ImageFont.load_default(size=18);earned="BADGE EARNED";draw.text((400-int(draw.textlength(earned,font=earned_font))//2,286),earned,fill=RETRO[1],font=earned_font)
+
+        leader=self._gym_leader_sprite(battle.gym_key,(125,165))
+        if leader:canvas.paste(leader,(665-leader.width//2,322-leader.height),leader)
         draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
         self._dialogue(draw,battle.result or f"{badge} earned!",(70,360),width=76,size=16)
         return self._save(canvas)
