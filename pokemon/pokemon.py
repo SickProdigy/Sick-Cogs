@@ -17,7 +17,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_leader_path,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,TradeLobbyView,TradeSelectionView,GymChallengeView,TradeCollectionView,ReleasePokemonView,MartView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FieldBagView,FieldMedicineView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,TradeLobbyView,TradeSelectionView,GymChallengeView,TradeCollectionView,ReleasePokemonView,MartView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -328,7 +328,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.6";__author__="SickProdigy"
+    __version__="1.4.7";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -985,7 +985,7 @@ class Pokemon(commands.Cog):
             await interaction.response.send_message(embed=render_pokedex(session),view=view,ephemeral=True);view.message=await interaction.original_response();return
         if section=="bag":
             embed,files=await self.rendered_bag(user,conf)
-            await interaction.response.send_message(embed=embed,files=files,ephemeral=True)
+            await interaction.response.send_message(embed=embed,files=files,view=FieldBagView(self,user.id,conf),ephemeral=True)
             return
         if section=="research":
             async with self.lock(("user",user.id)):
@@ -1828,9 +1828,54 @@ class Pokemon(commands.Cog):
 
     @pokemon.command(name="bag")
     async def pokemon_bag(self,ctx):
-        """View your illustrated inventory."""
-        embed,files=await self.rendered_bag(ctx.author)
-        await ctx.send(embed=embed,files=files)
+        """View your inventory and use field medicine on your party."""
+        conf=await self.config.user(ctx.author).all();embed,files=await self.rendered_bag(ctx.author,conf)
+        await ctx.send(embed=embed,files=files,view=FieldBagView(self,ctx.author.id,conf))
+
+    @staticmethod
+    def field_medicine_targets(conf,item_key):
+        owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};targets=[]
+        for slot,identity in enumerate(conf.get("party",[])[:6],1):
+            raw=owned.get(identity)
+            if not raw:continue
+            pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon);current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
+            eligible=(item_key=="potion" and 0<current<maximum) or (item_key=="revive" and current<=0)
+            if eligible:targets.append((slot,identity,pokemon.nickname or SPECIES[pokemon.species_id].name,pokemon.level,current,maximum))
+        return targets
+
+    async def show_field_bag(self,interaction,message=None):
+        conf=await self.config.user(interaction.user).all();embed,files=await self.rendered_bag(interaction.user,conf)
+        await interaction.response.edit_message(content=message,embed=embed,attachments=files,view=FieldBagView(self,interaction.user.id,conf))
+
+    async def open_field_medicine(self,interaction,item_key):
+        if self.trainer_in_active_battle(interaction.user.id):
+            await interaction.response.send_message("Use medicine from the active battle’s Bag so the opponent receives its turn.",ephemeral=True);return
+        conf=await self.config.user(interaction.user).all();targets=self.field_medicine_targets(conf,item_key)
+        await interaction.response.edit_message(content=f"Choose a party Pokemon for your {MART_ITEMS[item_key][0]}.",view=FieldMedicineView(self,interaction.user.id,item_key,targets))
+
+    async def apply_field_medicine(self,user,item_key,identifier):
+        if self.trainer_in_active_battle(user.id):return False,"Use medicine from the active battle’s Bag so the opponent receives its turn."
+        async with self.lock(("user",user.id)):
+            conf=await self.config.user(user).all();raw=self.find_owned(conf,identifier)
+            if not raw:return False,"Choose a party slot or unique Pokemon name."
+            pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon);current=maximum if pokemon.current_hp is None else int(pokemon.current_hp);items=conf.get("items",{})
+            if item_key=="potion":
+                if current<=0:return False,"That Pokemon has fainted. Use a Revive first."
+                if current>=maximum:return False,"That Pokemon already has full HP."
+                if int(items.get("potion",0))<1:return False,"You have no Potions."
+                items["potion"]=int(items.get("potion",0))-1;pokemon.current_hp=min(maximum,current+20);message=f"{SPECIES[pokemon.species_id].name} recovered {pokemon.current_hp-current} HP ({pokemon.current_hp}/{maximum})."
+            elif item_key=="revive":
+                if current>0:return False,"That Pokemon has not fainted."
+                if int(items.get("revive",0))<1:return False,"You have no Revives."
+                items["revive"]=int(items.get("revive",0))-1;pokemon.current_hp=max(1,maximum//2);pokemon.status="";pokemon.status_turns=0;message=f"{SPECIES[pokemon.species_id].name} was revived with {pokemon.current_hp}/{maximum} HP."
+            else:return False,"That field medicine is unavailable."
+            conf["items"]=items;raw.update(pokemon.raw());await self.config.user(user).set(conf)
+        return True,message
+
+    async def use_field_medicine_interaction(self,interaction,item_key,identifier):
+        success,message=await self.apply_field_medicine(interaction.user,item_key,identifier)
+        if not success:await interaction.response.send_message(message,ephemeral=True);return
+        await self.show_field_bag(interaction,message)
 
     @pokemon.command(name="achievements",aliases=["goals"])
     async def achievements(self,ctx):
@@ -1911,35 +1956,12 @@ class Pokemon(commands.Cog):
     @pokemon_use.command(name="potion")
     async def use_potion(self,ctx,identifier:str):
         """Use a Potion to restore a Pokemon’s HP."""
-        async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique Pokemon name.");return
-            pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon)
-            current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
-            if current<=0:await ctx.send("That Pokemon has fainted. Use a Revive first.");return
-            if current>=maximum:await ctx.send("That Pokemon already has full HP.");return
-            items=conf.get("items",{})
-            if int(items.get("potion",0))<1:await ctx.send("You have no Potions.");return
-            items["potion"]=int(items.get("potion",0))-1;conf["items"]=items
-            pokemon.current_hp=min(maximum,current+20);raw.update(pokemon.raw())
-            await self.config.user(ctx.author).set(conf)
-        await ctx.send(f"{SPECIES[pokemon.species_id].name} recovered {pokemon.current_hp-current} HP ({pokemon.current_hp}/{maximum}).")
+        _,message=await self.apply_field_medicine(ctx.author,"potion",identifier);await ctx.send(message)
 
     @pokemon_use.command(name="revive")
     async def use_revive(self,ctx,identifier:str):
         """Use a Revive on a fainted Pokemon."""
-        async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique Pokemon name.");return
-            pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon)
-            current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
-            if current>0:await ctx.send("That Pokemon has not fainted.");return
-            items=conf.get("items",{})
-            if int(items.get("revive",0))<1:await ctx.send("You have no Revives.");return
-            items["revive"]=int(items.get("revive",0))-1;conf["items"]=items
-            pokemon.current_hp=max(1,maximum//2);pokemon.status="";pokemon.status_turns=0;raw.update(pokemon.raw())
-            await self.config.user(ctx.author).set(conf)
-        await ctx.send(f"{SPECIES[pokemon.species_id].name} was revived with {pokemon.current_hp}/{maximum} HP.")
+        _,message=await self.apply_field_medicine(ctx.author,"revive",identifier);await ctx.send(message)
 
     @pokemon.command(name="center")
     @commands.guild_only()
