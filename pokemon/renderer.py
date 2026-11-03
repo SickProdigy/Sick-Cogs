@@ -632,7 +632,7 @@ class BattleRenderer:
             heading="Gotta catch 'em all!";heading_font=ImageFont.load_default(size=34)
             draw.text((400-int(draw.textlength(heading,font=heading_font))//2,42),heading,fill=RETRO[0],font=heading_font)
             draw.ellipse((pokemon_x-155,205,pokemon_x+155,310),fill=(182,168,89),outline=RETRO[0],width=4)
-            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,240-image.height),image)
+            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,275-image.height),image)
             ball_center=((295 if has_avatar else 400),290)
             if ball_data:
                 ball=self._open(ball_data,(86,86),trim=True,upscale=True);canvas.paste(ball,(ball_center[0]-ball.width//2,ball_center[1]-ball.height//2),ball)
