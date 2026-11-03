@@ -379,6 +379,11 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(rendered.size,(56,42))
         self.assertEqual(rendered.getchannel("A").getbbox(),(0,0,56,42))
 
+    def test_retro_palette_does_not_add_floyd_steinberg_grain(self):
+        source=Image.new("RGBA",(32,32),(180,180,80,255))
+        rendered=BattleRenderer._retro(source)
+        self.assertEqual(len(rendered.getcolors(maxcolors=256)),1)
+
     def test_trainer_party_preserves_saved_order_and_skips_missing_entries(self):
         first=OwnedPokemon.create("first",4,5,seed=1);second=OwnedPokemon.create("second",7,3,seed=2)
         conf={"collection":[first.raw(),second.raw()],"party":["second","missing","first"]}

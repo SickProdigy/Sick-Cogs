@@ -895,7 +895,7 @@ class BattleRenderer:
         flat.extend([0] * (768 - len(flat)))
         palette.putpalette(flat)
         alpha = image.getchannel("A")
-        rgb = image.convert("RGB").quantize(palette=palette, dither=Image.Dither.FLOYDSTEINBERG).convert("RGBA")
+        rgb = image.convert("RGB").quantize(palette=palette, dither=Image.Dither.NONE).convert("RGBA")
         rgb.putalpha(alpha)
         return rgb
 
