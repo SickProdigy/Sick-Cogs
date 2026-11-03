@@ -56,6 +56,11 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(DatabaseConfigurationError, "between 3 and 60"):
             ApiSettings.from_tokens({**BASE_TOKENS, "timeout": "90"})
 
+    def test_setup_group_is_separate_from_player_commands(self):
+        self.assertEqual(AzerothCore.acset.name,"wowset")
+        self.assertIn("azerothcoreset",AzerothCore.acset.aliases);self.assertIn("acset",AzerothCore.acset.aliases)
+        self.assertNotIn("set",AzerothCore.ac.all_commands)
+
     def test_duplicate_account_fault_is_user_friendly(self):
         error="SOAP request failed with HTTP 500: SOAP-ENV:Client: Account with this name already exist!"
         message=AzerothCore._friendly_account_create_error(error)

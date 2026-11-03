@@ -184,7 +184,7 @@ class AzerothCore(commands.Cog):
     def _missing_soap_url_message(ctx: commands.Context) -> str:
         return (
             "SOAP URL has not been configured yet. Set it with "
-            f"`{ctx.clean_prefix}azerothcore set soap_url <ip:port>`."
+            f"`{ctx.clean_prefix}wowset soap_url <ip:port>`."
         )
 
     @staticmethod
@@ -282,7 +282,7 @@ class AzerothCore(commands.Cog):
 
         soap_url = await self._configured_soap_url()
         if not soap_url:
-            return None, "SOAP URL has not been configured. Use `azerothcore set soap_url` to set it."
+            return None, "SOAP URL has not been configured. Use `wowset soap_url` to set it."
 
         envelope_template = await self._configured_envelope_template()
         body = envelope_template.format(command=html.escape(command, quote=True))
@@ -1417,7 +1417,7 @@ class AzerothCore(commands.Cog):
 
         prefixes = await self._configured_playerbot_prefixes()
         if not prefixes:
-            return await ctx.send("Playerbot account prefixes are disabled. Configure them with `azerothcore set playerbotprefix <prefix...>`.")
+            return await ctx.send("Playerbot account prefixes are disabled. Configure them with `wowset playerbotprefix <prefix...>`.")
 
         players = self._parse_players(out)
         if players:
@@ -1539,7 +1539,7 @@ class AzerothCore(commands.Cog):
         """Run a raw SOAP console command and show the response.
 
         Restricted to server owners, server admins/managers, and roles
-        configured with `azerothcore set accountcreationrole`.
+        configured with `wowset accountcreationrole`.
         """
 
         if not await self._trusted_account_guild(ctx):
@@ -1569,7 +1569,7 @@ class AzerothCore(commands.Cog):
         """Create a game account through SOAP and DM the credentials.
 
         Restricted to server owners, server admins/managers, and roles
-        configured with `azerothcore set accountcreationrole`.
+        configured with `wowset accountcreationrole`.
 
         If a Discord member is provided as the final argument, the bot DMs
         that member. Otherwise, it DMs the command author.
@@ -1629,7 +1629,7 @@ class AzerothCore(commands.Cog):
         msg += f" Raw response: {out[:1000]}"
         await ctx.send(msg)
 
-    @ac.group(name="set", invoke_without_command=True)
+    @commands.group(name="wowset", aliases=("azerothcoreset", "acset"), invoke_without_command=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset(self, ctx: commands.Context):
@@ -1638,9 +1638,9 @@ class AzerothCore(commands.Cog):
         message = (
             "**AzerothCore Module Settings**\n\n"
             "**Basics**\n"
-            "- `azerothcore set soap_url <ip:port>`\n"
-            "- `azerothcore set soap_auth <user> <pass>`\n"
-            "- `azerothcore set view`\n"
+            "- `wowset soap_url <ip:port>`\n"
+            "- `wowset soap_auth <user> <pass>`\n"
+            "- `wowset view`\n"
             "- `azerothcore soapcheck`\n"
             "- `azerothcore apicheck`\n\n"
             "**Private ac-api-v1**\n"
@@ -1648,23 +1648,23 @@ class AzerothCore(commands.Cog):
             "- Required: base_url and community_token.\n"
             "- Optional: timeout. Account creation uses SOAP.\n\n"
             "**Display**\n"
-            "- `azerothcore set servername <name>`\n"
-            "- `azerothcore set realmlist <text>`\n"
-            "- `azerothcore set infodescription <text>`\n\n"
+            "- `wowset servername <name>`\n"
+            "- `wowset realmlist <text>`\n"
+            "- `wowset infodescription <text>`\n\n"
             "**Account Creation Roles**\n"
-            "- `azerothcore set accountcreationrole <role...>`\n"
-            "- `azerothcore set roleremove <role...>`\n"
-            "- `azerothcore set rolelist`\n\n"
+            "- `wowset accountcreationrole <role...>`\n"
+            "- `wowset roleremove <role...>`\n"
+            "- `wowset rolelist`\n\n"
             "**Advanced**\n"
-            "- `azerothcore set timeout <seconds>`\n"
-            "- `azerothcore set onlinecommand <command>`\n"
-            "- `azerothcore set playerbotprefix <prefix...>`\n"
-            "- `azerothcore set infocommand <command>`\n"
-            "- `azerothcore set createcommand <command>`\n"
+            "- `wowset timeout <seconds>`\n"
+            "- `wowset onlinecommand <command>`\n"
+            "- `wowset playerbotprefix <prefix...>`\n"
+            "- `wowset infocommand <command>`\n"
+            "- `wowset createcommand <command>`\n"
             "- `azerothcore raw <command>`\n"
             "- `azerothcore playerbots`\n"
             "- `azerothcore onlineprobe [command]`\n\n"
-            "Example: `azerothcore set soap_url 192.168.1.1:7878`"
+            "Example: `wowset soap_url 192.168.1.1:7878`"
         )
         await ctx.send(message)
 
@@ -1674,7 +1674,7 @@ class AzerothCore(commands.Cog):
     async def acset_baseurl(self, ctx: commands.Context, base_url: str):
         """Legacy bridge setting. Use soap_url instead."""
 
-        await ctx.send("Base URL is managed by SOAP-only configuration. Use `azerothcore set soap_url`.")
+        await ctx.send("Base URL is managed by SOAP-only configuration. Use `wowset soap_url`.")
 
     @acset.command(name="servername")
     @commands.guild_only()
@@ -1724,7 +1724,7 @@ class AzerothCore(commands.Cog):
     async def acset_token(self, ctx: commands.Context, token: Optional[str] = None):
         """Legacy bridge setting. Use soap_auth instead."""
 
-        await ctx.send("Token is not used in SOAP-only mode. Use `azerothcore set soap_auth` to configure SOAP credentials.")
+        await ctx.send("Token is not used in SOAP-only mode. Use `wowset soap_auth` to configure SOAP credentials.")
 
     @acset.command(name="statuspath", hidden=True)
     @commands.guild_only()

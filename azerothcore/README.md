@@ -16,24 +16,24 @@ Commands can also be run with the short aliases `wow` or `ac`, such as `wow onli
 
 ## Setup
 
-1. Configure the SOAP endpoint the cog should use with `azerothcore set soap_url <ip:port>`.
-2. (Optional) Configure SOAP basic auth using `azerothcore set soap_auth <user> <pass>`.
-3. Check the current configuration with `azerothcore set view`, then test connectivity with `azerothcore soapcheck`.
-4. Add display text with `azerothcore set servername`, `azerothcore set realmlist`, and `azerothcore set infodescription`.
+1. Configure the SOAP endpoint the cog should use with `wowset soap_url <ip:port>`.
+2. (Optional) Configure SOAP basic auth using `wowset soap_auth <user> <pass>`.
+3. Check the current configuration with `wowset view`, then test connectivity with `azerothcore soapcheck`.
+4. Add display text with `wowset servername`, `wowset realmlist`, and `wowset infodescription`.
 5. As the Red bot owner, enable account management in the trusted Discord server with `azerothcore trustguild true`.
-6. Add the Discord roles that are allowed to create accounts with `azerothcore set accountcreationrole <role...>`.
-6. (Optional) Adjust advanced SOAP behavior with `azerothcore set timeout`, `azerothcore set onlinecommand`, `azerothcore set infocommand`, or `azerothcore set createcommand`.
+6. Add the Discord roles that are allowed to create accounts with `wowset accountcreationrole <role...>`.
+6. (Optional) Adjust advanced SOAP behavior with `wowset timeout`, `wowset onlinecommand`, `wowset infocommand`, or `wowset createcommand`.
 
 ### Helpful examples
 
-- `azerothcore set realmlist wow.sickgaming.net`
-- `azerothcore set servername My Realm`
-- `azerothcore set soap_url 192.168.86.139:17878`
-- `azerothcore set soap_auth soapuser abcd1234`
-- `azerothcore set accountcreationrole @admin`
-- `azerothcore set timeout 10`
-- `azerothcore set onlinecommand account onlinelist`
-- `azerothcore set playerbotprefix RNDBOT`
+- `wowset realmlist wow.sickgaming.net`
+- `wowset servername My Realm`
+- `wowset soap_url 192.168.86.139:17878`
+- `wowset soap_auth soapuser abcd1234`
+- `wowset accountcreationrole @admin`
+- `wowset timeout 10`
+- `wowset onlinecommand account onlinelist`
+- `wowset playerbotprefix RNDBOT`
 - `azerothcore createuser playername player@example.com @player`
 - `azerothcore accountcreate playername player@example.com @player`
 - `azerothcore onlineprobe`
@@ -51,9 +51,9 @@ If your server exposes SOAP on a non-default host/port, update the SOAP URL acco
 `azerothcore info` pulls technical status from the `server info` SOAP command. AzerothCore may not return a friendly realm name or public description through SOAP, so use these settings for display:
 
 ```text
-azerothcore set servername <name>
-azerothcore set infodescription <description>
-azerothcore set realmlist <text>
+wowset servername <name>
+wowset infodescription <description>
+wowset realmlist <text>
 ```
 
 `azerothcore online` uses the configured server name in the embed title. If no server name is set, it uses `World of Warcraft`. The configured realmlist is shown as a small footer when available, while the full description and connection details stay focused on `azerothcore info`.
@@ -62,8 +62,8 @@ azerothcore set realmlist <text>
 
 AzerothCore's SOAP interface commonly listens on port 7878 inside the server/container. This repository can publish that as another host port, such as `DOCKER_SOAP_EXTERNAL_PORT=17878`. If your host IP is `192.168.86.139` and host port `17878` maps to the SOAP service, configure the cog like this:
 
-`azerothcore set soap_url 192.168.86.139:17878`
-`azerothcore set soap_auth soapuser abcd1234`
+`wowset soap_url 192.168.86.139:17878`
+`wowset soap_auth soapuser abcd1234`
 
 The cog also supports Basic Auth credentials embedded in the URL, but separate `soap_auth` configuration is preferred so the bot does not repeat credentials in normal setup responses.
 
@@ -121,42 +121,42 @@ remainder.
 
 Common results:
 
-- `SOAP URL has not been configured yet`: set the endpoint with `azerothcore set soap_url <ip:port>`.
+- `SOAP URL has not been configured yet`: set the endpoint with `wowset soap_url <ip:port>`.
 - `host answered, but nothing is listening`: the IP is reachable, but that port is not bound on that interface.
 - `connection was reset`: something accepted the connection and closed it before returning a SOAP response. Check `SOAP.Enabled`, `SOAP.IP`, `SOAP.Port`, and whether the port is really the AzerothCore SOAP port.
-- `HTTP 401` or auth-related SOAP fault: check `azerothcore set soap_auth <user> <pass>`.
+- `HTTP 401` or auth-related SOAP fault: check `wowset soap_auth <user> <pass>`.
 - `HTTP 403` or permission-related SOAP fault: the account likely needs GM/security access in `account_access`.
 - `HTTP 500` with a SOAP fault: SOAP is responding; read the fault text for the next fix.
-- `Command 'players' does not exist`: reset the old command with `azerothcore set onlinecommand reset`, or configure another command that exists on your AzerothCore build.
+- `Command 'players' does not exist`: reset the old command with `wowset onlinecommand reset`, or configure another command that exists on your AzerothCore build.
 
 `azerothcore online` defaults to `account onlinelist` so it can show who is online instead of only counts. AzerothCore documents this as a higher-security GM command, so the SOAP account may need elevated access or the command security may need to be adjusted in AzerothCore's command table. If the online-list command cannot run or does not return names, `azerothcore online` falls back to `server info` counts when possible.
 
 PlayerBot accounts are filtered out of the main `azerothcore online` character list when their account names start with a configured prefix. The default prefix is `RNDBOT`. `azerothcore online` still shows a count of online AI players under the real-player list. Use `azerothcore playerbots` to show those online bot characters separately. Manage prefixes with:
 
 ```text
-azerothcore set playerbotprefix
-azerothcore set playerbotprefix RNDBOT
-azerothcore set playerbotprefix RNDBOT BOT
-azerothcore set playerbotprefix reset
-azerothcore set playerbotprefix clear
+wowset playerbotprefix
+wowset playerbotprefix RNDBOT
+wowset playerbotprefix RNDBOT BOT
+wowset playerbotprefix reset
+wowset playerbotprefix clear
 ```
 
-Use `azerothcore onlineprobe` to test the default online-list command, chat-style `.account onlinelist`, and `server info` from Discord. To test a custom read-only command, run `azerothcore onlineprobe <command>`, then configure a working parser-friendly command with `azerothcore set onlinecommand <command>`.
+Use `azerothcore onlineprobe` to test the default online-list command, chat-style `.account onlinelist`, and `server info` from Discord. To test a custom read-only command, run `azerothcore onlineprobe <command>`, then configure a working parser-friendly command with `wowset onlinecommand <command>`.
 
 The cog intentionally has no direct database access. Named characters, separated human and AI online lists, and audience-filtered leaderboards come through the private ac-api-v1 module. SOAP remains available for administrative commands and legacy Playerbots output.
 
 `server info` can usually show connected players, characters in world, connection peak, uptime, and build/revision details, but it does not include character or account names. If your server has a custom command that lists character names, set it with:
 
 ```text
-azerothcore set onlinecommand <command>
+wowset onlinecommand <command>
 ```
 
 Reset command templates with:
 
 ```text
-azerothcore set onlinecommand reset
-azerothcore set infocommand reset
-azerothcore set createcommand reset
+wowset onlinecommand reset
+wowset infocommand reset
+wowset createcommand reset
 ```
 
 Useful Debian checks:
@@ -211,4 +211,4 @@ services:
       - "${DOCKER_SOAP_EXTERNAL_PORT:-17878}:7878"
 ```
 
-Security note: SOAP credentials are sensitive. Prefer `azerothcore set soap_auth` over embedding passwords in URLs or shell history.
+Security note: SOAP credentials are sensitive. Prefer `wowset soap_auth` over embedding passwords in URLs or shell history.
