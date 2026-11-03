@@ -14,14 +14,14 @@ from .catalog import CatalogError,PokemonCatalog
 from .catalog_versions import CATALOG_VERSIONS
 from .data import EVOLUTIONS,MOVES,SPECIES,direct_moves_for_level,experience_to_next,generation_for,move_source_species,moves_for_level,sprite
 from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
-from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
+from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_leader_path,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,TradeLobbyView,TradeSelectionView,GymChallengeView,TradeCollectionView,ReleasePokemonView,MartView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FieldBagView,FieldMedicineView,FieldStoneView,FieldEvolutionResultView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,TradeLobbyView,TradeSelectionView,GymChallengeView,TradeCollectionView,ReleasePokemonView,MartView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"encounter_owner_override":False,"battle_timeout":900,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","spawn_profile":"balanced","timer_minutes":30,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":2,"concurrency_owner_override":False,"timer_owner_override":False,"notification_mode":"silent","notification_role_id":None,"quiet_timezone":None,"quiet_start":None,"quiet_end":None,"channel_biomes":{}}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"encounter_owner_override":False,"battle_timeout":900,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"center_cooldown":None,"spawn_mode":"timed","spawn_profile":"balanced","timer_minutes":30,"next_spawn_at":None,"expired_card_mode":"delete","max_active_encounters":2,"concurrency_owner_override":False,"timer_owner_override":False,"notification_mode":"silent","notification_role_id":None,"quiet_timezone":None,"quiet_start":None,"quiet_end":None,"channel_biomes":{}}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None,"pokedex_stats":{},"recorded_battles":[],"achievement_rewards":[],"daily_research":{},"menu_style":"retro","vip_reward_month":None}
 MART_ITEMS={
     "poke_ball":("Poke Ball","balls",50),
@@ -144,6 +144,11 @@ def effective_timer_minutes(conf,policy):
     if conf.get("timer_owner_override",False):return requested
     floor=max(SERVER_TIMER_MINUTES[0],min(SERVER_TIMER_MINUTES[1],int(policy.get("minimum_timer",GLOBAL["minimum_timer"]))))
     return max(requested,floor)
+
+def effective_center_cooldown(conf,policy):
+    selected=conf.get("center_cooldown")
+    if selected is None:selected=policy.get("center_cooldown",GLOBAL["center_cooldown"])
+    return max(60,min(86400,int(selected)))
 
 def jittered_spawn_due(now,minutes,rng=None):
     rng=rng or random.SystemRandom()
@@ -328,7 +333,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.3.5";__author__="SickProdigy"
+    __version__="1.4.20";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -840,16 +845,23 @@ class Pokemon(commands.Cog):
             embed,files=await self.rendered_battle(battle)
             await i.response.edit_message(embed=embed,attachments=files,view=BattleView(self,eid))
             raw.pop("message_sync_pending",None);encounters[str(eid)]=raw;await self.config.encounters.set(encounters)
+    @staticmethod
+    def battle_attachment_name(battle):
+        player=battle.victory_player() if battle.state=="won" else battle.player
+        return (f"battle-{int(battle.encounter_id)}-{int(battle.action_count)}-{battle.state}-"
+                f"{int(player.species_id)}-{int(battle.wild_species_id)}.png")
+
     async def rendered_battle(self,battle):
         embed=self.battle_embed(battle);avatar_data=None
-        if battle.state in {"won","caught"}:
+        if battle.state in {"won","caught"} or (battle.state=="active" and battle.battle_kind=="gym"):
             user=self.bot.get_user(battle.user_id)
             if user:
                 try:avatar_data=await user.display_avatar.with_size(128).read()
-                except (discord.HTTPException,OSError):log.debug("Trainer avatar unavailable for battle result",exc_info=True)
+                except (discord.HTTPException,OSError):log.debug("Trainer avatar unavailable for battle card",exc_info=True)
         try:
-            image=await self.renderer.battle(battle,avatar_data=avatar_data);embed.set_image(url="attachment://battle.png")
-            return embed,[discord.File(image,filename="battle.png")]
+            image=await self.renderer.battle(battle,avatar_data=avatar_data);filename=self.battle_attachment_name(battle)
+            embed.set_image(url=f"attachment://{filename}")
+            return embed,[discord.File(image,filename=filename)]
         except RenderError:
             log.exception("Battle rendering failed")
             return embed,[]
@@ -890,11 +902,11 @@ class Pokemon(commands.Cog):
         except RenderError:
             log.exception("Progression rendering failed");return embed,[]
 
-    async def rendered_pokedex_registration(self,pokemon,trainer_name):
-        species=SPECIES[pokemon.species_id];trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer"
+    async def rendered_pokedex_registration(self,pokemon,trainer_name,registered_count,registered_total=None):
+        species=SPECIES[pokemon.species_id];registered_total=registered_total or len(SPECIES);trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer"
         embed=discord.Embed(title=f"{species.name} was registered!",description=f"New Pokemon data was added to {trainer}'s Pokedex.",color=discord.Color.red())
         try:
-            image=await self.renderer.pokedex_registration(pokemon,trainer);embed.set_image(url="attachment://pokedex-registration.png")
+            image=await self.renderer.pokedex_registration(pokemon,trainer,registered_count,registered_total);embed.set_image(url="attachment://pokedex-registration.png")
             return embed,[discord.File(image,filename="pokedex-registration.png")]
         except RenderError:
             log.exception("Pokedex registration rendering failed");return embed,[]
@@ -969,6 +981,8 @@ class Pokemon(commands.Cog):
             for slot,item in enumerate(party,1):
                 maximum=pokemon_max_hp(item);current=maximum if item.current_hp is None else item.current_hp;lines.append(f"{slot}. {item.nickname or SPECIES[item.species_id].name} · Lv. {item.level} · HP {current}/{maximum}")
             trainer=getattr(user,"display_name","Trainer");embed=discord.Embed(title=f"{trainer}’s Party",description="\n".join(lines) or "Empty",color=discord.Color.gold())
+            avatar=getattr(getattr(user,"display_avatar",None),"url",None)
+            if avatar:embed.set_thumbnail(url=avatar)
             try:image=await self.renderer.party_card(party,trainer);embed.set_image(url="attachment://party.png");files=[discord.File(image,filename="party.png")]
             except RenderError:files=[]
             await interaction.response.send_message(embed=embed,files=files,ephemeral=True);return
@@ -979,7 +993,7 @@ class Pokemon(commands.Cog):
             await interaction.response.send_message(embed=render_pokedex(session),view=view,ephemeral=True);view.message=await interaction.original_response();return
         if section=="bag":
             embed,files=await self.rendered_bag(user,conf)
-            await interaction.response.send_message(embed=embed,files=files,ephemeral=True)
+            await interaction.response.send_message(embed=embed,files=files,view=FieldBagView(self,user.id,conf),ephemeral=True)
             return
         if section=="research":
             async with self.lock(("user",user.id)):
@@ -990,9 +1004,10 @@ class Pokemon(commands.Cog):
         if section=="achievements":await interaction.response.send_message(embed=self.accomplishments_embed(user,conf),ephemeral=True);return
         if section=="gym":
             upcoming=next_gym(conf.get("badges",[]));view=GymChallengeView(self,user.id,upcoming.leader) if upcoming and upcoming.key in COMPLETED_GYMS else None
-            await interaction.response.send_message(embed=gym_status_embed(user,conf),view=view,ephemeral=True);return
+            leader_url,leader_files=self.gym_leader_attachment(upcoming)
+            await interaction.response.send_message(embed=gym_status_embed(user,conf,leader_image_url=leader_url),files=leader_files,view=view,ephemeral=True);return
         if section=="trade":
-            await interaction.response.send_message("Start an exact trade with `poke trade  <your collection number> <their collection number>`. The other trainer must confirm before anything moves.",ephemeral=True);return
+            await interaction.response.send_message("Start an interactive trade with `poke trade`, or use `poke trade @trainer <your collection number> <their collection number>` for an exact numbered offer. Use `poke trade collection @trainer` to view their collection numbers.",ephemeral=True);return
         if section=="mart":
             if interaction.guild is None:await interaction.response.send_message("The Poke Mart is available inside a server.",ephemeral=True);return
             embed,files,view=await self.rendered_mart(user,interaction.guild)
@@ -1042,9 +1057,16 @@ class Pokemon(commands.Cog):
             await interaction.response.edit_message(embed=embed,attachments=[],view=None)
 
     @staticmethod
+    def gym_leader_attachment(gym):
+        path=gym_leader_path(gym.key) if gym else None
+        if path is None:return None,[]
+        filename=f"gym-leader-{gym.key}.png"
+        return f"attachment://{filename}",[discord.File(path,filename=filename)]
+
+    @staticmethod
     def move_label(key):return MOVES[key].name[:80]
     def battle_embed(self,b):
-        player=SPECIES[b.player.species_id];wild=SPECIES[b.wild_species_id];wild_name=("Shiny " if b.wild_shiny else "")+wild.name
+        active=b.victory_player() if b.state=="won" else b.player;player=SPECIES[active.species_id];wild=SPECIES[b.wild_species_id];wild_name=("Shiny " if b.wild_shiny else "")+wild.name
         gym=GYMS.get(b.gym_key) if b.battle_kind=="gym" else None
         if b.state!="active":
             trainer=" ".join(str(b.trainer_name or "Trainer").split())[:24] or "Trainer"
@@ -1057,9 +1079,10 @@ class Pokemon(commands.Cog):
             if b.state in {"ran","lost"}:return e
             e.set_thumbnail(url=sprite(wild.id,shiny=b.wild_shiny))
             if b.state=="caught":e.add_field(name="Caught Pokemon",value=f"{wild_name} · Lv. {b.wild_level}\nCaught: **{max(1,int(b.caught_count))}**",inline=True)
-            e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
-            needed=experience_to_next(b.player.species_id,b.player.level)
-            e.add_field(name="Experience",value="MAX" if not needed else f"{b.player.experience}/{needed} XP",inline=True)
+            active_hp=b.player_hp if active.instance_id==b.player.instance_id else int(b.party_hp.get(active.instance_id,b.max_hp(active)))
+            e.add_field(name=f"{player.name} HP",value=f"{active_hp}/{b.max_hp(active)}",inline=True)
+            needed=experience_to_next(active.species_id,active.level)
+            e.add_field(name="Experience",value="MAX" if not needed else f"{active.experience}/{needed} XP",inline=True)
             return e
         title=f"Gym Leader {gym.leader} · {wild.name} Lv. {b.wild_level} · Pokemon {b.opponent_index+1}/{b.opponent_total}" if gym else f"Wild {wild_name} · Lv. {b.wild_level}"
         e=discord.Embed(title=title,description=b.result or b.last_action or f"Turn {b.turn}",color=discord.Color.gold() if gym else discord.Color.blurple())
@@ -1290,7 +1313,7 @@ class Pokemon(commands.Cog):
             await i.response.edit_message(embed=embed,attachments=files,view=None if battle.state!="active" else BattleView(self,eid))
             await self.mark_encounter_message_synced(eid)
             if first_registration:
-                registration,registration_files=await self.rendered_pokedex_registration(pokemon,battle.trainer_name)
+                registration,registration_files=await self.rendered_pokedex_registration(pokemon,battle.trainer_name,len(caught_ids),len(SPECIES))
                 await i.followup.send(embed=registration,files=registration_files)
             if battle.state!="active":await self.send_progression(i,battle)
     async def save_battle(self,b):
@@ -1745,6 +1768,8 @@ class Pokemon(commands.Cog):
             lines.append(f"{slot}. {name} · Lv. {item.level} · HP {current}/{maximum}")
         trainer=getattr(ctx.author,"display_name",getattr(ctx.author,"name",str(ctx.author)))
         embed=discord.Embed(title=f"{trainer}'s Party",description="\n".join(lines) or "Empty",color=discord.Color.gold())
+        avatar=getattr(getattr(ctx.author,"display_avatar",None),"url",None)
+        if avatar:embed.set_thumbnail(url=avatar)
         try:
             image=await self.renderer.party_card(party,trainer);embed.set_image(url="attachment://party.png");files=[discord.File(image,filename="party.png")]
         except RenderError:
@@ -1814,9 +1839,91 @@ class Pokemon(commands.Cog):
 
     @pokemon.command(name="bag")
     async def pokemon_bag(self,ctx):
-        """View your illustrated inventory."""
-        embed,files=await self.rendered_bag(ctx.author)
-        await ctx.send(embed=embed,files=files)
+        """View your inventory and use field medicine on your party."""
+        conf=await self.config.user(ctx.author).all();embed,files=await self.rendered_bag(ctx.author,conf)
+        await ctx.send(embed=embed,files=files,view=FieldBagView(self,ctx.author.id,conf))
+
+    @staticmethod
+    def field_medicine_targets(conf,item_key):
+        owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};targets=[]
+        for slot,identity in enumerate(conf.get("party",[])[:6],1):
+            raw=owned.get(identity)
+            if not raw:continue
+            pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon);current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
+            eligible=(item_key=="potion" and 0<current<maximum) or (item_key=="revive" and current<=0)
+            if eligible:targets.append((slot,identity,pokemon.nickname or SPECIES[pokemon.species_id].name,pokemon.level,current,maximum))
+        return targets
+
+    @staticmethod
+    def field_stone_targets(conf,item_key):
+        evolutions=STONE_EVOLUTIONS.get(item_key,{});owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};targets=[]
+        for slot,identity in enumerate(conf.get("party",[])[:6],1):
+            raw=owned.get(identity)
+            if not raw:continue
+            target=evolutions.get(int(raw.get("species_id",0)))
+            if target:
+                pokemon=OwnedPokemon.from_raw(raw);targets.append((slot,identity,pokemon.nickname or SPECIES[pokemon.species_id].name,pokemon.level,SPECIES[target].name))
+        return targets
+
+    async def show_field_bag(self,interaction,message=None):
+        conf=await self.config.user(interaction.user).all();embed,files=await self.rendered_bag(interaction.user,conf)
+        await interaction.response.edit_message(content=message,embed=embed,attachments=files,view=FieldBagView(self,interaction.user.id,conf))
+
+    async def open_field_medicine(self,interaction,item_key):
+        if self.trainer_in_active_battle(interaction.user.id):
+            await interaction.response.send_message("Use medicine from the active battle’s Bag so the opponent receives its turn.",ephemeral=True);return
+        conf=await self.config.user(interaction.user).all();targets=self.field_medicine_targets(conf,item_key)
+        await interaction.response.edit_message(content=f"Choose a party Pokemon for your {MART_ITEMS[item_key][0]}.",view=FieldMedicineView(self,interaction.user.id,item_key,targets))
+
+    async def open_field_stone(self,interaction,item_key):
+        if self.trainer_in_active_battle(interaction.user.id):
+            await interaction.response.send_message("Finish your active battle before evolving a Pokemon.",ephemeral=True);return
+        conf=await self.config.user(interaction.user).all();targets=self.field_stone_targets(conf,item_key)
+        await interaction.response.edit_message(content=f"Choose an eligible party Pokemon for your {MART_ITEMS[item_key][0]}.",view=FieldStoneView(self,interaction.user.id,item_key,targets))
+
+    async def apply_field_medicine(self,user,item_key,identifier):
+        if self.trainer_in_active_battle(user.id):return False,"Use medicine from the active battle’s Bag so the opponent receives its turn."
+        async with self.lock(("user",user.id)):
+            conf=await self.config.user(user).all();raw=self.find_owned(conf,identifier)
+            if not raw:return False,"Choose a party slot or unique Pokemon name."
+            pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon);current=maximum if pokemon.current_hp is None else int(pokemon.current_hp);items=conf.get("items",{})
+            if item_key=="potion":
+                if current<=0:return False,"That Pokemon has fainted. Use a Revive first."
+                if current>=maximum:return False,"That Pokemon already has full HP."
+                if int(items.get("potion",0))<1:return False,"You have no Potions."
+                items["potion"]=int(items.get("potion",0))-1;pokemon.current_hp=min(maximum,current+20);message=f"{SPECIES[pokemon.species_id].name} recovered {pokemon.current_hp-current} HP ({pokemon.current_hp}/{maximum})."
+            elif item_key=="revive":
+                if current>0:return False,"That Pokemon has not fainted."
+                if int(items.get("revive",0))<1:return False,"You have no Revives."
+                items["revive"]=int(items.get("revive",0))-1;pokemon.current_hp=max(1,maximum//2);pokemon.status="";pokemon.status_turns=0;message=f"{SPECIES[pokemon.species_id].name} was revived with {pokemon.current_hp}/{maximum} HP."
+            else:return False,"That field medicine is unavailable."
+            conf["items"]=items;raw.update(pokemon.raw());await self.config.user(user).set(conf)
+        return True,message
+
+    async def use_field_medicine_interaction(self,interaction,item_key,identifier):
+        success,message=await self.apply_field_medicine(interaction.user,item_key,identifier)
+        if not success:await interaction.response.send_message(message,ephemeral=True);return
+        await self.show_field_bag(interaction,message)
+
+    async def apply_evolution_stone(self,user,item_key,identifier):
+        if item_key not in STONE_EVOLUTIONS:return False,"Choose fire, water, thunder, leaf, or moon stone.",None,None
+        if self.trainer_in_active_battle(user.id):return False,"Finish your active battle before evolving a Pokemon.",None,None
+        async with self.lock(("user",user.id)):
+            conf=await self.config.user(user).all();raw=self.find_owned(conf,identifier)
+            if not raw:return False,"Choose a party slot or unique Pokemon name.",None,None
+            target=STONE_EVOLUTIONS[item_key].get(int(raw.get("species_id",0)));name=raw.get("nickname") or SPECIES[raw["species_id"]].name
+            if not target:return False,f"{name} cannot evolve with a {MART_ITEMS[item_key][0]}.",None,None
+            if self.trade_reserved(await self.config.trades(),raw["instance_id"]):return False,"That Pokemon is reserved in a pending trade or gift.",None,None
+            items=conf.setdefault("items",{})
+            if int(items.get(item_key,0))<1:return False,f"You have no {MART_ITEMS[item_key][0]}s.",None,None
+            items[item_key]=int(items.get(item_key,0))-1;evolved,event=evolve_owned_raw(raw,target);raw.update(evolved);register_owned_species(conf,evolved);conf["items"]=items;await self.config.user(user).set(conf)
+        return True,f"The {MART_ITEMS[item_key][0]} was consumed.",OwnedPokemon.from_raw(evolved),event
+
+    async def use_field_stone_interaction(self,interaction,item_key,identifier):
+        success,message,pokemon,event=await self.apply_evolution_stone(interaction.user,item_key,identifier)
+        if not success:await interaction.response.send_message(message,ephemeral=True);return
+        embed,files=await self.rendered_progression(pokemon,evolved_from=event["from"]);embed.description+=f" {message}"
+        await interaction.response.edit_message(content=None,embed=embed,attachments=files,view=FieldEvolutionResultView(self,interaction.user.id))
 
     @pokemon.command(name="achievements",aliases=["goals"])
     async def achievements(self,ctx):
@@ -1881,57 +1988,25 @@ class Pokemon(commands.Cog):
     async def use_stone(self,ctx,stone:str,identifier:str):
         """Use a Kanto evolution stone on an eligible Pokemon."""
         key=mart_item_key(stone)
-        if key not in STONE_EVOLUTIONS:await ctx.send("Choose fire, water, thunder, leaf, or moon stone.");return
-        if self.trainer_in_active_battle(ctx.author.id):await ctx.send("Finish your active battle before evolving a Pokemon.");return
-        async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique Pokemon name.");return
-            target=STONE_EVOLUTIONS[key].get(int(raw.get("species_id",0)));name=raw.get("nickname") or SPECIES[raw["species_id"]].name
-            if not target:await ctx.send(f"{name} cannot evolve with a {MART_ITEMS[key][0]}.");return
-            if self.trade_reserved(await self.config.trades(),raw["instance_id"]):await ctx.send("That Pokemon is reserved in a pending trade or gift.");return
-            items=conf.setdefault("items",{})
-            if int(items.get(key,0))<1:await ctx.send(f"You have no {MART_ITEMS[key][0]}s.");return
-            items[key]=int(items.get(key,0))-1;evolved,event=evolve_owned_raw(raw,target);raw.update(evolved);register_owned_species(conf,evolved);conf["items"]=items;await self.config.user(ctx.author).set(conf)
-        pokemon=OwnedPokemon.from_raw(evolved);embed,files=await self.rendered_progression(pokemon,evolved_from=event["from"]);embed.description+=f" The {MART_ITEMS[key][0]} was consumed.";await ctx.send(embed=embed,files=files)
+        success,message,pokemon,event=await self.apply_evolution_stone(ctx.author,key,identifier)
+        if not success:await ctx.send(message);return
+        embed,files=await self.rendered_progression(pokemon,evolved_from=event["from"]);embed.description+=f" {message}";await ctx.send(embed=embed,files=files)
 
     @pokemon_use.command(name="potion")
     async def use_potion(self,ctx,identifier:str):
         """Use a Potion to restore a Pokemon’s HP."""
-        async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique Pokemon name.");return
-            pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon)
-            current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
-            if current<=0:await ctx.send("That Pokemon has fainted. Use a Revive first.");return
-            if current>=maximum:await ctx.send("That Pokemon already has full HP.");return
-            items=conf.get("items",{})
-            if int(items.get("potion",0))<1:await ctx.send("You have no Potions.");return
-            items["potion"]=int(items.get("potion",0))-1;conf["items"]=items
-            pokemon.current_hp=min(maximum,current+20);raw.update(pokemon.raw())
-            await self.config.user(ctx.author).set(conf)
-        await ctx.send(f"{SPECIES[pokemon.species_id].name} recovered {pokemon.current_hp-current} HP ({pokemon.current_hp}/{maximum}).")
+        _,message=await self.apply_field_medicine(ctx.author,"potion",identifier);await ctx.send(message)
 
     @pokemon_use.command(name="revive")
     async def use_revive(self,ctx,identifier:str):
         """Use a Revive on a fainted Pokemon."""
-        async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique Pokemon name.");return
-            pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon)
-            current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
-            if current>0:await ctx.send("That Pokemon has not fainted.");return
-            items=conf.get("items",{})
-            if int(items.get("revive",0))<1:await ctx.send("You have no Revives.");return
-            items["revive"]=int(items.get("revive",0))-1;conf["items"]=items
-            pokemon.current_hp=max(1,maximum//2);pokemon.status="";pokemon.status_turns=0;raw.update(pokemon.raw())
-            await self.config.user(ctx.author).set(conf)
-        await ctx.send(f"{SPECIES[pokemon.species_id].name} was revived with {pokemon.current_hp}/{maximum} HP.")
+        _,message=await self.apply_field_medicine(ctx.author,"revive",identifier);await ctx.send(message)
 
     @pokemon.command(name="center")
     @commands.guild_only()
     async def pokemon_center(self,ctx):
         """Heal your party at this server’s Pokemon Center."""
-        center=await self.config.guild(ctx.guild).center_channel()
+        guild_section=self.config.guild(ctx.guild);center=await guild_section.center_channel()
         if not center:await ctx.send("This server has not configured a Pokemon Center.");return
         if ctx.channel.id!=int(center):await ctx.send(f"Visit <#{center}> to use this server’s Pokemon Center.");return
         async with self.lock(("user",ctx.author.id)):
@@ -1943,7 +2018,7 @@ class Pokemon(commands.Cog):
             if not any(pokemon_needs_center(pokemon) for pokemon in before_party):await ctx.send("Your party is already in perfect health!");return
             last=conf.get("center_last_at");now=datetime.now(timezone.utc)
             if last:
-                try:remaining=max(60,int(await self.config.center_cooldown()))-(now-datetime.fromisoformat(last)).total_seconds()
+                try:remaining=effective_center_cooldown(await guild_section.all(),await self.config.all())-(now-datetime.fromisoformat(last)).total_seconds()
                 except (TypeError,ValueError):remaining=0
                 if remaining>0:
                     seconds=int(remaining)+1;minutes,seconds=divmod(seconds,60);wait=f"{minutes}m {seconds}s" if minutes else f"{seconds}s";await ctx.send(f"The Pokemon Center will be ready again in {wait}.");return
@@ -2018,8 +2093,8 @@ class Pokemon(commands.Cog):
     async def gym(self,ctx):
         """View your ordered Kanto Gym progress."""
         conf=await self.config.user(ctx.author).all();upcoming=next_gym(conf.get("badges",[]))
-        command=f"{getattr(ctx,'clean_prefix','[p]')}poke gym challenge"
-        await ctx.send(embed=gym_status_embed(ctx.author,conf,command),view=GymChallengeView(self,ctx.author.id,upcoming.leader) if upcoming and upcoming.key in COMPLETED_GYMS else None)
+        command=f"{getattr(ctx,'clean_prefix','[p]')}poke gym challenge";leader_url,leader_files=self.gym_leader_attachment(upcoming)
+        await ctx.send(embed=gym_status_embed(ctx.author,conf,command,leader_url),files=leader_files,view=GymChallengeView(self,ctx.author.id,upcoming.leader) if upcoming and upcoming.key in COMPLETED_GYMS else None)
 
     @gym.command(name="challenge")
     @commands.guild_only()
@@ -2181,7 +2256,22 @@ class Pokemon(commands.Cog):
         """Set the bot-wide free Pokemon Center cooldown."""
         if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes.");return
         previous=max(60,int(await self.config.center_cooldown()))//60;await self.config.center_cooldown.set(minutes*60)
-        await ctx.send(f"Bot-wide Pokemon Center cooldown changed from **{previous}m** to **{minutes}m** per user. This affects every server.")
+        await ctx.send(f"Bot-wide inherited Pokemon Center cooldown changed from **{previous}m** to **{minutes}m** per user. Servers using an explicit override are unchanged.")
+
+    @pokemon_set.command(name="centercooldown",aliases=["healcooldown"])
+    async def server_center_cooldown(self,ctx,value:str):
+        """Set this server's free Center cooldown to 1–1,440 minutes.
+
+        Use ``inherit`` to restore the bot-wide default.
+        """
+        section=self.config.guild(ctx.guild);conf=await section.all();policy=await self.config.all();previous=effective_center_cooldown(conf,policy)//60
+        if value.casefold() in {"inherit","default","reset","clear"}:
+            await section.center_cooldown.set(None);inherited=effective_center_cooldown({"center_cooldown":None},policy)//60
+            await ctx.send(f"This server: Pokemon Center cooldown changed from **{previous}m** to the inherited bot-wide default of **{inherited}m** per user.");return
+        try:minutes=int(value)
+        except ValueError:await ctx.send("Use 1–1440 minutes, or `inherit`.");return
+        if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes, or `inherit`.");return
+        await section.center_cooldown.set(minutes*60);await ctx.send(f"This server: Pokemon Center cooldown changed from **{previous}m** to a **{minutes}m server override** per user. Other servers are unchanged.")
 
     @pokemon_set.command(name="status",aliases=["settings"])
     async def spawn_status(self,ctx):
@@ -2189,7 +2279,7 @@ class Pokemon(commands.Cog):
         conf=await self.config.guild(ctx.guild).all();policy=await self.config.all();mode=conf.get("spawn_mode","timed")
         minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
         channels=", ".join(f"<#{value}>" for value in conf.get("channels",[])) or "None"
-        center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None";active=await self.guild_encounters(ctx.guild.id,conf);slot_limit=effective_concurrency(conf,policy)
+        center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None";center_minutes=effective_center_cooldown(conf,policy)//60;center_source="server override" if conf.get("center_cooldown") is not None else "inherited bot-wide default";active=await self.guild_encounters(ctx.guild.id,conf);slot_limit=effective_concurrency(conf,policy)
         selected_slots=max(1,min(5,int(conf.get("max_active_encounters",1))));concurrency_ceiling=max(1,min(5,int(policy.get("maximum_concurrency",5))));concurrency_source="bot-owner override" if conf.get("concurrency_owner_override") else f"server selected {selected_slots}; bot-wide ceiling {concurrency_ceiling}"
         if mode=="timed":
             minutes=effective_timer_minutes(conf,policy);due_text="Scheduling now"
@@ -2211,7 +2301,7 @@ class Pokemon(commands.Cog):
             quiet_state="active now" if quiet_hours_active(conf) else "inactive now";quiet_text=f"{format_quiet_clock(conf['quiet_start'])}–{format_quiet_clock(conf['quiet_end'])} {conf['quiet_timezone']} ({quiet_state})"
         else:quiet_text="disabled"
         await ctx.send(
-            f"**Pokemon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}** · Pace: **{selected_pace(conf)}**\nSpawn channels: {channels}\nPokemon Center: {center} · Free-heal cooldown: **{max(60,int(policy.get('center_cooldown',1800)))//60}m**\n"
+            f"**Pokemon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}** · Pace: **{selected_pace(conf)}**\nSpawn channels: {channels}\nPokemon Center: {center} · Free-heal cooldown: **{center_minutes}m** ({center_source})\n"
             f"{progress}\nConcurrency limit: **{slot_limit}** ({concurrency_source}) · Active encounters: **{len(active)}/{slot_limit}** · Next spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** ({encounter_source}) · Battle lifetime: **{battle_minutes}m**\n"
             f"Notifications: **{notification_mode}** · Alert role: {notification_role} · Quiet hours: **{quiet_text}**\n"
             f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nChannel biomes: {biomes}\nExpired unattended cards: **{expired_cards}**\nCatalog species: **{len(SPECIES)}**"
@@ -2553,7 +2643,7 @@ class Pokemon(commands.Cog):
             f"Fresh-install defaults: admin timer floor **{GLOBAL['minimum_timer']}m** · wild lifetime **{GLOBAL['encounter_timeout']//60}m** · Center cooldown **{GLOBAL['center_cooldown']//60}m** · admin concurrency ceiling **{GLOBAL['maximum_concurrency']}**\n"
             f"Timer limits: server administrators **{minimum_timer}–{SERVER_TIMER_MINUTES[1]:,}m** · bot-owner override **{OWNER_TIMER_MINUTES[0]}–{OWNER_TIMER_MINUTES[1]:,}m**\n"
             f"Encounter lifetime: bot-wide default **{effective_encounter_timeout({'encounter_timeout':None},policy)//60}m** · server range **{max(60,min(900,int(policy.get('minimum_encounter_timeout',60))))//60}–{max(60,min(900,int(policy.get('maximum_encounter_timeout',900))))//60}m** (owner-configured; hard range **1–15m**)\n"
-            f"Global free-Center cooldown: current **{max(60,int(policy.get('center_cooldown',1800)))//60}m** · owner-set range **1–1,440m**\n"
+            f"Inherited free-Center cooldown: current **{max(60,int(policy.get('center_cooldown',1800)))//60}m** · owner-set range **1–1,440m** · server-admin overrides **1–1,440m**\n"
             f"Activity-mode floors: **{policy.get('minimum_threshold',8)} points** · **{policy.get('minimum_cooldown',120)}s cooldown**\n"
             f"Concurrency limits: server-admin ceiling **{max(1,min(5,int(policy.get('maximum_concurrency',5))))}** (owner-set range **1–5**) · per-server owner override **1–5**\n"
             f"Allowed generations: **{generations}** · Rarity: **{policy.get('rarity_profile','friendly')}** · Special species: **{'enabled' if policy.get('allow_special_species') else 'event-only'}**\n"

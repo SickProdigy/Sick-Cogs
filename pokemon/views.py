@@ -199,6 +199,74 @@ class MartView(discord.ui.View):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This Poke Mart belongs to another trainer.",ephemeral=True);return False
 
+class FieldMedicineButton(discord.ui.Button):
+    def __init__(self,cog,user_id,item_key,label,emoji,count):
+        super().__init__(label=f"{label} x{count}",emoji=emoji,style=discord.ButtonStyle.success,disabled=count<1)
+        self.cog=cog;self.user_id=user_id;self.item_key=item_key
+    async def callback(self,interaction):await self.cog.open_field_medicine(interaction,self.item_key)
+
+class FieldStoneButton(discord.ui.Button):
+    EMOJIS={"fire_stone":"🔥","water_stone":"💧","thunder_stone":"⚡","leaf_stone":"🍃","moon_stone":"🌙"}
+    def __init__(self,cog,user_id,item_key,label,count):
+        super().__init__(label=f"{label} x{count}",emoji=self.EMOJIS[item_key],style=discord.ButtonStyle.primary,disabled=count<1,row=1)
+        self.cog=cog;self.user_id=user_id;self.item_key=item_key
+    async def callback(self,interaction):await self.cog.open_field_stone(interaction,self.item_key)
+
+class FieldBagView(discord.ui.View):
+    def __init__(self,cog,user_id,conf):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;items=conf.get("items",{})
+        self.add_item(FieldMedicineButton(cog,user_id,"potion","Potion","🧪",int(items.get("potion",0))))
+        self.add_item(FieldMedicineButton(cog,user_id,"revive","Revive","✨",int(items.get("revive",0))))
+        for key in ("fire_stone","water_stone","thunder_stone","leaf_stone","moon_stone"):
+            self.add_item(FieldStoneButton(cog,user_id,key,key.replace("_"," ").title(),int(items.get(key,0))))
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This Poke Bag belongs to another trainer.",ephemeral=True);return False
+
+class FieldMedicineSelect(discord.ui.Select):
+    def __init__(self,cog,user_id,item_key,targets):
+        options=[discord.SelectOption(label=f"{slot}. {name} · Lv.{level}",value=identity,description=f"HP {current}/{maximum}") for slot,identity,name,level,current,maximum in targets]
+        available=bool(options)
+        if not options:options=[discord.SelectOption(label="No eligible party Pokemon",value="none")]
+        super().__init__(placeholder=f"Choose a Pokemon for {item_key.title()}...",options=options,disabled=not available,row=0)
+        self.cog=cog;self.user_id=user_id;self.item_key=item_key
+    async def callback(self,interaction):await self.cog.use_field_medicine_interaction(interaction,self.item_key,self.values[0])
+
+class FieldMedicineView(discord.ui.View):
+    def __init__(self,cog,user_id,item_key,targets):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;self.add_item(FieldMedicineSelect(cog,user_id,item_key,targets))
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This Poke Bag belongs to another trainer.",ephemeral=True);return False
+    @discord.ui.button(label="Back to Bag",style=discord.ButtonStyle.secondary,row=1)
+    async def back(self,interaction,button):await self.cog.show_field_bag(interaction)
+
+class FieldStoneSelect(discord.ui.Select):
+    def __init__(self,cog,user_id,item_key,targets):
+        options=[discord.SelectOption(label=f"{slot}. {name} · Lv.{level}",value=identity,description=f"Evolves into {target}") for slot,identity,name,level,target in targets]
+        available=bool(options)
+        if not options:options=[discord.SelectOption(label="No eligible party Pokemon",value="none")]
+        super().__init__(placeholder=f"Choose a Pokemon for {item_key.replace('_',' ').title()}...",options=options,disabled=not available,row=0)
+        self.cog=cog;self.user_id=user_id;self.item_key=item_key
+    async def callback(self,interaction):await self.cog.use_field_stone_interaction(interaction,self.item_key,self.values[0])
+
+class FieldStoneView(discord.ui.View):
+    def __init__(self,cog,user_id,item_key,targets):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;self.add_item(FieldStoneSelect(cog,user_id,item_key,targets))
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This Poke Bag belongs to another trainer.",ephemeral=True);return False
+    @discord.ui.button(label="Back to Bag",style=discord.ButtonStyle.secondary,row=1)
+    async def back(self,interaction,button):await self.cog.show_field_bag(interaction)
+
+class FieldEvolutionResultView(discord.ui.View):
+    def __init__(self,cog,user_id):super().__init__(timeout=180);self.cog=cog;self.user_id=user_id
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This evolution belongs to another trainer.",ephemeral=True);return False
+    @discord.ui.button(label="Back to Bag",emoji="🎒",style=discord.ButtonStyle.secondary)
+    async def back(self,interaction,button):await self.cog.show_field_bag(interaction)
+
 class CollectionPokemonSelect(discord.ui.Select):
     def __init__(self,cog,user_id,items):
         options=[]

@@ -18,6 +18,8 @@ ITEM_SPRITES={key:key.replace("_","-") for key in ("poke_ball","great_ball","ult
 MAX_SPRITE_BYTES = 2 * 1024 * 1024
 MAX_RENDER_BYTES = 8 * 1024 * 1024
 MAX_COVER_BYTES = 6 * 1024 * 1024
+GYM_LEADER_SPRITES={"boulder":Path(__file__).with_name("assets")/"gym_leaders"/"brock-frlg.png","cascade":Path(__file__).with_name("assets")/"gym_leaders"/"misty-frlg.png"}
+KANTO_BADGE_SPRITES=Path(__file__).with_name("assets")/"badges-frlg.png"
 KANTO_COVERS = (
     ("Red Version","Nintendo_-_Game_Boy","Pokemon - Red Version (USA, Europe) (SGB Enhanced).png"),
     ("Blue Version","Nintendo_-_Game_Boy","Pokemon - Blue Version (USA, Europe) (SGB Enhanced).png"),
@@ -214,9 +216,9 @@ class BattleRenderer:
         try:return await self._render(self._mart_card_sync,items,balance,currency,scope,data)
         except (OSError,ValueError) as exc:raise RenderError("Poke Mart card rendering failed.") from exc
 
-    async def pokedex_registration(self,pokemon,trainer_name):
+    async def pokedex_registration(self,pokemon,trainer_name,registered_count,registered_total):
         data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
-        try:return await self._render(self._pokedex_registration_sync,pokemon,data,trainer_name)
+        try:return await self._render(self._pokedex_registration_sync,pokemon,data,trainer_name,registered_count,registered_total)
         except (OSError,ValueError) as exc:raise RenderError("Pokedex registration rendering failed.") from exc
 
     @staticmethod
@@ -259,11 +261,10 @@ class BattleRenderer:
         if battle.state!="active":
             participant_sprites=None
             if battle.state=="won" and battle.gym_key:
-                result_sprite=await self.get_sprite(battle.player.species_id,shiny=battle.player.shiny)
+                winner=battle.victory_player();result_sprite=await self.get_sprite(winner.species_id,shiny=winner.shiny)
             elif battle.state=="won":
                 result_sprite=await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
-                used=[item for item in battle.party if item.instance_id in set(battle.participants)][:6]
-                participant_sprites=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in used))
+                winner=battle.victory_player();participant_sprites=[await self.get_sprite(winner.species_id,shiny=winner.shiny)]
             else:
                 result_sprite=await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
             ball_sprite=None
@@ -284,7 +285,7 @@ class BattleRenderer:
                 battle.player.species_id, shiny=battle.player.shiny
             )
         try:
-            return await self._render(self._battle_sync, battle, front, back)
+            return await self._render(self._battle_sync, battle, front, back, avatar_data)
         except (OSError, ValueError) as exc:
             raise RenderError("Battle rendering failed.") from exc
 
@@ -328,15 +329,35 @@ class BattleRenderer:
         else:draw.line((x,y+9,x+9,y+9),fill=fill,width=width)
 
     @staticmethod
-    def _pokeball(draw,center,radius):
+    def _pokeball(draw,center,radius,dimmed=False):
         cx,cy=center;box=(cx-radius,cy-radius,cx+radius,cy+radius)
-        draw.ellipse(box,fill=RETRO[7],outline=RETRO[0],width=5)
-        draw.pieslice(box,180,360,fill=(205,63,58),outline=RETRO[0],width=4)
-        draw.rectangle((cx-radius+3,cy-5,cx+radius-3,cy+6),fill=RETRO[0])
-        button=max(7,radius//3)
-        draw.ellipse((cx-button,cy-button,cx+button,cy+button),fill=RETRO[7],outline=RETRO[0],width=4)
-        inner=max(3,button//2)
-        draw.ellipse((cx-inner,cy-inner,cx+inner,cy+inner),fill=RETRO[5],outline=RETRO[1],width=2)
+        shell=(151,154,148) if dimmed else RETRO[7]
+        top=(95,99,96) if dimmed else (205,63,58)
+        band=(54,58,55) if dimmed else RETRO[0]
+        stroke=max(2,radius//5)
+        draw.ellipse(box,fill=shell,outline=band,width=stroke)
+        draw.pieslice(box,180,360,fill=top,outline=band,width=stroke)
+        draw.rectangle((cx-radius+stroke,cy-2,cx+radius-stroke,cy+2),fill=band)
+        button=max(3,radius//3)
+        draw.ellipse((cx-button,cy-button,cx+button,cy+button),fill=shell,outline=band,width=2)
+        inner=max(1,button//2)
+        draw.ellipse((cx-inner,cy-inner,cx+inner,cy+inner),fill=RETRO[5] if not dimmed else shell,outline=RETRO[1] if not dimmed else band,width=2)
+
+    @staticmethod
+    def _party_markers(draw,states,origin):
+        x,y=origin
+        for index,conscious in enumerate(list(states)[:6]):
+            BattleRenderer._pokeball(draw,(x+34*index,y),10,dimmed=not conscious)
+
+    @staticmethod
+    def _battle_party_markers(draw,battle):
+        player_states=[]
+        for pokemon in battle.party[:6]:
+            hp=battle.player_hp if pokemon.instance_id==battle.player.instance_id else battle.party_hp.get(pokemon.instance_id,0)
+            player_states.append(int(hp)>0)
+        BattleRenderer._party_markers(draw,player_states,(450,374))
+        if battle.battle_kind=="gym":
+            BattleRenderer._party_markers(draw,(index>=battle.opponent_index for index in range(battle.opponent_total)),(60,140))
 
     def _starter_sync(self,pokemon,data,trainer_name,choice_species_id=None):
         canvas=Image.new("RGB",(800,450),(224,227,222));draw=ImageDraw.Draw(canvas)
@@ -528,6 +549,11 @@ class BattleRenderer:
         canvas.paste(avatar,(x,y),mask)
         return True
 
+    def _gym_leader_sprite(self,key,size):
+        path=GYM_LEADER_SPRITES.get(key)
+        if not path or not path.is_file():return None
+        return self._open(path.read_bytes(),size,trim=True,upscale=True)
+
     def _gym_victory_sync(self,battle,data,avatar_data=None):
         labels={"boulder":"Boulder Badge","cascade":"Cascade Badge","thunder":"Thunder Badge","rainbow":"Rainbow Badge","soul":"Soul Badge","marsh":"Marsh Badge","volcano":"Volcano Badge","earth":"Earth Badge"}
         badge=labels.get(battle.gym_key,"Gym Badge");canvas=Image.new("RGB",(800,450),(229,214,145));draw=ImageDraw.Draw(canvas)
@@ -536,10 +562,25 @@ class BattleRenderer:
         draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
         self._trainer_portrait(canvas,draw,avatar_data,center=(125,190),diameter=112)
         draw.text((400-int(draw.textlength(badge,font=ImageFont.load_default(size=36)))//2,42),badge,fill=RETRO[0],font=ImageFont.load_default(size=36))
+        leader=self._gym_leader_sprite(battle.gym_key,(115,145))
+        if leader:canvas.paste(leader,(730-leader.width//2,325-leader.height),leader)
         image=self._open(data,(220,190),trim=True,upscale=True);canvas.paste(image,(365-image.width//2,300-image.height),image)
         if battle.gym_key=="boulder":
-            points=((610,125),(665,105),(714,140),(705,205),(650,242),(592,207),(580,150))
-            draw.polygon(points,fill=(126,126,112),outline=RETRO[0]);draw.line((607,144,648,128,687,151,674,195,632,211,604,188,607,144),fill=(201,192,151),width=6)
+            outer=((620,102),(680,102),(722,144),(722,204),(680,246),(620,246),(578,204),(578,144))
+            inner=((628,132),(672,132),(692,152),(692,196),(672,216),(628,216),(608,196),(608,152))
+            facets=((205,208,202),(171,175,170),(95,99,96),(132,136,132),(104,108,105),(82,86,84),(137,141,137),(188,192,186))
+            draw.polygon(outer,fill=(63,66,63),outline=RETRO[0])
+            for index,color in enumerate(facets):
+                following=(index+1)%len(outer)
+                draw.polygon((outer[index],outer[following],inner[following],inner[index]),fill=color)
+            draw.polygon(inner,fill=(151,154,148),outline=(72,76,73),width=4)
+            draw.line((632,138,668,138),fill=(224,226,220),width=4)
+            draw.line((686,156,686,191),fill=(111,115,111),width=4)
+            draw.line((*outer[0],*outer[1],*outer[2],*outer[3],*outer[4],*outer[5],*outer[6],*outer[7],*outer[0]),fill=RETRO[0],width=4)
+        elif battle.gym_key=="cascade":
+            points=((650,100),(708,171),(700,207),(680,232),(650,244),(620,232),(600,207),(592,171))
+            draw.polygon(points,fill=(72,154,205),outline=RETRO[0]);draw.ellipse((610,154,690,230),fill=(91,181,225),outline=RETRO[0],width=4)
+            draw.line((625,180,637,151,654,128),fill=(210,239,244),width=7)
         draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
         self._dialogue(draw,battle.result or f"{badge} earned!",(70,360),width=76,size=16)
         return self._save(canvas)
@@ -605,7 +646,7 @@ class BattleRenderer:
             gray=ImageOps.autocontrast(ImageOps.grayscale(defeated),mask=alpha);defeated=ImageOps.colorize(gray,(35,42,25),(242,235,188)).convert("RGBA");defeated.putalpha(alpha)
             canvas.paste(defeated,(590-defeated.width//2,195-defeated.height),defeated)
             draw.ellipse((45,215,405,330),fill=(169,188,132),outline=RETRO[0],width=4)
-            used=[item for item in battle.party if item.instance_id in set(battle.participants)][:6]
+            used=[battle.victory_player()]
             sprites=list(participant_data or [data])[:len(used)]
             layouts={1:[(225,292)],2:[(170,292),(280,292)],3:[(225,250),(150,300),(300,300)],4:[(170,250),(280,250),(155,302),(295,302)],5:[(170,245),(280,245),(120,302),(225,312),(330,302)],6:[(130,245),(225,235),(320,245),(120,302),(225,312),(330,302)]}
             for raw,(x,bottom) in zip(sprites,layouts.get(len(sprites),[])):
@@ -663,7 +704,13 @@ class BattleRenderer:
         abilities=", ".join(str(value).replace("_"," ").title() for value in species.abilities) or "Unknown"
         return f"Type: {types}",f"Abilities: {abilities}"
 
-    def _pokedex_registration_sync(self,pokemon,data,trainer_name):
+
+    @staticmethod
+    def pokedex_registration_message(species,trainer_name,registered_count,registered_total):
+        trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer";total=max(1,int(registered_total));count=max(0,min(total,int(registered_count)))
+        return f"{species.name} was registered in {trainer}'s Pokedex. Pokedex progress: {count}/{total} registered."
+
+    def _pokedex_registration_sync(self,pokemon,data,trainer_name,registered_count,registered_total):
         species=SPECIES[pokemon.species_id];trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer";canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
         draw.rectangle((28,25,772,340),fill=RETRO[7],outline=RETRO[0],width=6)
         draw.rectangle((48,48,330,315),fill=RETRO[4],outline=RETRO[1],width=4)
@@ -673,7 +720,7 @@ class BattleRenderer:
         type_text,ability_text=self.pokedex_registration_details(species)
         draw.text((370,175),type_text,fill=RETRO[0],font=ImageFont.load_default(size=20))
         self._dialogue(draw,ability_text,(370,211),width=34,max_lines=2,size=18)
-        draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,f"{species.name} was registered in {trainer}'s Pokedex.",(25,382),width=84,size=19)
+        draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,self.pokedex_registration_message(species,trainer,registered_count,registered_total),(25,372),width=84,size=19)
         return self._save(canvas)
 
     def _main_menu_sync(self,user_name,conf,lead,data,style,cover_label=None,avatar_data=None):
@@ -715,9 +762,20 @@ class BattleRenderer:
             vip_font=ImageFont.load_default(size=22);draw.rounded_rectangle((650,48,744,91),12,fill=(214,165,52),outline=ink,width=3);draw.text((675,58),"VIP",fill=ink,font=vip_font)
         draw.text((55,150),f"BADGES  {len(conf.get('badges',[]))}/8",fill=ink,font=ImageFont.load_default(size=20))
         badge_keys=("boulder","cascade","thunder","rainbow","soul","marsh","volcano","earth")
+        try:
+            with Image.open(KANTO_BADGE_SPRITES) as source:badge_sheet=source.convert("RGBA")
+        except (OSError,ValueError):badge_sheet=None
+        earned=set(conf.get("badges",[]))
         for index,key in enumerate(badge_keys):
-            x=62+index*65;color=(214,165,52) if key in conf.get("badges",[]) else (170,174,151)
-            draw.ellipse((x,185,x+40,225),fill=color,outline=ink,width=3)
+            x=54+index*66
+            if badge_sheet is None:
+                color=(214,165,52) if key in earned else (170,174,151);draw.ellipse((x+4,185,x+44,225),fill=color,outline=ink,width=3);continue
+            tile=badge_sheet.crop((index*16,0,index*16+16,16));background=tile.getpixel((0,0))[:3]
+            tile.putdata([(*pixel[:3],0 if pixel[:3]==background else pixel[3]) for pixel in tile.get_flattened_data()])
+            icon=tile.resize((48,48),Image.Resampling.NEAREST)
+            if key not in earned:
+                alpha=icon.getchannel("A");gray=ImageOps.grayscale(icon.convert("RGB"));icon=ImageOps.colorize(gray,(93,105,91),(190,198,178)).convert("RGBA");icon.putalpha(alpha)
+            canvas.paste(icon,(x,181),icon)
         draw.text((55,252),f"POKEDEX  {len(conf.get('pokedex_caught',[]))} caught / {len(conf.get('pokedex_seen',[]))} seen",fill=ink,font=ImageFont.load_default(size=19))
         draw.text((55,284),f"COLLECTION  {len(conf.get('collection',[]))}    PARTY  {len(party)}/6",fill=ink,font=ImageFont.load_default(size=19))
         draw.line((48,322,752,322),fill=ink,width=3);draw.text((55,333),"CURRENT PARTY",fill=ink,font=ImageFont.load_default(size=20))
@@ -726,7 +784,7 @@ class BattleRenderer:
             x=left+index*(slot_width+gap);draw.rounded_rectangle((x,370,x+slot_width,550),12,fill=paper,outline=ink,width=3)
             if index>=len(party):
                 label="EMPTY";font=ImageFont.load_default(size=14);draw.text((x+(slot_width-int(draw.textlength(label,font=font)))//2,447),label,fill=ink,font=font);continue
-            pokemon=party[index];image=self._retro(self._open(data[index],(96,100),trim=True,upscale=True));canvas.paste(image,(x+slot_width//2-image.width//2,483-image.height),image)
+            pokemon=party[index];image=self._open(data[index],(96,100),trim=True,upscale=True);canvas.paste(image,(x+slot_width//2-image.width//2,483-image.height),image)
             name=pokemon.nickname or SPECIES[pokemon.species_id].name;font=ImageFont.load_default(size=14);name=name[:13]
             draw.text((x+(slot_width-int(draw.textlength(name,font=font)))//2,495),name,fill=ink,font=font)
             level=f"Lv. {pokemon.level}";small=ImageFont.load_default(size=12);draw.text((x+10,526),level,fill=ink,font=small)
@@ -812,7 +870,7 @@ class BattleRenderer:
         draw.rectangle((0,360,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,message,(25,382),width=84,size=19)
         return self._save(canvas)
 
-    def _battle_sync(self, battle, front_data, back_data):
+    def _battle_sync(self, battle, front_data, back_data, avatar_data=None):
         canvas = Image.new("RGB", (800, 450), RETRO[4])
         draw = ImageDraw.Draw(canvas)
         draw.rectangle((0, 0, 800, 315), fill=RETRO[5])
@@ -822,12 +880,19 @@ class BattleRenderer:
         draw.ellipse((55, 300, 390, 390), fill=RETRO[2], outline=RETRO[0], width=4)
         front = self._retro(self._open(front_data,(210,185),trim=True,upscale=True))
         back = self._retro(self._open(back_data,(250,220),trim=True,upscale=True))
+        leader=self._gym_leader_sprite(battle.gym_key,(62,72)) if battle.battle_kind=="gym" else None
+        if leader:
+            draw.ellipse((682,18,772,108),fill=RETRO[5],outline=RETRO[0],width=5)
+            canvas.paste(leader,(727-leader.width//2,100-leader.height),leader)
+        if battle.battle_kind=="gym" and avatar_data:
+            self._trainer_portrait(canvas,draw,avatar_data,center=(62,255),diameter=68)
         canvas.paste(front, (595 - front.width // 2, 220 - front.height), front)
         canvas.paste(back, (205 - back.width // 2, 350 - back.height), back)
         wild = SPECIES[battle.wild_species_id]
         player = SPECIES[battle.player.species_id]
         self._status_box(draw,(40,35),wild.name,battle.wild_level,battle.wild_hp,battle.wild_max_hp,battle.wild_status,battle.wild_gender)
         self._status_box(draw,(430,270),player.name,battle.player.level,battle.player_hp,battle.max_hp(battle.player),battle.player_status,battle.player.gender)
+        self._battle_party_markers(draw,battle)
         draw.rectangle((0, 390, 800, 450), fill=RETRO[5], outline=RETRO[0], width=5)
         text = battle.result or battle.last_action or f"What will {player.name} do?"
         self._dialogue(draw,text,(20,400))
@@ -842,7 +907,7 @@ class BattleRenderer:
         flat.extend([0] * (768 - len(flat)))
         palette.putpalette(flat)
         alpha = image.getchannel("A")
-        rgb = image.convert("RGB").quantize(palette=palette, dither=Image.Dither.FLOYDSTEINBERG).convert("RGBA")
+        rgb = image.convert("RGB").quantize(palette=palette, dither=Image.Dither.NONE).convert("RGBA")
         rgb.putalpha(alpha)
         return rgb
 

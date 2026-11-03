@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import AsyncMock
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image,ImageDraw
 from pokemon.catching import BALLS,attempt_catch,calculate_catch_value
 from pokemon.catalog_versions import CATALOG_VERSIONS,DIMENSIONS
 from pokemon.data import EVOLUTIONS,SPECIES,effectiveness,experience_to_next,moves_for_level,total_experience
@@ -249,14 +249,14 @@ class BattleTests(unittest.TestCase):
         self.assertEqual((restored.battle_kind,restored.gym_key),("gym","boulder"))
 
     def test_gym_opponent_party_switches_and_round_trips(self):
-        b=battle();b.battle_kind="gym";b.gym_key="boulder";b.initialize_opponents(((74,12),(95,14)))
+        b=battle();b.battle_kind="gym";b.gym_key="cascade";b.initialize_opponents(((120,18),(121,21)))
         b.wild_hp=0;b._finish_if_needed()
-        self.assertEqual((b.state,b.wild_species_id,b.wild_level,b.opponent_index),("active",95,14,1))
-        self.assertIn("sent out Onix",b.result);self.assertEqual(b.opponents_defeated,[74])
+        self.assertEqual((b.state,b.wild_species_id,b.wild_level,b.opponent_index),("active",121,21,1))
+        self.assertIn("sent out Starmie",b.result);self.assertEqual(b.opponents_defeated,[120])
         restored=Battle.from_raw(b.raw())
-        self.assertEqual((restored.wild_species_id,restored.opponent_index,restored.opponent_total),(95,1,2))
+        self.assertEqual((restored.wild_species_id,restored.opponent_index,restored.opponent_total),(121,1,2))
         restored.wild_hp=0;restored._finish_if_needed()
-        self.assertEqual(restored.state,"won");self.assertEqual(restored.opponents_defeated,[74,95]);self.assertGreater(restored.experience_award,0)
+        self.assertEqual(restored.state,"won");self.assertEqual(restored.opponents_defeated,[120,121]);self.assertGreater(restored.experience_award,0)
 
     def test_action_history_is_monotonic_and_bounded(self):
         b=battle()
@@ -361,6 +361,15 @@ class BattleTests(unittest.TestCase):
         self.assertGreater(b.player_hp,0)
         self.assertEqual(b.turn,turn)
         self.assertEqual(b.last_action,"Go, Squirtle!")
+
+    def test_victory_records_second_and_third_slot_winners(self):
+        for winning_slot in (1,2):
+            with self.subTest(winning_slot=winning_slot+1):
+                party=[OwnedPokemon.create(f"slot-{index}",species,8,seed=index+10) for index,species in enumerate((4,7,25))]
+                b=Battle(20+winning_slot,100,1,2,3,party[0],10,8,1,20,seed=5);b.initialize_party(party)
+                b.player_hp=0;b._finish_if_needed();b.switch_to(winning_slot);b.wild_hp=0;b._finish_if_needed()
+                self.assertEqual((b.state,b.player.instance_id,b.victory_player_id),("won",party[winning_slot].instance_id,party[winning_slot].instance_id))
+                restored=Battle.from_raw(b.raw());self.assertEqual(restored.victory_player().instance_id,party[winning_slot].instance_id)
     def test_renderer_trims_and_upscales_small_padded_sprites(self):
         source=io.BytesIO();image=Image.new("RGBA",(96,96),(0,0,0,0))
         for x in range(40,56):
@@ -370,6 +379,11 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(rendered.size,(56,42))
         self.assertEqual(rendered.getchannel("A").getbbox(),(0,0,56,42))
 
+    def test_retro_palette_does_not_add_floyd_steinberg_grain(self):
+        source=Image.new("RGBA",(32,32),(180,180,80,255))
+        rendered=BattleRenderer._retro(source)
+        self.assertEqual(len(rendered.getcolors(maxcolors=256)),1)
+
     def test_trainer_party_preserves_saved_order_and_skips_missing_entries(self):
         first=OwnedPokemon.create("first",4,5,seed=1);second=OwnedPokemon.create("second",7,3,seed=2)
         conf={"collection":[first.raw(),second.raw()],"party":["second","missing","first"]}
@@ -378,6 +392,7 @@ class BattleTests(unittest.TestCase):
     def test_pokedex_registration_details_show_types_and_abilities(self):
         self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[39]),("Type: Normal / Fairy","Abilities: Cute Charm, Competitive"))
         self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[25]),("Type: Electric","Abilities: Static"))
+        self.assertEqual(BattleRenderer.pokedex_registration_message(SPECIES[74],"  Prodigy  ",42,151),"Geodude was registered in Prodigy's Pokedex. Pokedex progress: 42/151 registered.")
 
     def test_pokemon_center_dialogue_is_ascii_safe(self):
         self.assertEqual(BattleRenderer.pokemon_center_message("SickProdigy",True),"SickProdigy, your Pokemon are back to perfect health!")
@@ -389,7 +404,8 @@ class BattleTests(unittest.TestCase):
         source=io.BytesIO()
         Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
         data=source.getvalue();avatar_source=io.BytesIO();Image.new("RGBA",(80,80),(220,40,80,255)).save(avatar_source,"PNG");avatar_data=avatar_source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
-        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);expired=renderer._encounter_sync(10,data,backdrop=0,expired=True);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy",[1]);bag_card=renderer._bag_card_sync([("poke_ball","Poke Ball",8),("moon_stone","Moon Stone",1)],"SickProdigy",[data,data]);registration=renderer._pokedex_registration_sync(starter_pokemon,data,"SickProdigy");menu_conf={"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id]};retro_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"retro",avatar_data=avatar_data);modern_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"modern",avatar_data=avatar_data);starter_pokemon.current_hp=0;center_treating=renderer._pokemon_center_sync([starter_pokemon],[data],"SickProdigy",False);starter_pokemon.current_hp=pokemon_max_hp(starter_pokemon);center_complete=renderer._pokemon_center_sync([starter_pokemon],[data],"SickProdigy",True);trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},[starter_pokemon],[data],"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data,avatar_data);b.gym_key="boulder";gym_victory=renderer._gym_victory_sync(b,data,avatar_data);b.gym_key="";b.state="caught";b.last_ball="great_ball";caught_result=renderer._battle_result_sync(b,data,avatar_data,data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
+        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);expired=renderer._encounter_sync(10,data,backdrop=0,expired=True);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy",[1]);bag_card=renderer._bag_card_sync([("poke_ball","Poke Ball",8),("moon_stone","Moon Stone",1)],"SickProdigy",[data,data]);registration=renderer._pokedex_registration_sync(starter_pokemon,data,"SickProdigy",42,151);menu_conf={"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id]};retro_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"retro",avatar_data=avatar_data);modern_menu=renderer._main_menu_sync("SickProdigy",menu_conf,starter_pokemon,data,"modern",avatar_data=avatar_data);starter_pokemon.current_hp=0;center_treating=renderer._pokemon_center_sync([starter_pokemon],[data],"SickProdigy",False);starter_pokemon.current_hp=pokemon_max_hp(starter_pokemon);center_complete=renderer._pokemon_center_sync([starter_pokemon],[data],"SickProdigy",True);trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},[starter_pokemon],[data],"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.battle_kind="gym";b.gym_key="boulder";b.initialize_opponents(((74,12),(95,14)));gym_scene=renderer._battle_sync(b,data,data);b.opponent_index=1;gym_scene_switched=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data,avatar_data);b.gym_key="boulder";gym_victory=renderer._gym_victory_sync(b,data,avatar_data);b.gym_key="cascade";cascade_victory=renderer._gym_victory_sync(b,data,avatar_data);b.gym_key="";b.state="caught";b.last_ball="great_ball";caught_result=renderer._battle_result_sync(b,data,avatar_data,data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
+        active_gym=battle();active_gym.battle_kind="gym";active_gym.gym_key="boulder";active_gym.initialize_opponents(((74,12),(95,14)));gym_scene_avatar=renderer._battle_sync(active_gym,data,data,avatar_data)
         self.assertEqual(len(ENCOUNTER_BACKDROPS),12)
         self.assertEqual(len(KANTO_COVERS),11)
         with Image.open(encounter) as image,Image.open(alternate) as other:
@@ -415,8 +431,23 @@ class BattleTests(unittest.TestCase):
             self.assertEqual(retro.size,(800,500));self.assertEqual(modern.size,(800,500));self.assertNotEqual(retro.getpixel((10,10)),modern.getpixel((10,10)))
         with Image.open(center_treating) as treating,Image.open(center_complete) as complete:
             self.assertEqual(treating.size,(900,540));self.assertEqual(complete.size,(900,540));self.assertNotEqual(treating.getpixel((240,211)),complete.getpixel((240,211)));self.assertEqual(complete.getpixel((300,240)),(188,91,96));self.assertNotEqual(treating.getpixel((160,150)),complete.getpixel((160,150)))
-        with Image.open(trainer_card) as image:self.assertEqual(image.size,(800,610))
-        with Image.open(gym_victory) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(trainer_card) as image:
+            self.assertEqual(image.size,(800,610))
+            self.assertEqual(image.getpixel((100,430)),(40,120,220))
+            earned=image.crop((54,181,102,229));locked=image.crop((120,181,168,229))
+            self.assertGreater(len(earned.getcolors(maxcolors=2305)),4);self.assertNotEqual(earned.tobytes(),locked.tobytes())
+        with Image.open(scene) as ordinary,Image.open(gym_scene) as gym_battle,Image.open(gym_scene_switched) as switched:
+            self.assertNotEqual(ordinary.crop((620,35,750,205)).tobytes(),gym_battle.crop((620,35,750,205)).tobytes())
+            self.assertNotEqual(gym_battle.crop((48,128,112,152)).tobytes(),switched.crop((48,128,112,152)).tobytes())
+            self.assertNotEqual(gym_battle.crop((50,130,71,151)).tobytes(),switched.crop((50,130,71,151)).tobytes())
+        with Image.open(gym_scene) as without_trainer,Image.open(gym_scene_avatar) as with_trainer:
+            self.assertNotEqual(without_trainer.crop((20,210,105,300)).tobytes(),with_trainer.crop((20,210,105,300)).tobytes())
+        with Image.open(gym_victory) as image:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((650,115)),(205,208,202))
+            self.assertEqual(image.getpixel((650,174)),(151,154,148))
+            self.assertEqual(image.getpixel((706,174)),(95,99,96))
+        with Image.open(cascade_victory) as image:self.assertEqual(image.getpixel((650,190)),(91,181,225))
         with Image.open(evolution) as image:self.assertEqual(image.size,(800,450))
         with Image.open(move_card) as image:self.assertEqual(image.size,(800,450))
         with Image.open(starter) as image:
@@ -461,14 +492,23 @@ class BattleTests(unittest.TestCase):
         b.state="lost"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
 
+    def test_active_battle_party_markers_dim_fainted_player_slots(self):
+        first=OwnedPokemon.create("first",4,8,seed=1);second=OwnedPokemon.create("second",7,8,seed=2);third=OwnedPokemon.create("third",25,8,seed=3)
+        current=Battle(1,100,1,2,3,first,10,8,20,20);current.initialize_party([first,second,third]);current.party_hp[second.instance_id]=0
+        image=Image.new("RGB",(800,450),RETRO[5]);BattleRenderer._battle_party_markers(ImageDraw.Draw(image),current)
+        first_ball=image.crop((440,364,461,385)).tobytes();fainted_ball=image.crop((474,364,495,385)).tobytes();third_ball=image.crop((508,364,529,385)).tobytes()
+        self.assertEqual(first_ball,third_ball);self.assertNotEqual(first_ball,fainted_ball)
+        self.assertEqual(image.getpixel((450,367)),(205,63,58));self.assertEqual(image.getpixel((450,381)),RETRO[7])
+        self.assertEqual(image.getpixel((484,367)),(95,99,96));self.assertNotEqual(image.getpixel((484,367)),(205,63,58))
+
 
 class RendererAsyncTests(unittest.IsolatedAsyncioTestCase):
-    async def test_victory_result_fetches_defeated_opponent_and_used_party_sprites(self):
-        renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();second=OwnedPokemon.create("second",7,5,seed=2);current.initialize_party([current.player,second]);current.participants=[current.player.instance_id,second.instance_id];current.state="won"
-        renderer.get_sprite=AsyncMock(side_effect=[b"wild",b"first",b"second"]);renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
+    async def test_victory_result_fetches_defeated_opponent_and_actual_winner_sprite(self):
+        renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();second=OwnedPokemon.create("second",7,5,seed=2);third=OwnedPokemon.create("third",25,5,seed=3);current.initialize_party([current.player,second,third]);current.player=third;current.victory_player_id=third.instance_id;current.state="won"
+        renderer.get_sprite=AsyncMock(side_effect=[b"wild",b"third"]);renderer._render=AsyncMock(return_value=io.BytesIO(b"card"))
         await renderer.battle(current)
-        self.assertEqual([call.args[0] for call in renderer.get_sprite.await_args_list],[current.wild_species_id,current.player.species_id,second.species_id])
-        self.assertEqual(renderer._render.await_args.args[-1],[b"first",b"second"])
+        self.assertEqual([call.args[0] for call in renderer.get_sprite.await_args_list],[current.wild_species_id,third.species_id])
+        self.assertEqual(renderer._render.await_args.args[-1],[b"third"])
 
     async def test_catch_result_uses_the_thrown_ball_sprite(self):
         renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();current.state="caught";current.last_ball="ultra_ball"

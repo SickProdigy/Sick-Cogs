@@ -13,10 +13,10 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import COMPLETED_GYMS,KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
-from pokemon.pokemon import BIOMES, GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, biome_weight, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
+from pokemon.pokemon import BIOMES, GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_center_cooldown, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, biome_weight, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeLobbyView, TradeCollectionView, GymChallengeView
+from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, FieldBagView, FieldMedicineView, FieldStoneView, FieldEvolutionResultView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeLobbyView, TradeCollectionView, GymChallengeView
 
 
 class StoredValue:
@@ -308,7 +308,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemonownerset timermin",owner_names)
         self.assertIs(Pokemon.pokemon_owner_set.get_command("globalstatus"),Pokemon.pokemon_owner_set.get_command("settings"))
         self.assertIs(Pokemon.pokemon_owner_set.get_command("globalstatus"),Pokemon.pokemon_owner_set.get_command("status"))
-        self.assertNotIn("pokemonset centercooldown",admin_names)
+        self.assertIn("pokemonset centercooldown",admin_names)
         self.assertIn("pokemonownerset centercooldown",owner_names)
         self.assertNotIn("pokemonset rarity",admin_names)
         self.assertIn("pokemonownerset rarity",owner_names)
@@ -338,9 +338,9 @@ class GymProgressionTests(unittest.TestCase):
         self.assertEqual([gym.key for gym in KANTO_GYMS],["boulder","cascade","thunder","rainbow","soul","marsh","volcano","earth"])
         self.assertEqual(next_gym([]).leader,"Brock")
         self.assertEqual(next_gym([]).team,((74,12),(95,14)))
-        self.assertEqual(next_gym(["boulder"]).leader,"Misty")
+        self.assertEqual((next_gym(["boulder"]).leader,next_gym(["boulder"]).team),("Misty",((120,18),(121,21))))
         self.assertIsNone(next_gym([gym.key for gym in KANTO_GYMS]))
-        self.assertEqual(COMPLETED_GYMS,{"boulder"})
+        self.assertEqual(COMPLETED_GYMS,{"boulder","cascade"})
 
     def test_badge_case_and_profile_show_journey(self):
         user=SimpleNamespace(display_name="SickProdigy",display_avatar=SimpleNamespace(url="https://example.com/avatar.png"))
@@ -348,10 +348,15 @@ class GymProgressionTests(unittest.TestCase):
         profile=trainer_profile_embed(user,conf,300)
         self.assertIn("SickProdigy",profile.title)
         self.assertIn("1/8",profile.fields[0].name)
-        self.assertIn("Misty",profile.footer.text);self.assertIn("Locked",profile.footer.text)
+        self.assertIn("Misty",profile.footer.text);self.assertNotIn("Locked",profile.footer.text)
+        self.assertEqual([field.name for field in profile.fields],["Badge Case · 1/8","Pokedex","Collection","Partner"])
+        self.assertFalse(profile.fields[1].inline);self.assertFalse(profile.fields[2].inline)
         self.assertEqual(badge_case(["boulder"]).count("◻️"),7)
-        status=gym_status_embed(user,conf,"!poke gym challenge")
-        self.assertIn("Misty",status.fields[1].value);self.assertIn("under development",status.fields[1].value);self.assertNotIn("!poke gym challenge",status.footer.text)
+        status=gym_status_embed(user,conf,"!poke gym challenge","attachment://gym-leader-misty.png")
+        self.assertEqual(status.fields[1].value,"Misty · Cerulean City");self.assertNotIn("Poke Balls",status.fields[1].value);self.assertNotIn("Staryu",status.fields[1].value);self.assertNotIn("Starmie",status.fields[1].value);self.assertIn("!poke gym challenge",status.footer.text)
+        self.assertEqual(status.thumbnail.url,"attachment://gym-leader-misty.png")
+        locked=gym_status_embed(user,{**conf,"badges":["boulder","cascade"]},"!poke gym challenge")
+        self.assertIn("Lt. Surge",locked.fields[1].value);self.assertIn("under development",locked.fields[1].value)
 
 
 class PokedexTests(unittest.TestCase):
@@ -425,12 +430,39 @@ class PokedexTests(unittest.TestCase):
         self.assertTrue(Pokemon.trade_reserved(trades,"outgoing"));self.assertFalse(Pokemon.trade_reserved(trades,"spare"));self.assertFalse(Pokemon.trade_reserved(trades,"outgoing",1))
 
 class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_battle_result_attachment_is_keyed_to_psyduck_and_electabuzz(self):
+        player=OwnedPokemon.create("psyduck",54,30,seed=7)
+        current=Battle(88,100,1,2,3,player,125,30,80,0,seed=9)
+        current.state="won";current.action_count=7;current.trainer_name="SickProdigy"
+        cog=Pokemon.__new__(Pokemon);cog.bot=SimpleNamespace(get_user=lambda _user_id:None)
+        cog.renderer=SimpleNamespace(battle=AsyncMock(return_value=io.BytesIO(b"image")))
+        embed,files=await cog.rendered_battle(current)
+        filename="battle-88-7-won-54-125.png"
+        self.assertEqual(embed.title,"SickProdigy defeated Electabuzz!")
+        self.assertEqual(embed.image.url,f"attachment://{filename}")
+        self.assertEqual(files[0].filename,filename)
+        cog.renderer.battle.assert_awaited_once_with(current,avatar_data=None)
+
+    async def test_victory_embed_attachment_and_renderer_use_the_same_switched_winner(self):
+        first=OwnedPokemon.create("first",4,20,seed=1);second=OwnedPokemon.create("second",7,20,seed=2);current=Battle(89,100,1,2,3,first,125,30,1,20,seed=9,trainer_name="SickProdigy")
+        current.initialize_party([first,second]);current.player_hp=0;current._finish_if_needed();current.switch_to(1);current.wild_hp=0;current._finish_if_needed()
+        cog=Pokemon.__new__(Pokemon);cog.bot=SimpleNamespace(get_user=lambda _user_id:None);cog.renderer=SimpleNamespace(battle=AsyncMock(return_value=io.BytesIO(b"image")))
+        embed,files=await cog.rendered_battle(current);filename=f"battle-89-{current.action_count}-won-7-125.png"
+        self.assertEqual(embed.fields[0].name,"Squirtle HP");self.assertEqual(embed.image.url,f"attachment://{filename}");self.assertEqual(files[0].filename,filename)
+        self.assertEqual(current.victory_player_id,"second");cog.renderer.battle.assert_awaited_once_with(current,avatar_data=None)
+
+    async def test_active_gym_battle_uses_the_trainer_avatar(self):
+        current=battle();current.battle_kind="gym";current.gym_key="boulder";avatar=SimpleNamespace(with_size=lambda size:SimpleNamespace(read=AsyncMock(return_value=b"avatar")));user=SimpleNamespace(display_avatar=avatar)
+        cog=Pokemon.__new__(Pokemon);cog.bot=SimpleNamespace(get_user=lambda user_id:user);cog.renderer=SimpleNamespace(battle=AsyncMock(return_value=io.BytesIO(b"image")))
+        await cog.rendered_battle(current)
+        cog.renderer.battle.assert_awaited_once_with(current,avatar_data=b"avatar")
+
     async def test_pokedex_registration_names_the_trainer(self):
         pokemon=OwnedPokemon.create("registration",39,3,seed=2)
         cog=Pokemon.__new__(Pokemon);cog.renderer=SimpleNamespace(pokedex_registration=AsyncMock(return_value=io.BytesIO(b"png")))
-        embed,files=await cog.rendered_pokedex_registration(pokemon,"  SickProdigy  ")
+        embed,files=await cog.rendered_pokedex_registration(pokemon,"  SickProdigy  ",42)
         self.assertEqual(embed.description,"New Pokemon data was added to SickProdigy's Pokedex.")
-        cog.renderer.pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy")
+        cog.renderer.pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy",42,151)
         self.assertEqual(len(files),1)
 
 
@@ -499,10 +531,25 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(user=lambda user:section);cog.rendered_main_menu=AsyncMock(return_value=(discord.Embed(title="Modern menu"),[]))
         view=MainMenuView(cog,42);denied=SimpleNamespace(user=SimpleNamespace(id=7),response=SimpleNamespace(send_message=AsyncMock()))
         self.assertFalse(await view.interaction_check(denied));denied.response.send_message.assert_awaited_once()
-        response=SimpleNamespace(edit_message=AsyncMock());interaction=SimpleNamespace(user=SimpleNamespace(id=42,display_name="Trainer"),response=response)
+        response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock());interaction=SimpleNamespace(user=SimpleNamespace(id=42,display_name="Trainer"),response=response)
         await cog.open_menu_section(interaction,"style")
         self.assertEqual(section.value["menu_style"],"modern")
         response.edit_message.assert_awaited_once();self.assertIsInstance(response.edit_message.await_args.kwargs["view"],MainMenuView)
+        await cog.open_menu_section(interaction,"trade")
+        guidance=response.send_message.await_args.args[0]
+        self.assertIn("`poke trade`",guidance);self.assertIn("`poke trade @trainer <your collection number> <their collection number>`",guidance)
+        self.assertIn("`poke trade collection @trainer`",guidance)
+
+    async def test_party_views_use_owner_avatar_thumbnail(self):
+        avatar_url="https://example.com/party-owner.png";user=SimpleNamespace(id=42,display_name="Trainer",display_avatar=SimpleNamespace(url=avatar_url))
+        section=StoredSection({"collection":[],"party":[]});renderer=SimpleNamespace(party_card=AsyncMock(return_value=io.BytesIO(b"card")))
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda member:section);cog.renderer=renderer
+        response=SimpleNamespace(send_message=AsyncMock());interaction=SimpleNamespace(user=user,response=response)
+        await cog.open_menu_section(interaction,"party")
+        self.assertEqual(response.send_message.await_args.kwargs["embed"].thumbnail.url,avatar_url)
+        ctx=SimpleNamespace(author=user,send=AsyncMock())
+        await Pokemon.party.callback(cog,ctx)
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].thumbnail.url,avatar_url)
 
     async def test_starter_picker_is_one_time_and_encounter_scoped(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
@@ -625,10 +672,28 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_bag_command_uses_trainer_name(self):
         section=StoredSection({"balls":8,"items":{"great_ball":6,"ultra_ball":1,"potion":10,"revive":2}})
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section);cog.renderer=SimpleNamespace(bag_card=AsyncMock(return_value=io.BytesIO(b"card")))
-        ctx=SimpleNamespace(author=SimpleNamespace(display_name="SickProdigy"),send=AsyncMock())
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42,display_name="SickProdigy"),send=AsyncMock())
         await Pokemon.pokemon_bag.callback(cog,ctx)
         sent=ctx.send.await_args.kwargs;self.assertEqual(sent["embed"].title,"SickProdigy’s Poke Bag");self.assertIsNone(sent["embed"].description);self.assertEqual(len(sent["files"]),1)
+        self.assertIsInstance(sent["view"],FieldBagView);self.assertEqual([item.label for item in sent["view"].children],["Potion x10","Revive x2","Fire Stone x0","Water Stone x0","Thunder Stone x0","Leaf Stone x0","Moon Stone x0"])
+        self.assertTrue(all(item.disabled for item in sent["view"].children[2:]))
         items,trainer=cog.renderer.bag_card.await_args.args;self.assertEqual(trainer,"SickProdigy");self.assertIn(("great_ball","Great Ball",6),items);self.assertIn(("moon_stone","Moon Stone",0),items)
+
+    def test_field_medicine_targets_only_eligible_party_pokemon(self):
+        healthy=OwnedPokemon.create("healthy",4,5,seed=1);hurt=OwnedPokemon.create("hurt",7,6,seed=2);fainted=OwnedPokemon.create("fainted",25,7,seed=3);boxed=OwnedPokemon.create("boxed",1,8,seed=4)
+        hurt.current_hp=1;fainted.current_hp=0;boxed.current_hp=1
+        conf={"collection":[healthy.raw(),hurt.raw(),fainted.raw(),boxed.raw()],"party":["healthy","hurt","fainted"]}
+        self.assertEqual([item[1] for item in Pokemon.field_medicine_targets(conf,"potion")],["hurt"])
+        self.assertEqual([item[1] for item in Pokemon.field_medicine_targets(conf,"revive")],["fainted"])
+        view=FieldMedicineView(SimpleNamespace(),42,"potion",Pokemon.field_medicine_targets(conf,"potion"))
+        selector=next(item for item in view.children if isinstance(item,discord.ui.Select));self.assertEqual(selector.options[0].label,"2. Squirtle · Lv.6")
+
+    def test_field_stones_target_only_eligible_party_pokemon(self):
+        pikachu=OwnedPokemon.create("pikachu",25,10,seed=1);eevee=OwnedPokemon.create("eevee",133,12,seed=2);boxed=OwnedPokemon.create("boxed",25,14,seed=3)
+        conf={"collection":[pikachu.raw(),eevee.raw(),boxed.raw()],"party":["pikachu","eevee"],"items":{"thunder_stone":1}}
+        targets=Pokemon.field_stone_targets(conf,"thunder_stone");self.assertEqual([(item[0],item[1],item[4]) for item in targets],[(1,"pikachu","Raichu"),(2,"eevee","Jolteon")])
+        view=FieldStoneView(SimpleNamespace(),42,"thunder_stone",targets);selector=next(item for item in view.children if isinstance(item,discord.ui.Select))
+        self.assertEqual(selector.options[0].label,"1. Pikachu · Lv.10");self.assertEqual(selector.options[0].description,"Evolves into Raichu")
 
     async def test_owner_reset_requires_confirmation_and_releases_battle(self):
         section=StoredSection({"collection":[{"instance_id":"starter"}],"starter_chosen":True})
@@ -674,6 +739,14 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx=SimpleNamespace(author=SimpleNamespace(id=7),send=AsyncMock())
         await Pokemon.use_stone.callback(cog,ctx,"thunder","1")
         evolved=OwnedPokemon.from_raw(section.value["collection"][0]);self.assertEqual((evolved.species_id,evolved.level,evolved.moves),(26,10,before_moves));self.assertEqual(section.value["items"]["thunder_stone"],0);self.assertIn(26,section.value["pokedex_caught"]);cog.rendered_progression.assert_awaited_once()
+
+    async def test_bag_stone_evolves_selected_party_pokemon_and_shows_result(self):
+        pikachu=OwnedPokemon.create("pikachu",25,10,seed=3);section=StoredSection({"collection":[pikachu.raw()],"party":["pikachu"],"items":{"thunder_stone":1},"pokedex_seen":[25],"pokedex_caught":[25]})
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(user=lambda user:section,trades=StoredValue({}));cog.rendered_progression=AsyncMock(return_value=(discord.Embed(title="Pikachu evolved!",description="Evolution complete."),[]))
+        response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock());interaction=SimpleNamespace(user=SimpleNamespace(id=7),response=response)
+        await cog.use_field_stone_interaction(interaction,"thunder_stone","pikachu")
+        evolved=OwnedPokemon.from_raw(section.value["collection"][0]);self.assertEqual(evolved.species_id,26);self.assertEqual(section.value["items"]["thunder_stone"],0)
+        sent=response.edit_message.await_args.kwargs;self.assertEqual(sent["embed"].title,"Pikachu evolved!");self.assertIsInstance(sent["view"],FieldEvolutionResultView);response.send_message.assert_not_awaited()
 
     async def test_mart_refunds_when_inventory_persistence_fails(self):
         section=SimpleNamespace(all=AsyncMock(return_value={"balls":10,"items":{}}),set=AsyncMock(side_effect=RuntimeError("storage failed")));prices=StoredValue({key:value[2] for key,value in MART_ITEMS.items()})
@@ -756,7 +829,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         pokemon=OwnedPokemon.create("medicine",7,10,seed=4)
         maximum=Battle.stat(pokemon,"hp");pokemon.current_hp=1
         section=StoredSection({"collection":[pokemon.raw()],"party":["medicine"],"items":{"potion":1,"revive":1}})
-        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(user=lambda user:section)
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(user=lambda user:section)
         ctx=SimpleNamespace(author=SimpleNamespace(id=42),send=AsyncMock())
         await Pokemon.use_potion.callback(cog,ctx,"1")
         restored=OwnedPokemon.from_raw(section.value["collection"][0])
@@ -767,6 +840,12 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         revived=OwnedPokemon.from_raw(section.value["collection"][0])
         self.assertEqual(revived.current_hp,max(1,maximum//2))
         self.assertEqual(section.value["items"]["revive"],0)
+
+    async def test_field_medicine_is_blocked_during_active_battle(self):
+        pokemon=OwnedPokemon.create("medicine",7,10,seed=4);pokemon.current_hp=1;section=StoredSection({"collection":[pokemon.raw()],"party":["medicine"],"items":{"potion":1}})
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={1:SimpleNamespace(user_id=42,state="active")};cog.config=SimpleNamespace(user=lambda user:section)
+        success,message=await cog.apply_field_medicine(SimpleNamespace(id=42),"potion","medicine")
+        self.assertFalse(success);self.assertIn("active battle",message);self.assertEqual(section.value["items"]["potion"],1)
 
     def test_legacy_underleveled_evolution_move_repair_is_targeted(self):
         rapidash=OwnedPokemon.create("rapidash",78,40,seed=4);rapidash.level=3;rapidash.moves=("stomp","tail_whip","growl","ember");rapidash.move_pp={key:1 for key in rapidash.moves}
@@ -904,11 +983,11 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         party=OwnedPokemon.create("party",4,10,seed=3);party.current_hp=0;party.status="burn";party.move_pp={key:0 for key in party.moves}
         boxed=OwnedPokemon.create("boxed",7,10,seed=4);boxed.current_hp=1
         section=StoredSection({"collection":[party.raw(),boxed.raw()],"party":["party"],"items":{},"center_last_at":None})
-        center=StoredValue(55)
+        center=StoredValue(55);guild_section=StoredSection({**GUILD,"center_channel":55})
         message=SimpleNamespace(edit=AsyncMock());cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(
             user=lambda user:section,
-            guild=lambda guild:SimpleNamespace(center_channel=center),
-            center_cooldown=StoredValue(1800),
+            guild=lambda guild:SimpleNamespace(center_channel=center,all=guild_section.all),
+            all=AsyncMock(return_value={"center_cooldown":1800}),
         );cog.rendered_center=AsyncMock(side_effect=lambda user,party,complete=False:(discord.Embed(title="Complete" if complete else "Healing"),[]))
         ctx=SimpleNamespace(author=SimpleNamespace(id=42,display_name="Trainer"),guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=55),send=AsyncMock(return_value=message))
         with patch("pokemon.pokemon.asyncio.sleep",new=AsyncMock()) as sleep:
@@ -938,7 +1017,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cooldown=StoredValue(1800);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(center_cooldown=cooldown);ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.center_cooldown.callback(cog,ctx,45)
         self.assertEqual(cooldown.value,2700)
-        self.assertIn("Bot-wide Pokemon Center cooldown",ctx.send.await_args.args[0]);self.assertIn("from **30m** to **45m**",ctx.send.await_args.args[0])
+        self.assertIn("Bot-wide inherited Pokemon Center cooldown",ctx.send.await_args.args[0]);self.assertIn("from **30m** to **45m**",ctx.send.await_args.args[0])
 
     async def test_finished_battle_persists_hp_and_status(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
@@ -956,9 +1035,10 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx=SimpleNamespace(author=SimpleNamespace(id=42),clean_prefix="!",send=AsyncMock())
         await Pokemon.gym.callback(cog,ctx)
         sent=ctx.send.await_args.kwargs;self.assertIn("!poke gym challenge",sent["embed"].footer.text);self.assertEqual(sent["view"].challenge.label,"Challenge Brock")
+        self.assertEqual(sent["embed"].thumbnail.url,"attachment://gym-leader-boulder.png");self.assertEqual(sent["files"][0].filename,"gym-leader-boulder.png");sent["files"][0].close()
 
     async def test_unfinished_next_gym_is_locked_in_ui_and_authoritative_path(self):
-        conf={"badges":["boulder"],"collection":[],"party":[]};section=StoredSection(conf)
+        conf={"badges":["boulder","cascade"],"collection":[],"party":[]};section=StoredSection(conf)
         guild_section=SimpleNamespace(all=AsyncMock(return_value={"active_encounter":None,"max_active_encounters":1}))
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(user=lambda user:section,guild=lambda guild:guild_section,all=AsyncMock(return_value={"maximum_concurrency":3}))
         cog.guild_encounters=AsyncMock(return_value={})
@@ -1005,12 +1085,30 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((raw["kind"],raw["gym_key"],raw["battle"]["battle_kind"]),("gym","boulder","gym"))
         self.assertEqual([item["species_id"] for item in raw["battle"]["opponent_party"]],[74,95])
 
+    async def test_second_gym_starts_misty_restart_safe_battle(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        player=OwnedPokemon.create("misty-starter",1,22,seed=5)
+        conf={"collection":[player.raw()],"party":["misty-starter"],"badges":["boulder"]}
+        active=StoredValue(None);timeout=StoredValue(1800);next_encounter_value=StoredValue(22)
+        cog=Pokemon.__new__(Pokemon);cog.battles={};cog.locks={};user_section=StoredSection(conf)
+        guild_section=SimpleNamespace(all=AsyncMock(return_value={"active_encounter":None,"max_active_encounters":1}),active_encounter=active,battle_timeout=timeout,spawn_profile=StoredValue("balanced"))
+        cog.config=SimpleNamespace(user=lambda user:user_section,guild=lambda guild:guild_section,next_encounter=next_encounter_value,all=AsyncMock(return_value={"maximum_concurrency":3}))
+        cog.rendered_battle=AsyncMock(return_value=(discord.Embed(title="Misty Gym"),[]));cog.put_encounter=AsyncMock()
+        message=SimpleNamespace(id=109)
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42),guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=2),send=AsyncMock(return_value=message))
+        await Pokemon.gym_challenge.callback(cog,ctx)
+        battle=cog.battles[22];raw=cog.put_encounter.await_args.args[1]
+        self.assertEqual((battle.battle_kind,battle.gym_key,battle.wild_species_id,battle.wild_level,battle.opponent_total),("gym","cascade",120,18,2))
+        self.assertEqual([(item["species_id"],item["level"]) for item in raw["battle"]["opponent_party"]],[(120,18),(121,21)])
+        self.assertIn(120,user_section.value["pokedex_seen"]);self.assertEqual(next_encounter_value.value,23)
+
     async def test_gym_badge_settlement_is_idempotent(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
-        player=OwnedPokemon.create("gym-player",7,20,seed=4)
-        battle=Battle(9,42,1,2,3,player,95,12,50,1,battle_kind="gym",gym_key="boulder")
+        player=OwnedPokemon.create("gym-player",7,25,seed=4)
+        battle=Battle(9,42,1,2,3,player,120,18,50,1,battle_kind="gym",gym_key="cascade")
+        battle.initialize_opponents(((120,18),(121,21)));battle.opponent_index=1;battle.wild_species_id=121;battle.wild_level=21;battle.opponents_defeated=[120,121]
         battle.state="won";battle.result="Victory."
-        stored={"collection":[player.raw()],"badges":[]}
+        stored={"collection":[player.raw()],"badges":["boulder"]}
         section=SimpleNamespace(
             all=AsyncMock(side_effect=lambda:dict(stored)),
             set=AsyncMock(side_effect=lambda value:stored.update(value)),
@@ -1019,10 +1117,13 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog.config=SimpleNamespace(user_from_id=lambda user_id:section)
         await cog.sync_battle_player(battle)
         await cog.sync_battle_player(battle)
-        self.assertEqual(stored["badges"],["boulder"])
-        self.assertEqual(battle.result.count("Boulder Badge"),1)
-        stored["badges"]=[];lost=Battle(10,42,1,2,3,player,74,12,50,1,battle_kind="gym",gym_key="boulder");lost.state="lost";lost.result="Gym challenge lost."
-        await cog.sync_battle_player(lost);self.assertEqual(stored["badges"],[])
+        self.assertEqual(stored["badges"],["boulder","cascade"])
+        self.assertEqual(battle.result.count("Cascade Badge"),1)
+        self.assertEqual(stored["pokedex_seen"],[120,121])
+        self.assertEqual((stored["pokedex_stats"]["120"]["battled"],stored["pokedex_stats"]["120"]["defeated"]),(1,1))
+        self.assertEqual((stored["pokedex_stats"]["121"]["battled"],stored["pokedex_stats"]["121"]["defeated"]),(1,1))
+        stored["badges"]=["boulder"];lost=Battle(10,42,1,2,3,player,120,18,50,1,battle_kind="gym",gym_key="cascade");lost.state="lost";lost.result="Gym challenge lost."
+        await cog.sync_battle_player(lost);self.assertEqual(stored["badges"],["boulder"])
 
     async def test_gym_view_removes_bag_and_rejects_poke_balls(self):
         current=battle();current.battle_kind="gym";current.gym_key="boulder"
@@ -1137,6 +1238,18 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(effective_timer_minutes({"timer_minutes":10},{"minimum_timer":30}),30)
         self.assertEqual(effective_timer_minutes({"timer_minutes":10,"timer_owner_override":True},{"minimum_timer":30}),10)
 
+    def test_effective_center_cooldown_uses_server_override_or_inherited_default(self):
+        self.assertEqual(effective_center_cooldown({"center_cooldown":None},{"center_cooldown":1800}),1800)
+        self.assertEqual(effective_center_cooldown({"center_cooldown":900},{"center_cooldown":1800}),900)
+        self.assertEqual(effective_center_cooldown({"center_cooldown":1},{"center_cooldown":1800}),60)
+
+    async def test_server_admin_can_override_and_restore_center_cooldown(self):
+        cooldown=StoredValue(None);policy={"center_cooldown":1800}
+        section=SimpleNamespace(center_cooldown=cooldown,all=AsyncMock(side_effect=lambda:{**GUILD,"center_cooldown":cooldown.value}))
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section,all=AsyncMock(return_value=policy));ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
+        await Pokemon.server_center_cooldown.callback(cog,ctx,"15");self.assertEqual(cooldown.value,900);self.assertIn("15m server override",ctx.send.await_args.args[0])
+        ctx.send.reset_mock();await Pokemon.server_center_cooldown.callback(cog,ctx,"inherit");self.assertIsNone(cooldown.value);self.assertIn("inherited bot-wide default of **30m**",ctx.send.await_args.args[0])
+
     async def test_server_concurrency_respects_owner_ceiling_and_owner_override(self):
         slots=StoredValue(1);override=StoredValue(False);section=SimpleNamespace(max_active_encounters=slots,concurrency_owner_override=override,spawn_profile=StoredValue("balanced"))
         ceiling=StoredValue(2);cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section,maximum_concurrency=ceiling)
@@ -1159,7 +1272,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         policy={"encounter_timeout":120,"minimum_encounter_timeout":60,"maximum_encounter_timeout":900,"center_cooldown":1800,"minimum_threshold":8,"minimum_cooldown":120,"maximum_concurrency":3,"minimum_timer":30,"allowed_generations":[1],"rarity_profile":"friendly","allow_special_species":False,"pokedex_default_style":"retro","mart_prices":{"poke_ball":50,"great_ball":150,"ultra_ball":300,"potion":75,"revive":400}}
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(all=AsyncMock(return_value=policy));ctx=SimpleNamespace(send=AsyncMock())
         await Pokemon.global_status.callback(cog,ctx);text=ctx.send.await_args.args[0]
-        for expected in ("Pokemon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Encounter lifetime: bot-wide default **2m** · server range **1–15m**","Global free-Center cooldown: current **30m**","VIP benefits: guild **not set** · role **not set** · storage **240/480** + **6** party","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokedex style: **Retro**","Poke Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
+        for expected in ("Pokemon bot-wide policy","Fresh-install defaults: admin timer floor **15m** · wild lifetime **15m** · Center cooldown **30m** · admin concurrency ceiling **5**","server administrators **30–10,080m**","bot-owner override **1–10,080m**","Encounter lifetime: bot-wide default **2m** · server range **1–15m**","Inherited free-Center cooldown: current **30m**","server-admin overrides **1–1,440m**","VIP benefits: guild **not set** · role **not set** · storage **240/480** + **6** party","Activity-mode floors: **8 points**","Concurrency limits: server-admin ceiling **3**","Allowed generations: **1**","Default Pokedex style: **Retro**","Poke Ball: **50**","Revive: **400**"):self.assertIn(expected,text)
         self.assertNotIn("current server",text.casefold());self.assertNotIn("spawn channels",text.casefold())
 
     async def test_sub_hour_timer_uses_owner_command_group(self):

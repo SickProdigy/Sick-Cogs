@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 
 import discord
 
@@ -24,7 +25,7 @@ class Gym:
 
 KANTO_GYMS=(
     Gym("boulder","Boulder Badge","🪨","Brock","Pewter City",((74,12),(95,14))),
-    Gym("cascade","Cascade Badge","💧","Misty","Cerulean City",((121,21),)),
+    Gym("cascade","Cascade Badge","💧","Misty","Cerulean City",((120,18),(121,21))),
     Gym("thunder","Thunder Badge","⚡","Lt. Surge","Vermilion City",((26,24),)),
     Gym("rainbow","Rainbow Badge","🌈","Erika","Celadon City",((45,29),)),
     Gym("soul","Soul Badge","☠️","Koga","Fuchsia City",((110,43),)),
@@ -33,7 +34,14 @@ KANTO_GYMS=(
     Gym("earth","Earth Badge","🌍","Giovanni","Viridian City",((112,50),)),
 )
 GYMS={gym.key:gym for gym in KANTO_GYMS}
-COMPLETED_GYMS={"boulder"}
+COMPLETED_GYMS={"boulder","cascade"}
+GYM_LEADER_ASSETS={"boulder":"brock-frlg.png","cascade":"misty-frlg.png"}
+
+
+def gym_leader_path(key):
+    filename=GYM_LEADER_ASSETS.get(str(key))
+    path=Path(__file__).with_name("assets")/"gym_leaders"/filename if filename else None
+    return path if path and path.is_file() else None
 
 
 def earned_badges(raw):
@@ -59,16 +67,16 @@ def badge_case(raw):
     return " ".join(gym.symbol if gym.key in badges else "◻️" for gym in KANTO_GYMS)
 
 
-def gym_status_embed(user,conf,challenge_command="[p]poke gym challenge"):
+def gym_status_embed(user,conf,challenge_command="[p]poke gym challenge",leader_image_url=None):
     badges=earned_badges(conf.get("badges",[]));upcoming=next_gym(badges)
     embed=discord.Embed(title="Kanto Gym Challenge",color=discord.Color.gold())
+    if leader_image_url:embed.set_thumbnail(url=leader_image_url)
     names=", ".join(GYMS[key].badge for key in badges) or "No badges earned yet."
     embed.description=badge_case(badges)+"\n"+names
     embed.add_field(name="Badges",value=f"{len(badges)}/{len(KANTO_GYMS)}",inline=True)
     if upcoming:
-        team=" · ".join(f"{SPECIES[species_id].name} Lv. {level}" for species_id,level in upcoming.team)
         if upcoming.key in COMPLETED_GYMS:
-            embed.add_field(name="Next challenge",value=f"{upcoming.leader} · {upcoming.city}\n{team}",inline=True);embed.set_footer(text=f"Use {challenge_command} when your party is ready, or press Challenge {upcoming.leader} below.")
+            embed.add_field(name="Next challenge",value=f"{upcoming.leader} · {upcoming.city}",inline=True);embed.set_footer(text=f"Use {challenge_command} when your party is ready, or press Challenge {upcoming.leader} below.")
         else:
             embed.add_field(name="Next challenge · Locked",value=f"{upcoming.leader} · {upcoming.city}\nThis Gym is still under development.",inline=True);embed.set_footer(text="Only completed Gym Leader battles can be challenged.")
     else:
@@ -88,10 +96,8 @@ def trainer_profile_embed(user,conf,max_collection):
     if avatar:embed.set_thumbnail(url=avatar)
     badge_names=", ".join(GYMS[key].badge for key in badges) or "No badges earned yet."
     embed.add_field(name=f"Badge Case · {len(badges)}/8",value=badge_case(badges)+"\n"+badge_names,inline=False)
-    embed.add_field(name="Pokedex",value=f"{len(conf.get('pokedex_seen',[]))} seen\n{len(conf.get('pokedex_caught',[]))} caught",inline=True)
-    embed.add_field(name="Collection",value=f"{len(conf.get('collection',[]))}/{max_collection} Pokemon\n{len(conf.get('party',[]))}/6 in party",inline=True)
-    items=conf.get("items",{})
-    embed.add_field(name="Bag",value=f"{conf.get('balls',0)} Poke · {items.get('great_ball',0)} Great · {items.get('ultra_ball',0)} Ultra",inline=True)
+    embed.add_field(name="Pokedex",value=f"{len(conf.get('pokedex_seen',[]))} seen · {len(conf.get('pokedex_caught',[]))} caught",inline=False)
+    embed.add_field(name="Collection",value=f"{len(conf.get('collection',[]))}/{max_collection} Pokemon · {len(conf.get('party',[]))}/6 in party",inline=False)
     if lead:
         needed=experience_to_next(lead["species_id"],lead["level"])
         progress="MAX" if not needed else f"{lead.get('experience',0)}/{needed} XP"

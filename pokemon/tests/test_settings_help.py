@@ -27,6 +27,7 @@ class SettingsHelpTests(unittest.TestCase):
             "cooldown": ("86400", "seconds", "floor"),
             "battleexpiry": ("5–1440", "minutes"),
             "encountertime": ("minutes", "default", "inherit", "reset", "limits"),
+            "centercooldown": ("1–1,440", "minutes", "inherit", "bot-wide default"),
             "generations": ("spaces", "without numbers"),
             "spawn": ("Omit", "mention", "ID", "shiny", "bot owner"),
         }
