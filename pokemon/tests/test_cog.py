@@ -540,6 +540,17 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("`poke trade`",guidance);self.assertIn("`poke trade @trainer <your collection number> <their collection number>`",guidance)
         self.assertIn("`poke trade collection @trainer`",guidance)
 
+    async def test_party_views_use_owner_avatar_thumbnail(self):
+        avatar_url="https://example.com/party-owner.png";user=SimpleNamespace(id=42,display_name="Trainer",display_avatar=SimpleNamespace(url=avatar_url))
+        section=StoredSection({"collection":[],"party":[]});renderer=SimpleNamespace(party_card=AsyncMock(return_value=io.BytesIO(b"card")))
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda member:section);cog.renderer=renderer
+        response=SimpleNamespace(send_message=AsyncMock());interaction=SimpleNamespace(user=user,response=response)
+        await cog.open_menu_section(interaction,"party")
+        self.assertEqual(response.send_message.await_args.kwargs["embed"].thumbnail.url,avatar_url)
+        ctx=SimpleNamespace(author=user,send=AsyncMock())
+        await Pokemon.party.callback(cog,ctx)
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].thumbnail.url,avatar_url)
+
     async def test_starter_picker_is_one_time_and_encounter_scoped(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
         conf={"collection":[],"party":[],"starter_chosen":False,"pokedex_seen":[],"pokedex_caught":[]}
