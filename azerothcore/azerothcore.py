@@ -1786,6 +1786,8 @@ class AzerothCore(commands.Cog):
     @commands.guild_only()
     async def ac_accountstatus(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         """Show your linked account, or let staff inspect another member."""
+        if not await self._trusted_account_guild(ctx):
+            return await ctx.send("AzerothCore account management is not enabled for this Discord server.")
         target = member or ctx.author
         if target.id != ctx.author.id and not await self._can_create_accounts(ctx):
             return await ctx.send("You do not have permission to inspect another member account link.")
