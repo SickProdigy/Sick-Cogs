@@ -489,6 +489,8 @@ class BattleTests(unittest.TestCase):
         image=Image.new("RGB",(800,450),RETRO[5]);BattleRenderer._battle_party_markers(ImageDraw.Draw(image),current)
         first_ball=image.crop((440,364,461,385)).tobytes();fainted_ball=image.crop((474,364,495,385)).tobytes();third_ball=image.crop((508,364,529,385)).tobytes()
         self.assertEqual(first_ball,third_ball);self.assertNotEqual(first_ball,fainted_ball)
+        self.assertEqual(image.getpixel((450,367)),(205,63,58));self.assertEqual(image.getpixel((450,381)),RETRO[7])
+        self.assertEqual(image.getpixel((484,367)),(95,99,96));self.assertNotEqual(image.getpixel((484,367)),(205,63,58))
 
 
 class RendererAsyncTests(unittest.IsolatedAsyncioTestCase):

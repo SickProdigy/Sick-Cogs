@@ -333,12 +333,13 @@ class BattleRenderer:
         shell=(151,154,148) if dimmed else RETRO[7]
         top=(95,99,96) if dimmed else (205,63,58)
         band=(54,58,55) if dimmed else RETRO[0]
-        draw.ellipse(box,fill=shell,outline=band,width=5)
-        draw.pieslice(box,180,360,fill=top,outline=band,width=4)
-        draw.rectangle((cx-radius+3,cy-5,cx+radius-3,cy+6),fill=band)
-        button=max(7,radius//3)
-        draw.ellipse((cx-button,cy-button,cx+button,cy+button),fill=shell,outline=band,width=4)
-        inner=max(3,button//2)
+        stroke=max(2,radius//5)
+        draw.ellipse(box,fill=shell,outline=band,width=stroke)
+        draw.pieslice(box,180,360,fill=top,outline=band,width=stroke)
+        draw.rectangle((cx-radius+stroke,cy-2,cx+radius-stroke,cy+2),fill=band)
+        button=max(3,radius//3)
+        draw.ellipse((cx-button,cy-button,cx+button,cy+button),fill=shell,outline=band,width=2)
+        inner=max(1,button//2)
         draw.ellipse((cx-inner,cy-inner,cx+inner,cy+inner),fill=RETRO[5] if not dimmed else shell,outline=RETRO[1] if not dimmed else band,width=2)
 
     @staticmethod
@@ -550,7 +551,7 @@ class BattleRenderer:
     def _gym_leader_sprite(self,key,size):
         path=GYM_LEADER_SPRITES.get(key)
         if not path or not path.is_file():return None
-        return self._retro(self._open(path.read_bytes(),size,trim=True,upscale=True))
+        return self._open(path.read_bytes(),size,trim=True,upscale=True)
 
     def _gym_victory_sync(self,battle,data,avatar_data=None):
         labels={"boulder":"Boulder Badge","cascade":"Cascade Badge","thunder":"Thunder Badge","rainbow":"Rainbow Badge","soul":"Soul Badge","marsh":"Marsh Badge","volcano":"Volcano Badge","earth":"Earth Badge"}
