@@ -16,7 +16,7 @@ from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
 from pokemon.pokemon import BIOMES, GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_center_cooldown, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, biome_weight, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, FieldBagView, FieldMedicineView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeLobbyView, TradeCollectionView, GymChallengeView
+from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, FieldBagView, FieldMedicineView, FieldStoneView, FieldEvolutionResultView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeLobbyView, TradeCollectionView, GymChallengeView
 
 
 class StoredValue:
@@ -644,7 +644,8 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx=SimpleNamespace(author=SimpleNamespace(id=42,display_name="SickProdigy"),send=AsyncMock())
         await Pokemon.pokemon_bag.callback(cog,ctx)
         sent=ctx.send.await_args.kwargs;self.assertEqual(sent["embed"].title,"SickProdigy’s Poke Bag");self.assertIsNone(sent["embed"].description);self.assertEqual(len(sent["files"]),1)
-        self.assertIsInstance(sent["view"],FieldBagView);self.assertEqual([item.label for item in sent["view"].children],["Potion x10","Revive x2"])
+        self.assertIsInstance(sent["view"],FieldBagView);self.assertEqual([item.label for item in sent["view"].children],["Potion x10","Revive x2","Fire Stone x0","Water Stone x0","Thunder Stone x0","Leaf Stone x0","Moon Stone x0"])
+        self.assertTrue(all(item.disabled for item in sent["view"].children[2:]))
         items,trainer=cog.renderer.bag_card.await_args.args;self.assertEqual(trainer,"SickProdigy");self.assertIn(("great_ball","Great Ball",6),items);self.assertIn(("moon_stone","Moon Stone",0),items)
 
     def test_field_medicine_targets_only_eligible_party_pokemon(self):
@@ -655,6 +656,13 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item[1] for item in Pokemon.field_medicine_targets(conf,"revive")],["fainted"])
         view=FieldMedicineView(SimpleNamespace(),42,"potion",Pokemon.field_medicine_targets(conf,"potion"))
         selector=next(item for item in view.children if isinstance(item,discord.ui.Select));self.assertEqual(selector.options[0].label,"2. Squirtle · Lv.6")
+
+    def test_field_stones_target_only_eligible_party_pokemon(self):
+        pikachu=OwnedPokemon.create("pikachu",25,10,seed=1);eevee=OwnedPokemon.create("eevee",133,12,seed=2);boxed=OwnedPokemon.create("boxed",25,14,seed=3)
+        conf={"collection":[pikachu.raw(),eevee.raw(),boxed.raw()],"party":["pikachu","eevee"],"items":{"thunder_stone":1}}
+        targets=Pokemon.field_stone_targets(conf,"thunder_stone");self.assertEqual([(item[0],item[1],item[4]) for item in targets],[(1,"pikachu","Raichu"),(2,"eevee","Jolteon")])
+        view=FieldStoneView(SimpleNamespace(),42,"thunder_stone",targets);selector=next(item for item in view.children if isinstance(item,discord.ui.Select))
+        self.assertEqual(selector.options[0].label,"1. Pikachu · Lv.10");self.assertEqual(selector.options[0].description,"Evolves into Raichu")
 
     async def test_owner_reset_requires_confirmation_and_releases_battle(self):
         section=StoredSection({"collection":[{"instance_id":"starter"}],"starter_chosen":True})
@@ -700,6 +708,14 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx=SimpleNamespace(author=SimpleNamespace(id=7),send=AsyncMock())
         await Pokemon.use_stone.callback(cog,ctx,"thunder","1")
         evolved=OwnedPokemon.from_raw(section.value["collection"][0]);self.assertEqual((evolved.species_id,evolved.level,evolved.moves),(26,10,before_moves));self.assertEqual(section.value["items"]["thunder_stone"],0);self.assertIn(26,section.value["pokedex_caught"]);cog.rendered_progression.assert_awaited_once()
+
+    async def test_bag_stone_evolves_selected_party_pokemon_and_shows_result(self):
+        pikachu=OwnedPokemon.create("pikachu",25,10,seed=3);section=StoredSection({"collection":[pikachu.raw()],"party":["pikachu"],"items":{"thunder_stone":1},"pokedex_seen":[25],"pokedex_caught":[25]})
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={};cog.config=SimpleNamespace(user=lambda user:section,trades=StoredValue({}));cog.rendered_progression=AsyncMock(return_value=(discord.Embed(title="Pikachu evolved!",description="Evolution complete."),[]))
+        response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock());interaction=SimpleNamespace(user=SimpleNamespace(id=7),response=response)
+        await cog.use_field_stone_interaction(interaction,"thunder_stone","pikachu")
+        evolved=OwnedPokemon.from_raw(section.value["collection"][0]);self.assertEqual(evolved.species_id,26);self.assertEqual(section.value["items"]["thunder_stone"],0)
+        sent=response.edit_message.await_args.kwargs;self.assertEqual(sent["embed"].title,"Pikachu evolved!");self.assertIsInstance(sent["view"],FieldEvolutionResultView);response.send_message.assert_not_awaited()
 
     async def test_mart_refunds_when_inventory_persistence_fails(self):
         section=SimpleNamespace(all=AsyncMock(return_value={"balls":10,"items":{}}),set=AsyncMock(side_effect=RuntimeError("storage failed")));prices=StoredValue({key:value[2] for key,value in MART_ITEMS.items()})

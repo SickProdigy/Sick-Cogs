@@ -17,7 +17,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import COMPLETED_GYMS,GYMS,earned_badges,gym_leader_path,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FieldBagView,FieldMedicineView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,TradeLobbyView,TradeSelectionView,GymChallengeView,TradeCollectionView,ReleasePokemonView,MartView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FieldBagView,FieldMedicineView,FieldStoneView,FieldEvolutionResultView,FightView,MedicineView,MoveLearnView,PartyPlacementView,PartyView,StarterView,MainMenuView,TradeView,TradeLobbyView,TradeSelectionView,GymChallengeView,TradeCollectionView,ReleasePokemonView,MartView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -333,7 +333,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.8";__author__="SickProdigy"
+    __version__="1.4.9";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -1848,6 +1848,17 @@ class Pokemon(commands.Cog):
             if eligible:targets.append((slot,identity,pokemon.nickname or SPECIES[pokemon.species_id].name,pokemon.level,current,maximum))
         return targets
 
+    @staticmethod
+    def field_stone_targets(conf,item_key):
+        evolutions=STONE_EVOLUTIONS.get(item_key,{});owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};targets=[]
+        for slot,identity in enumerate(conf.get("party",[])[:6],1):
+            raw=owned.get(identity)
+            if not raw:continue
+            target=evolutions.get(int(raw.get("species_id",0)))
+            if target:
+                pokemon=OwnedPokemon.from_raw(raw);targets.append((slot,identity,pokemon.nickname or SPECIES[pokemon.species_id].name,pokemon.level,SPECIES[target].name))
+        return targets
+
     async def show_field_bag(self,interaction,message=None):
         conf=await self.config.user(interaction.user).all();embed,files=await self.rendered_bag(interaction.user,conf)
         await interaction.response.edit_message(content=message,embed=embed,attachments=files,view=FieldBagView(self,interaction.user.id,conf))
@@ -1857,6 +1868,12 @@ class Pokemon(commands.Cog):
             await interaction.response.send_message("Use medicine from the active battle’s Bag so the opponent receives its turn.",ephemeral=True);return
         conf=await self.config.user(interaction.user).all();targets=self.field_medicine_targets(conf,item_key)
         await interaction.response.edit_message(content=f"Choose a party Pokemon for your {MART_ITEMS[item_key][0]}.",view=FieldMedicineView(self,interaction.user.id,item_key,targets))
+
+    async def open_field_stone(self,interaction,item_key):
+        if self.trainer_in_active_battle(interaction.user.id):
+            await interaction.response.send_message("Finish your active battle before evolving a Pokemon.",ephemeral=True);return
+        conf=await self.config.user(interaction.user).all();targets=self.field_stone_targets(conf,item_key)
+        await interaction.response.edit_message(content=f"Choose an eligible party Pokemon for your {MART_ITEMS[item_key][0]}.",view=FieldStoneView(self,interaction.user.id,item_key,targets))
 
     async def apply_field_medicine(self,user,item_key,identifier):
         if self.trainer_in_active_battle(user.id):return False,"Use medicine from the active battle’s Bag so the opponent receives its turn."
@@ -1881,6 +1898,26 @@ class Pokemon(commands.Cog):
         success,message=await self.apply_field_medicine(interaction.user,item_key,identifier)
         if not success:await interaction.response.send_message(message,ephemeral=True);return
         await self.show_field_bag(interaction,message)
+
+    async def apply_evolution_stone(self,user,item_key,identifier):
+        if item_key not in STONE_EVOLUTIONS:return False,"Choose fire, water, thunder, leaf, or moon stone.",None,None
+        if self.trainer_in_active_battle(user.id):return False,"Finish your active battle before evolving a Pokemon.",None,None
+        async with self.lock(("user",user.id)):
+            conf=await self.config.user(user).all();raw=self.find_owned(conf,identifier)
+            if not raw:return False,"Choose a party slot or unique Pokemon name.",None,None
+            target=STONE_EVOLUTIONS[item_key].get(int(raw.get("species_id",0)));name=raw.get("nickname") or SPECIES[raw["species_id"]].name
+            if not target:return False,f"{name} cannot evolve with a {MART_ITEMS[item_key][0]}.",None,None
+            if self.trade_reserved(await self.config.trades(),raw["instance_id"]):return False,"That Pokemon is reserved in a pending trade or gift.",None,None
+            items=conf.setdefault("items",{})
+            if int(items.get(item_key,0))<1:return False,f"You have no {MART_ITEMS[item_key][0]}s.",None,None
+            items[item_key]=int(items.get(item_key,0))-1;evolved,event=evolve_owned_raw(raw,target);raw.update(evolved);register_owned_species(conf,evolved);conf["items"]=items;await self.config.user(user).set(conf)
+        return True,f"The {MART_ITEMS[item_key][0]} was consumed.",OwnedPokemon.from_raw(evolved),event
+
+    async def use_field_stone_interaction(self,interaction,item_key,identifier):
+        success,message,pokemon,event=await self.apply_evolution_stone(interaction.user,item_key,identifier)
+        if not success:await interaction.response.send_message(message,ephemeral=True);return
+        embed,files=await self.rendered_progression(pokemon,evolved_from=event["from"]);embed.description+=f" {message}"
+        await interaction.response.edit_message(content=None,embed=embed,attachments=files,view=FieldEvolutionResultView(self,interaction.user.id))
 
     @pokemon.command(name="achievements",aliases=["goals"])
     async def achievements(self,ctx):
@@ -1945,18 +1982,9 @@ class Pokemon(commands.Cog):
     async def use_stone(self,ctx,stone:str,identifier:str):
         """Use a Kanto evolution stone on an eligible Pokemon."""
         key=mart_item_key(stone)
-        if key not in STONE_EVOLUTIONS:await ctx.send("Choose fire, water, thunder, leaf, or moon stone.");return
-        if self.trainer_in_active_battle(ctx.author.id):await ctx.send("Finish your active battle before evolving a Pokemon.");return
-        async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique Pokemon name.");return
-            target=STONE_EVOLUTIONS[key].get(int(raw.get("species_id",0)));name=raw.get("nickname") or SPECIES[raw["species_id"]].name
-            if not target:await ctx.send(f"{name} cannot evolve with a {MART_ITEMS[key][0]}.");return
-            if self.trade_reserved(await self.config.trades(),raw["instance_id"]):await ctx.send("That Pokemon is reserved in a pending trade or gift.");return
-            items=conf.setdefault("items",{})
-            if int(items.get(key,0))<1:await ctx.send(f"You have no {MART_ITEMS[key][0]}s.");return
-            items[key]=int(items.get(key,0))-1;evolved,event=evolve_owned_raw(raw,target);raw.update(evolved);register_owned_species(conf,evolved);conf["items"]=items;await self.config.user(ctx.author).set(conf)
-        pokemon=OwnedPokemon.from_raw(evolved);embed,files=await self.rendered_progression(pokemon,evolved_from=event["from"]);embed.description+=f" The {MART_ITEMS[key][0]} was consumed.";await ctx.send(embed=embed,files=files)
+        success,message,pokemon,event=await self.apply_evolution_stone(ctx.author,key,identifier)
+        if not success:await ctx.send(message);return
+        embed,files=await self.rendered_progression(pokemon,evolved_from=event["from"]);embed.description+=f" {message}";await ctx.send(embed=embed,files=files)
 
     @pokemon_use.command(name="potion")
     async def use_potion(self,ctx,identifier:str):
