@@ -48,6 +48,7 @@ Develop-only cogs and experiments are not part of the stable Index release.
 
 Current develop experiments include:
 
+- `grayzonewarfare` — source-linked Gray Zone Warfare quest search and compact guidance.
 - `gameroom` — unified free-play games and Red native-game discovery.
 - `gitforge` — Gitea, GitHub, and GitLab issue and repository monitoring.
 - `ark` — official ARK: Survival Ascended Steam announcements.

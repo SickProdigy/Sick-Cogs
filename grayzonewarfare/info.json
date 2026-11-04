@@ -1,0 +1,17 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Find Gray Zone Warfare quests and concise source-linked guidance from the GZW Data API and its linked community wiki.",
+  "disabled": false,
+  "end_user_data_statement": "This cog does not persistently store user data or metadata. Quest search terms are matched locally against quest records fetched from the GZW Data API and cached in memory for up to 10 minutes.",
+  "hidden": false,
+  "install_msg": "No API key is required. Use `[p]gzw quest <quest name or keywords>` to search the Gray Zone Warfare wiki.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 9, 0],
+  "name": "GrayZoneWarfare",
+  "permissions": ["embed_links"],
+  "requirements": [],
+  "short": "Gray Zone Warfare quest wiki assistant",
+  "tags": ["gray-zone-warfare", "gzw", "quests", "wiki", "games"],
+  "type": "COG",
+  "version": "0.1.0"
+}
