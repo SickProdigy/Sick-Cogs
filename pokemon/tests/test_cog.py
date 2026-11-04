@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import COMPLETED_GYMS,KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon,pokemon_max_hp
-from pokemon.pokemon import BIOMES, GLOBAL, GUILD, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_center_cooldown, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, biome_weight, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
+from pokemon.pokemon import BIOMES, GLOBAL, GUILD, USER, MART_ITEMS, PACE, SPAWN_PROFILES, STONE_EVOLUTIONS, TRADE_EVOLUTIONS, Pokemon, active_guild_encounters, effective_center_cooldown, effective_concurrency, effective_encounter_timeout, effective_timer_minutes, jittered_spawn_due, activity_weight, authentic_moves_raw, available_species, biome_weight, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_needs_level_migration, encounter_returns_after_timeout, first_pokedex_registration, format_quiet_clock, parse_quiet_clock, quiet_hours_active, grant_mart_item, mart_item_key, mart_prices, mart_purchase, migrate_ball_items, migrated_pokedex_stats, minimum_spawn_level, pace_for_settings, pokemon_needs_center, rarity_tier, scaled_wild_level, spawn_weight, repair_underleveled_evolution_moves, store_caught_pokemon, vip_pack_values
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, EncounterView, CollectionBrowserView, FieldBagView, FieldMedicineView, FieldStoneView, FieldEvolutionResultView, ReleasePokemonView, FightView, PartyPlacementView, PartyView, StarterView, MainMenuView, TradeView, TradeLobbyView, TradeCollectionView, GymChallengeView
@@ -604,6 +604,23 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog.rendered_starter.assert_awaited_once_with(unittest.mock.ANY,"Trainer",9)
         self.assertIsNone(await cog.grant_starter(interaction.user,7))
         self.assertEqual(len(section.value["collection"]),1)
+
+    async def test_claim_acknowledges_before_battle_rendering(self):
+        owned=OwnedPokemon.create("starter",25,7,seed=1)
+        conf=json.loads(json.dumps(USER));conf.update({"collection":[owned.raw()],"party":[owned.instance_id],"starter_chosen":True})
+        section=StoredSection(conf);encounters=StoredEncounters();encounters.value={"9":{"state":"open","species_id":79,"level":1,"level_locked":True,"gender":"male","shiny":False,"guild_id":1,"channel_id":55,"message_id":99}}
+        response=SimpleNamespace(defer=AsyncMock(),send_message=AsyncMock(),edit_message=AsyncMock())
+        interaction=SimpleNamespace(user=SimpleNamespace(id=42,display_name="Trainer"),response=response,edit_original_response=AsyncMock())
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={}
+        cog.config=SimpleNamespace(user=lambda user:section,encounters=encounters,guild_from_id=lambda guild_id:SimpleNamespace(battle_timeout=StoredValue(900)))
+        async def render(current):
+            response.defer.assert_awaited_once()
+            return discord.Embed(title="Battle"),[]
+        cog.rendered_battle=AsyncMock(side_effect=render)
+        await cog.claim(interaction,9)
+        response.defer.assert_awaited_once();response.edit_message.assert_not_awaited()
+        interaction.edit_original_response.assert_awaited_once()
+        self.assertNotIn("message_sync_pending",encounters.value["9"]);self.assertEqual(encounters.value["9"]["state"],"battle")
 
     async def test_collection_sort_and_party_replacement_hide_instance_ids(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
