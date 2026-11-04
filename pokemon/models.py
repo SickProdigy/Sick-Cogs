@@ -225,6 +225,7 @@ class Battle:
         self.party_status_turns = {pokemon.instance_id:pokemon.status_turns for pokemon in self.party}
         conscious=next((pokemon for pokemon in self.party if self.party_hp[pokemon.instance_id]>0),self.party[0])
         self.player = conscious
+        self.participants=[conscious.instance_id]
         self.player_hp = self.party_hp[conscious.instance_id]
         self.player_status=self.party_status.get(conscious.instance_id,"")
         self.player_status_turns=self.party_status_turns.get(conscious.instance_id,0)
