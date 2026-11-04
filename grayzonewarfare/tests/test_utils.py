@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 
 from grayzonewarfare.grayzonewarfare import GrayZoneWarfare,QuestResultView,WikiUnavailable
-from grayzonewarfare.utils import TTLCache,normalize_text,parse_page,rank_pages,record_page,source_url
+from grayzonewarfare.utils import TTLCache,attach_guide,normalize_text,parse_guide_html,parse_page,rank_pages,record_page,source_url
 
 
 def record(name="First Recon",**changes):
@@ -54,6 +54,13 @@ class UtilityTests(unittest.TestCase):
     def test_normalization_handles_punctuation_and_accents(self):
         self.assertEqual(normalize_text("  Résumé: First-Recon! "),"resume first recon")
 
+    def test_guide_parser_extracts_steps_and_real_images(self):
+        html="""<div id="toc"><p>Contents noise</p></div><h2>Guide</h2><p>Go to the airfield.</p><h3>First truck</h3><p>Use the panel.</p><img src="data:image/gif;base64,x" data-src="https://images.example/map.png" alt="Truck map"><img data-src="https://images.example/map.png" alt="duplicate">"""
+        guide=parse_guide_html(html)
+        self.assertEqual(guide["steps"],["Go to the airfield.","**First truck**","Use the panel."])
+        self.assertEqual(guide["images"],[{"url":"https://images.example/map.png","caption":"Truck map"}])
+        self.assertEqual(attach_guide(page(),guide)["walkthrough"][0],"Go to the airfield.")
+
 
 class FakeResponse:
     def __init__(self,status,payload):self.status=status;self.payload=payload
@@ -83,15 +90,25 @@ class CogTests(unittest.IsolatedAsyncioTestCase):
         cog=self.make_cog([FakeResponse(200,first),FakeResponse(200,second)]);pages=await cog.search_quests("First Recon")
         self.assertEqual(pages[0]["title"],"First Recon");self.assertEqual(cog.session.calls[1][1]["params"],{"page":"2","per_page":"100"})
 
+    async def test_enrich_guide_uses_section_api_and_caches_result(self):
+        sections={"parse":{"sections":[{"line":"Guide","index":"5"}]}}
+        detail={"parse":{"text":{"*":"<h2>Guide</h2><p>Head north.</p><img data-src=\"https://images.example/map.png\" alt=\"Map\">"}}}
+        cog=self.make_cog([FakeResponse(200,sections),FakeResponse(200,detail)])
+        first=await cog.enrich_guide(page("A Single Drop"));second=await cog.enrich_guide(page("A Single Drop"))
+        self.assertEqual(first["walkthrough"],["Head north."]);self.assertEqual(len(first["guide_images"]),1)
+        self.assertEqual(second["walkthrough"],["Head north."]);self.assertEqual(len(cog.session.calls),2)
+        self.assertEqual(cog.session.calls[1][1]["params"]["section"],"5")
+
     async def test_search_reports_http_and_shape_failures(self):
         with self.assertRaises(WikiUnavailable):await self.make_cog([FakeResponse(503,{})]).search_quests("First Recon")
         with self.assertRaises(WikiUnavailable):await self.make_cog([FakeResponse(200,{"data":{}})]).search_quests("First Recon")
 
     def test_embed_is_linked_attributed_and_bounded(self):
-        value=page(briefing="Detailed sourced briefing "*100,objectives="Objective detail "*100)
-        embed=GrayZoneWarfare.quest_embed(value)
+        value=attach_guide(page(briefing="Detailed sourced briefing "*100,objectives="Objective detail "*100),{"steps":["Go north.","Use the panel."],"images":[{"url":"https://images.example/one.png","caption":"Map"},{"url":"https://images.example/two.png","caption":"Panel"}]})
+        embeds=GrayZoneWarfare.quest_embeds(value);embed=embeds[0]
         self.assertEqual(embed.url,value["fullurl"]);self.assertIn("Source: GZW Data API + Gray Zone Warfare Wiki",embed.footer.text)
-        self.assertTrue(all(len(field.value)<=1024 for field in embed.fields))
+        self.assertEqual(embed.fields[2].name,"Mission check");self.assertEqual(embed.fields[3].name,"How to complete it")
+        self.assertEqual(len(embeds),2);self.assertTrue(all(len(field.value)<=1024 for field in embed.fields))
 
     def test_disambiguation_is_requester_scoped_and_bounded(self):
         view=QuestResultView(SimpleNamespace(),7,[page(f"Quest {index}") for index in range(8)])
