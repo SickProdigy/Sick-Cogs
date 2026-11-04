@@ -333,7 +333,7 @@ def repair_underleveled_evolution_moves(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokemon in opt-in guild channels."""
-    __version__="1.4.30";__author__="SickProdigy"
+    __version__="1.4.31";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -842,8 +842,9 @@ class Pokemon(commands.Cog):
             wild=SPECIES[raw["species_id"]];content_generation=generation_for(int(raw["species_id"]));catalog_version=CATALOG_VERSIONS.for_generation(content_generation,bundled=content_generation==1).key;battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31),wild_gender=raw.get("gender","unknown"),content_generation=content_generation,catalog_version=catalog_version,wild_shiny=bool(raw.get("shiny",False)),trainer_name=str(getattr(i.user,"display_name",getattr(i.user,"name","Trainer")))[:24]);battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
             battle_seconds=await self.config.guild_from_id(int(raw["guild_id"])).battle_timeout()
             raw["state"]="battle";raw["expires_at"]=(datetime.now(timezone.utc)+timedelta(seconds=battle_seconds)).isoformat();raw["battle"]=battle.raw();raw["message_sync_pending"]=True;raw.pop("message_sync_attempts",None);raw.pop("message_sync_retry_at",None);encounters[str(eid)]=raw;await self.config.encounters.set(encounters);self.battles[eid]=battle
+            await i.response.defer()
             embed,files=await self.rendered_battle(battle)
-            await i.response.edit_message(embed=embed,attachments=files,view=BattleView(self,eid))
+            await i.edit_original_response(embed=embed,attachments=files,view=BattleView(self,eid))
             raw.pop("message_sync_pending",None);encounters[str(eid)]=raw;await self.config.encounters.set(encounters)
     @staticmethod
     def battle_attachment_name(battle):
