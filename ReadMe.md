@@ -36,6 +36,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `dictionary` - English definitions, pronunciations, related words, and community slang.
 - `donate` - Configurable donation information command.
 - `giveaways` - Persistent button giveaways with core entry rules and weighted draws.
+- `grayzonewarfare` - Gray Zone Warfare quest search with actionable wiki walkthroughs and source-linked guide images.
 - `movies` - Configurable TMDb new movie release announcements.
 - `navidrome` - Per-server Navidrome connections, linked users, and album announcements.
 - `nsfw` - NSFW-channel-only mature media with configurable external providers.
@@ -48,7 +49,6 @@ Develop-only cogs and experiments are not part of the stable Index release.
 
 Current develop experiments include:
 
-- `grayzonewarfare` — source-linked Gray Zone Warfare quest search and compact guidance.
 - `gameroom` — unified free-play games and Red native-game discovery.
 - `gitforge` — Gitea, GitHub, and GitLab issue and repository monitoring.
 - `ark` — official ARK: Survival Ascended Steam announcements.
