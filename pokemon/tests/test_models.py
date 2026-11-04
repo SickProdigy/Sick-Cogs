@@ -223,6 +223,13 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(b.action_history[-1]["action"],"switch")
         with self.assertRaises(BattleError):b.switch_to(1)
 
+    def test_fainted_initial_slot_is_not_recorded_as_a_participant(self):
+        fainted=OwnedPokemon.create("fainted",77,8,seed=1);fainted.current_hp=0
+        active=OwnedPokemon.create("active",54,8,seed=2)
+        current=Battle(1,100,1,2,3,fainted,100,8,1,20,seed=4);current.initialize_party([fainted,active])
+        self.assertEqual(current.player.instance_id,"active")
+        self.assertEqual(current.participants,["active"])
+
     def test_voluntary_switch_can_knock_out_the_incoming_pokemon(self):
         first=OwnedPokemon.create("one",4,10,seed=1);second=OwnedPokemon.create("two",7,10,seed=2);third=OwnedPokemon.create("three",1,10,seed=3)
         b=Battle(1,100,1,2,3,first,6,100,30,300,seed=4);b.initialize_party([first,second,third]);b.party_hp["two"]=1;b.wild_pp={"rage":1,"slash":0,"flamethrower":0,"fire_spin":0}
@@ -398,7 +405,14 @@ class BattleTests(unittest.TestCase):
     def test_pokedex_registration_details_show_types_and_abilities(self):
         self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[39]),("Type: Normal / Fairy","Abilities: Cute Charm, Competitive"))
         self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[25]),("Type: Electric","Abilities: Static"))
-        self.assertEqual(BattleRenderer.pokedex_registration_message(SPECIES[74],"  Prodigy  ",42,151),"Geodude was registered in Prodigy's Pokedex. Pokedex progress: 42/151 registered.")
+        self.assertEqual(BattleRenderer.pokedex_registration_message(SPECIES[74],"  Prodigy  ",42,151),"Geodude was registered in Prodigy's Pokedex.\nPokedex progress: 42/151 registered.")
+
+    def test_dialogue_preserves_explicit_line_breaks(self):
+        calls=[]
+        class Draw:
+            def text(self,position,value,**kwargs):calls.append((position,value))
+        BattleRenderer._dialogue(Draw(),"Registration complete.\nPokedex progress: 43/151 registered.",(25,372),width=84,size=19)
+        self.assertEqual(calls,[((25,372),"Registration complete."),((25,394),"Pokedex progress: 43/151 registered.")])
 
     def test_pokemon_center_dialogue_is_ascii_safe(self):
         self.assertEqual(BattleRenderer.pokemon_center_message("SickProdigy",True),"SickProdigy, your Pokemon are back to perfect health!")
@@ -473,6 +487,8 @@ class BattleTests(unittest.TestCase):
         with Image.open(caught_result) as image:
             self.assertEqual(image.size,(800,450))
             self.assertEqual(image.getpixel((145,245)),(220,40,80))
+            self.assertEqual(image.getpixel((650,275)),(182,168,89))
+            self.assertEqual(image.getpixel((485,320)),(182,168,89))
             self.assertNotIn(RETRO[1],set(image.crop((460,320,550,348)).get_flattened_data()))
             self.assertIn(RETRO[1],set(image.crop((65,380,150,408)).get_flattened_data()))
         with Image.open(escape_result) as image:
@@ -521,6 +537,13 @@ class RendererAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call.args[0] for call in renderer.get_sprite.await_args_list],[current.wild_species_id]+[item.species_id for item in party])
         self.assertEqual(renderer._render.await_args.args[-1],[f"party-{index}".encode() for index in range(6)])
         self.assertEqual(current.victory_player().instance_id,party[-1].instance_id)
+
+    async def test_victory_result_omits_party_member_fainted_before_battle(self):
+        renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));fainted=OwnedPokemon.create("fainted",77,8,seed=1);fainted.current_hp=0;active=OwnedPokemon.create("active",54,8,seed=2)
+        current=Battle(1,100,1,2,3,fainted,100,8,1,20,seed=4);current.initialize_party([fainted,active]);current.state="won";current.victory_player_id="active"
+        renderer.get_sprite=AsyncMock(side_effect=[b"wild",b"active"]);renderer._render=AsyncMock(return_value=io.BytesIO(b"card"));await renderer.battle(current)
+        self.assertEqual([call.args[0] for call in renderer.get_sprite.await_args_list],[100,54])
+        self.assertEqual(renderer._render.await_args.args[-1],[b"active"])
 
     async def test_gym_victory_fetches_every_participating_party_sprite(self):
         renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"));current=battle();second=OwnedPokemon.create("second",7,5,seed=2);third=OwnedPokemon.create("third",25,5,seed=3);current.initialize_party([current.player,second,third]);current.switch_to(1);current.state="won";current.gym_key="boulder"

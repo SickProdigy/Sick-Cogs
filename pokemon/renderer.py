@@ -320,7 +320,9 @@ class BattleRenderer:
 
     @staticmethod
     def _dialogue(draw,text,origin,width=88,max_lines=2,size=16):
-        lines=textwrap.wrap(" ".join(str(text).split()),width=width,break_long_words=False,break_on_hyphens=False) or [""]
+        lines=[]
+        for paragraph in str(text).splitlines() or [""]:
+            lines.extend(textwrap.wrap(" ".join(paragraph.split()),width=width,break_long_words=False,break_on_hyphens=False) or [""])
         font=ImageFont.load_default(size=size);x,y=origin
         for index,line in enumerate(lines[:max_lines]):draw.text((x,y+index*(size+3)),line,fill=RETRO[0],font=font)
 
@@ -636,12 +638,12 @@ class BattleRenderer:
             ratio=y/449;draw.line((0,y,800,y),fill=(int(244-49*ratio),int(232-58*ratio),int(174-69*ratio)))
         draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
         has_avatar=self._trainer_portrait(canvas,draw,avatar_data) if battle.state=="caught" else False
-        pokemon_x=485 if has_avatar else 400
+        pokemon_x=525 if has_avatar else 400
         if battle.state=="caught":
             heading="Gotta catch 'em all!";heading_font=ImageFont.load_default(size=34)
             draw.text((400-int(draw.textlength(heading,font=heading_font))//2,42),heading,fill=RETRO[0],font=heading_font)
-            draw.ellipse((pokemon_x-155,205,pokemon_x+155,310),fill=(182,168,89),outline=RETRO[0],width=4)
-            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,275-image.height),image)
+            draw.ellipse((pokemon_x-155,225,pokemon_x+155,330),fill=(182,168,89),outline=RETRO[0],width=4)
+            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,300-image.height),image)
             ball_center=((295 if has_avatar else 400),290)
             if ball_data:
                 ball=self._open(ball_data,(86,86),trim=True,upscale=True);canvas.paste(ball,(ball_center[0]-ball.width//2,ball_center[1]-ball.height//2),ball)
@@ -719,7 +721,7 @@ class BattleRenderer:
     @staticmethod
     def pokedex_registration_message(species,trainer_name,registered_count,registered_total):
         trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer";total=max(1,int(registered_total));count=max(0,min(total,int(registered_count)))
-        return f"{species.name} was registered in {trainer}'s Pokedex. Pokedex progress: {count}/{total} registered."
+        return f"{species.name} was registered in {trainer}'s Pokedex.\nPokedex progress: {count}/{total} registered."
 
     def _pokedex_registration_sync(self,pokemon,data,trainer_name,registered_count,registered_total):
         species=SPECIES[pokemon.species_id];trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer";canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
