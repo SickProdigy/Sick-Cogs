@@ -152,6 +152,7 @@ class Battle:
     wild_hp: int
     turn: int = 1
     state: str = "active"
+    escape_reason: str = ""
     result: Optional[str] = None
     seed: int = 0
     rolls: int = 0
@@ -447,7 +448,7 @@ class Battle:
             applied=self._set_status(move.status,not player,rng)
             if applied:changes.append(f"{target_name} is {applied}")
         if move.name in {"Teleport","Roar","Whirlwind"} and self.battle_kind=="wild":
-            self.state="ran";self.result=f"{user_name} used {move.name}. {SPECIES[self.wild_species_id].name} escaped!"
+            self.state="ran";self.escape_reason=f"move:{move.name}";self.result=f"{user_name} used {move.name}. {SPECIES[self.wild_species_id].name} escaped!"
             changes.append(f"{SPECIES[self.wild_species_id].name} escaped")
         detail="; ".join(changes) if changes else "but nothing happened"
         return f"{user_name} used {move.name}; {detail}."
@@ -663,6 +664,7 @@ class Battle:
         if self.state != "active":
             raise BattleError("This encounter is over.")
         self.state = "ran"
+        self.escape_reason = ""
         trainer=" ".join(str(self.trainer_name or "Trainer").split())[:24] or "Trainer"
         self.result = "You forfeited the Gym challenge." if self.battle_kind=="gym" else f"{trainer} got away safely!"
         self._record("run")
@@ -702,6 +704,7 @@ class Battle:
         data = dict(raw)
         data["player"] = OwnedPokemon.from_raw(data["player"])
         data.setdefault("experience_award", 0)
+        data.setdefault("escape_reason", "")
         data.setdefault("wild_pp", {})
         data.setdefault("player_status", "")
         data.setdefault("wild_status", "")

@@ -247,7 +247,10 @@ class CogPolicyTests(unittest.TestCase):
         self.assertEqual(escaped.title,"SickProdigy got away safely!")
         self.assertEqual(escaped.fields,[])
         self.assertIsNone(escaped.thumbnail.url)
-        current.state="lost"
+        current.escape_reason="move:Roar";current.result=f"{wild.name} used Roar. {wild.name} escaped!"
+        forced=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
+        self.assertEqual(forced.title,f"{wild.name} escaped!");self.assertIn("used Roar",forced.description)
+        current.escape_reason="";current.state="lost"
         current.result=f"{wild.name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
         embed=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
         self.assertEqual(embed.title,f"{wild.name} escaped from SickProdigy!")
@@ -464,6 +467,30 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.description,"New Pokemon data was added to SickProdigy's Pokedex.")
         cog.renderer.pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy",42,151)
         self.assertEqual(len(files),1)
+
+    async def test_owner_can_preview_registration_without_mutating_progress(self):
+        pokemon=OwnedPokemon.create("registration",108,22,seed=2)
+        conf={"collection":[pokemon.raw()],"pokedex_caught":[25,108]}
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda _user:StoredSection(conf))
+        cog.rendered_pokedex_registration=AsyncMock(return_value=(discord.Embed(title="Lickitung was registered!"),[]))
+        author=SimpleNamespace(display_name="SickProdigy");ctx=SimpleNamespace(author=author,send=AsyncMock())
+        await Pokemon.preview_registration.callback(cog,ctx,species_name="Lickitung")
+        cog.rendered_pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy",2,len(SPECIES))
+        sent=ctx.send.await_args.kwargs
+        self.assertEqual(sent["embed"].footer.text,"Owner preview only - no Pokemon progress was changed.")
+        self.assertEqual(conf["pokedex_caught"],[25,108])
+
+
+    async def test_owner_card_preview_builds_terminal_scene_without_mutating_party(self):
+        first=OwnedPokemon.create("first",25,7,seed=2);second=OwnedPokemon.create("second",66,8,seed=3);first.current_hp=4
+        conf={"collection":[first.raw(),second.raw()],"party":["first","second"],"pokedex_caught":[25,66]}
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda _user:StoredSection(conf));cog.rendered_battle=AsyncMock(return_value=(discord.Embed(title="Victory!"),[]))
+        author=SimpleNamespace(id=7,display_name="SickProdigy");ctx=SimpleNamespace(author=author,guild=SimpleNamespace(id=8),channel=SimpleNamespace(id=9),send=AsyncMock())
+        await cog._preview_card(ctx,"victory","Pikachu")
+        battle=cog.rendered_battle.await_args.args[0]
+        self.assertEqual((battle.state,battle.wild_species_id,battle.participants),("won",25,["first","second"]))
+        self.assertEqual(conf["collection"][0]["current_hp"],4)
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].footer.text,"Owner preview only - no Pokemon progress was changed.")
 
 
     async def test_timed_mode_tracks_recent_trainer_for_spawn_level_without_activity_points(self):
@@ -783,15 +810,17 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     def test_daily_research_rewards_three_bounded_tasks_once(self):
         conf={"pokedex_stats":{},"pokedex_caught":[],"recorded_battles":[],"achievement_rewards":[],"balls":0,"items":{}}
-        cog=Pokemon.__new__(Pokemon)
+        cog=Pokemon.__new__(Pokemon);rewards=[]
         for encounter_id,state in ((101,"won"),(102,"won"),(103,"caught")):
             current=battle();current.encounter_id=encounter_id;current.state=state
-            cog.record_battle_result(conf,current)
+            rewards.extend(cog.record_battle_result(conf,current))
         self.assertEqual(conf["balls"],2)
         self.assertEqual(conf["items"]["potion"],2)
         self.assertEqual(conf["items"]["great_ball"],1)
         self.assertEqual(set(conf["daily_research"]["claimed"]),{"encounters","victories","catches"})
         self.assertEqual(cog.grant_daily_research(conf),[])
+        self.assertTrue(all(" — " not in reward for reward in rewards))
+        self.assertTrue(all(reward.startswith("Research - ") for reward in rewards))
 
     def test_daily_research_resets_with_new_utc_day_baseline(self):
         conf={"pokedex_stats":{"1":{"battled":4,"defeated":2,"caught":1}}}
