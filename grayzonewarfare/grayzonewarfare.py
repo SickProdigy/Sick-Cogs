@@ -11,7 +11,7 @@ from .utils import TTLCache,attach_guide,normalize_text,parse_guide_html,parse_p
 
 
 log=logging.getLogger("red.sick-cogs.GrayZoneWarfare")
-VERSION="0.2.0"
+VERSION="1.0.0"
 WIKI_NAME="Gray Zone Warfare Wiki"
 WIKI_BASE="https://gray-zone-warfare.fandom.com"
 API_NAME="GZW Data API"
