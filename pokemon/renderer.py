@@ -320,7 +320,9 @@ class BattleRenderer:
 
     @staticmethod
     def _dialogue(draw,text,origin,width=88,max_lines=2,size=16):
-        lines=textwrap.wrap(" ".join(str(text).split()),width=width,break_long_words=False,break_on_hyphens=False) or [""]
+        lines=[]
+        for paragraph in str(text).splitlines() or [""]:
+            lines.extend(textwrap.wrap(" ".join(paragraph.split()),width=width,break_long_words=False,break_on_hyphens=False) or [""])
         font=ImageFont.load_default(size=size);x,y=origin
         for index,line in enumerate(lines[:max_lines]):draw.text((x,y+index*(size+3)),line,fill=RETRO[0],font=font)
 
@@ -719,7 +721,7 @@ class BattleRenderer:
     @staticmethod
     def pokedex_registration_message(species,trainer_name,registered_count,registered_total):
         trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer";total=max(1,int(registered_total));count=max(0,min(total,int(registered_count)))
-        return f"{species.name} was registered in {trainer}'s Pokedex. Pokedex progress: {count}/{total} registered."
+        return f"{species.name} was registered in {trainer}'s Pokedex.\nPokedex progress: {count}/{total} registered."
 
     def _pokedex_registration_sync(self,pokemon,data,trainer_name,registered_count,registered_total):
         species=SPECIES[pokemon.species_id];trainer=" ".join(str(trainer_name or "Trainer").split())[:24] or "Trainer";canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)

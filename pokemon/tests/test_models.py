@@ -405,7 +405,14 @@ class BattleTests(unittest.TestCase):
     def test_pokedex_registration_details_show_types_and_abilities(self):
         self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[39]),("Type: Normal / Fairy","Abilities: Cute Charm, Competitive"))
         self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[25]),("Type: Electric","Abilities: Static"))
-        self.assertEqual(BattleRenderer.pokedex_registration_message(SPECIES[74],"  Prodigy  ",42,151),"Geodude was registered in Prodigy's Pokedex. Pokedex progress: 42/151 registered.")
+        self.assertEqual(BattleRenderer.pokedex_registration_message(SPECIES[74],"  Prodigy  ",42,151),"Geodude was registered in Prodigy's Pokedex.\nPokedex progress: 42/151 registered.")
+
+    def test_dialogue_preserves_explicit_line_breaks(self):
+        calls=[]
+        class Draw:
+            def text(self,position,value,**kwargs):calls.append((position,value))
+        BattleRenderer._dialogue(Draw(),"Registration complete.\nPokedex progress: 43/151 registered.",(25,372),width=84,size=19)
+        self.assertEqual(calls,[((25,372),"Registration complete."),((25,394),"Pokedex progress: 43/151 registered.")])
 
     def test_pokemon_center_dialogue_is_ascii_safe(self):
         self.assertEqual(BattleRenderer.pokemon_center_message("SickProdigy",True),"SickProdigy, your Pokemon are back to perfect health!")
