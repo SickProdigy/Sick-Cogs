@@ -480,6 +480,8 @@ class BattleTests(unittest.TestCase):
         with Image.open(caught_result) as image:
             self.assertEqual(image.size,(800,450))
             self.assertEqual(image.getpixel((145,245)),(220,40,80))
+            self.assertEqual(image.getpixel((650,275)),(182,168,89))
+            self.assertEqual(image.getpixel((485,320)),(182,168,89))
             self.assertNotIn(RETRO[1],set(image.crop((460,320,550,348)).get_flattened_data()))
             self.assertIn(RETRO[1],set(image.crop((65,380,150,408)).get_flattened_data()))
         with Image.open(escape_result) as image:
