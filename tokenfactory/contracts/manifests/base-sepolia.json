@@ -13,7 +13,7 @@
   "deploymentSelector": "0xb40a41ce",
   "fixedSupplyTokenCreatedTopic": "0x8fdcf262da18a046c6f85d4fd10e822a07e071a567fa391c6b3d1fe6d91a1c5f",
   "sourceSha256": "fde10b1846c6b9462a8d8cbf923379a7e9e9bf2466df5c1de31755a18225ac16",
-  "packageLockSha256": "c10285d16e705ee3127c08480a6479eb3e92e59a6c87d965776f74ad1591016b",
+  "packageLockSha256": "dae3e8940a86a6fd4a6c371e631a0f1f8e8292d9e4f53bc082ebcf1d4a150df1",
   "factoryCreationCodeHash": "0xb64d6bb88272f855801acc74e55e90777db7acaf6e7a1f7b8c13d5a6aeb4e5d0",
   "factoryRuntimeCodeHash": "0xa4e867671846a61743568f19d897fb5ffe40ad9678c9c06e791ff45dad7136f7",
   "singletonFactory": "0xce0042B868300000d44A59004Da54A005ffdcf9f",

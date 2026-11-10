@@ -43,7 +43,7 @@ Expected SHA-256 values:
 
 ```text
 fde10b1846c6b9462a8d8cbf923379a7e9e9bf2466df5c1de31755a18225ac16  src/SickGamingTokenFactory.sol
-c10285d16e705ee3127c08480a6479eb3e92e59a6c87d965776f74ad1591016b  package-lock.json
+dae3e8940a86a6fd4a6c371e631a0f1f8e8292d9e4f53bc082ebcf1d4a150df1  package-lock.json
 3177fd1f03bccdebfac94b403e7fb53ddddbe6338516de31003bfb511599c909  artifact/SickGamingTokenFactory.json
 ```
 
