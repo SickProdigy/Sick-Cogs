@@ -531,7 +531,7 @@ details. The original relay secret and configuration remain unchanged during upd
 
 ## Remaining work
 
-Frontend build requirements: Node.js 20.18+ and npm. Run `npm ci` in
+Frontend build requirements: Node.js 22+ and npm. Run `npm ci` in
 `cryptowallet/web/`, then use `npm run build` for `src/cdp-wallet.js`,
 `npm run build:clanker` for `src/clanker-external.js`, or `npm run build:security`
 for `src/security.js`. Deploy the corresponding generated root-level browser bundle with
