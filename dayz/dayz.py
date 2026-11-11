@@ -74,7 +74,7 @@ class DayZ(commands.Cog):
     """Publish official DayZ Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.4"
+    __version__ = "1.0.5"
 
     default_guild = {
         "enabled": False,

@@ -27,6 +27,10 @@ Review the available cogs and each cog's setup message before installing:
 
 Use `[p]cog update` to install future updates. Replace `[p]` with your bot's configured prefix when typing commands.
 
+Image-rendering cogs that require Pillow use `Pillow>=13.0.0,<14` and require Python
+3.11 or newer. Keep these requirements aligned when installing multiple cogs in one
+Red environment; older cog releases may otherwise request a vulnerable Pillow downgrade.
+
 ## Available Cogs
 
 - `avatar` - Display a Discord user's avatar as a direct, clickable image URL.

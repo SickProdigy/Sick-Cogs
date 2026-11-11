@@ -6,13 +6,13 @@
     "hidden": false,
     "install_msg": "Use `[p]meme` for online memes, `[p]meme gif` for animated Imgur results, and `[p]memeify` (alias `[p]imgflip`) for local captioning. Online providers require optional Red shared API tokens; see the cog README.",
     "min_bot_version": "3.5.0",
-    "min_python_version": [3, 9, 0],
+    "min_python_version": [3, 11, 0],
     "name": "Meme",
     "permissions": ["attach_files", "embed_links"],
     "required_cogs": {},
-    "requirements": ["Pillow>=10.0,<12.0"],
+    "requirements": ["Pillow>=13.0.0,<14"],
     "short": "Find, publish, and create memes",
     "tags": ["meme", "memes", "fun", "images", "gif", "reddit", "imgur"],
     "type": "COG",
-    "version": "1.0.4"
+    "version": "1.0.5"
 }
