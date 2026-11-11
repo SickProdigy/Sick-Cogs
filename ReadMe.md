@@ -51,6 +51,11 @@ Red environment; older cog releases may otherwise request a vulnerable Pillow do
 
 Develop-only cogs and experiments are not part of the stable Index release.
 
+Assistant is no longer bundled or synced by Sick-Cogs. Future Assistant work may
+use the creators' upstream cog or a separately reviewed contribution; the former
+local fork remains recoverable from Git history. BotUpdates' optional Assistant
+integration requires a separately installed compatible cog.
+
 Current develop experiments include:
 
 - `gameroom` — unified free-play games and Red native-game discovery.
