@@ -26,7 +26,7 @@ class Meme(commands.Cog):
     """Find online memes and GIFs and publish scheduled feeds."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.4"
+    __version__ = "1.0.5"
     default_guild = {"feeds": {}, "seen": [], "feed_silent": False}
 
     def __init__(self, bot):
