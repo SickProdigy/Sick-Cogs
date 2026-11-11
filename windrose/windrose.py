@@ -73,7 +73,7 @@ class Windrose(commands.Cog):
     """Publish official Windrose Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.1.1"
 
     default_guild = {
         "enabled": False,

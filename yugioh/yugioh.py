@@ -12,7 +12,7 @@ DEFAULTS={"schema":1,"next_game_id":1,"games":{}}
 DUEL_TIMEOUT_SECONDS=604800
 class YuGiOh(commands.Cog):
     """Persistent two-player Yu-Gi-Oh rules prototype."""
-    __author__="SickProdigy";__version__="0.1.0"
+    __author__="SickProdigy";__version__="0.1.1"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True);self.config.register_global(**DEFAULTS)
         self.games={};self.channels={};self.locks={};self.storage_lock=asyncio.Lock();self.session=None;self.art_cache=None;self.cleanup_task=None

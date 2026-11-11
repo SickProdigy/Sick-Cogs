@@ -6,11 +6,12 @@
     "hidden": false,
     "install_msg": "Set an announcement channel with `[p]palworldset channel #channel`, choose `[p]palworldset mode card` or `[p]palworldset mode article`, optionally set a notification role, then start automatic posting with `[p]palworldset autopost start`. Existing Steam posts are seeded during setup and will not flood the channel.",
     "min_bot_version": "3.5.0",
+    "min_python_version": [3, 11, 0],
     "permissions": ["embed_links", "attach_files"],
     "name": "Palworld",
-    "requirements": ["Pillow>=12.0,<13"],
+    "requirements": ["Pillow>=13.0.0,<14"],
     "short": "Official Palworld Steam announcements",
     "tags": ["palworld", "steam", "updates", "notifications", "games"],
     "type": "COG",
-    "version": "0.1.0"
+    "version": "0.1.1"
 }
