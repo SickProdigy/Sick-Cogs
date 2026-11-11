@@ -11,7 +11,7 @@ from PIL import Image, UnidentifiedImageError
 APP_ID = 2399830
 API_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
 ANNOUNCEMENTS_URL = f"https://steamcommunity.com/app/{APP_ID}/announcements/"
-USER_AGENT = "Sick-Cogs-Ark/1.1.5 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Ark/1.1.8 (+https://github.com/SickProdigy/Sick-Cogs)"
 STEAM_CLAN_IMAGE_ROOT = "https://clan.steamstatic.com/images"
 
 CATEGORIES = ("updates", "hotfixes", "community", "events", "wipes", "releases", "promotions")
@@ -219,7 +219,7 @@ class SteamNewsClient:
         self.session = session
 
     async def fetch(self, *, count: int = 50) -> List[Dict[str, Any]]:
-        params = {"appid": APP_ID, "count": max(1, min(int(count), 100)), "maxlength": 0, "format": "json"}
+        params = {"appid": APP_ID, "count": max(1, min(int(count), 100)), "maxlength": 0, "format": "json", "feeds": "steam_community_announcements"}
         try:
             async with self.session.get(API_URL, params=params) as response:
                 if response.status >= 400:
@@ -231,4 +231,8 @@ class SteamNewsClient:
         items = payload.get("appnews", {}).get("newsitems", []) if isinstance(payload, dict) else []
         if not isinstance(items, list):
             raise SteamNewsError("Steam News returned an invalid response.")
-        return [item for item in items if isinstance(item, dict) and item_id(item)]
+        return [
+            item for item in items
+            if isinstance(item, dict) and item_id(item)
+            and str(item.get("feedname") or "").casefold() == "steam_community_announcements"
+        ]

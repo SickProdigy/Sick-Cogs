@@ -5,6 +5,7 @@ from ark import setup
 from ark.ark import Ark, CONFIG_IDENTIFIER, LEGACY_CONFIG_COG_NAME
 
 from ark.client import (
+    SteamNewsClient,
     classify_news,
     extract_image,
     extract_images,
@@ -15,6 +16,30 @@ from ark.client import (
     plain_text,
     recent_items,
 )
+
+
+class SteamFeedTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_excludes_third_party_and_unidentified_feeds(self):
+        from unittest.mock import MagicMock
+
+        official = {"gid": "official", "feedname": "steam_community_announcements", "date": 1}
+        third_party = {
+            "gid": "third-party", "feedname": "PlayGround.ru - официальная группа", "date": 2,
+            "url": "https://steamstore-a.akamaihd.net/news/externalpost/PlayGround.ru - официальная группа/123",
+        }
+        response = AsyncMock()
+        response.status = 200
+        response.json.return_value = {"appnews": {"newsitems": [third_party, official, {"gid": "unknown"}]}}
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=response)
+        context.__aexit__ = AsyncMock(return_value=False)
+        session = Mock()
+        session.get.return_value = context
+
+        items = await SteamNewsClient(session).fetch()
+
+        self.assertEqual(items, [official])
+        self.assertEqual(session.get.call_args.kwargs["params"]["feeds"], "steam_community_announcements")
 
 
 class ArkClientTests(unittest.TestCase):
