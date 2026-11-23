@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock,MagicMock
 
 from grayzonewarfare.grayzonewarfare import GrayZoneWarfare,QuestResultView,WikiUnavailable
 from grayzonewarfare.utils import TTLCache,attach_guide,normalize_text,parse_guide_html,parse_page,rank_pages,record_page,source_url
@@ -44,6 +45,16 @@ class UtilityTests(unittest.TestCase):
         self.assertEqual(rank_pages("tanker trucks",pages)[0]["title"],"A Single Drop")
         self.assertEqual(rank_pages("zzzz-no-real-quest-98765",pages),[])
 
+    def test_common_words_do_not_match_a_different_missing_quest(self):
+        self.assertEqual(rank_pages("letter from beyond",[page("Letters from Lamang")]),[])
+
+    def test_guide_only_html_keeps_location_captions_and_filters_broken_markup(self):
+        html='<p>Locate the body.</p><p>[[File:broken.png|thumb|broken</p><p>]]]]</p><figure><img src="https://images.example/map.png/scale-to-width-down/298"><p>Body location 189/163</p></figure><noscript><img src="https://images.example/duplicate.png"></noscript><p>Letter location 189/160</p>'
+        guide=parse_guide_html(html)
+        self.assertEqual(guide["steps"],["Locate the body.","Body location 189/163","Letter location 189/160"])
+        self.assertEqual(len(guide["images"]),1)
+        self.assertIn("/scale-to-width-down/1000",guide["images"][0]["url"])
+
     def test_cache_expires_and_evicts_oldest(self):
         now=[0.0];cache=TTLCache(ttl=10,max_entries=2,clock=lambda:now[0])
         cache.set("one",[1]);cache.set("two",[2]);self.assertEqual(cache.get("one"),[1])
@@ -78,17 +89,82 @@ class CogTests(unittest.IsolatedAsyncioTestCase):
     def make_cog(self,responses):
         cog=GrayZoneWarfare.__new__(GrayZoneWarfare);cog.cache=TTLCache();cog.request_lock=asyncio.Lock();cog.last_request=0;cog.session=FakeSession(responses);return cog
 
+    async def test_non_exact_results_require_selection_before_enrichment(self):
+        for names in (["First Recon"],["First Recon","First Hit"]):
+            cog=self.make_cog([])
+            cog.search_quests=AsyncMock(return_value=[page(name) for name in names])
+            cog.enrich_guide=AsyncMock()
+            ctx=SimpleNamespace(author=SimpleNamespace(id=7),typing=MagicMock(),send=AsyncMock())
+            ctx.typing.return_value.__aenter__=AsyncMock()
+            ctx.typing.return_value.__aexit__=AsyncMock()
+            await GrayZoneWarfare.quest.callback(cog,ctx,query="first")
+            cog.enrich_guide.assert_not_awaited()
+            self.assertNotIn("embeds",ctx.send.call_args.kwargs)
+            self.assertIn("No exact quest title matched",ctx.send.call_args.args[0])
+            self.assertIsInstance(ctx.send.call_args.kwargs["view"],QuestResultView)
+
+    async def test_exact_result_opens_directly(self):
+        cog=self.make_cog([]);result=page()
+        cog.search_quests=AsyncMock(return_value=[result]);cog.enrich_guide=AsyncMock(return_value=result)
+        ctx=SimpleNamespace(typing=MagicMock(),send=AsyncMock())
+        ctx.typing.return_value.__aenter__=AsyncMock();ctx.typing.return_value.__aexit__=AsyncMock()
+        await GrayZoneWarfare.quest.callback(cog,ctx,query="First Recon")
+        cog.enrich_guide.assert_awaited_once_with(result)
+        self.assertIn("embeds",ctx.send.call_args.kwargs)
+
+    async def test_selection_defers_then_replaces_prompt(self):
+        cog=self.make_cog([]);result=page();cog.enrich_guide=AsyncMock(return_value=result)
+        view=QuestResultView(cog,7,[result]);select=view.children[0];select._values=["0"]
+        interaction=SimpleNamespace(user=SimpleNamespace(id=7),response=SimpleNamespace(defer=AsyncMock()),edit_original_response=AsyncMock())
+        await select.callback(interaction)
+        interaction.response.defer.assert_awaited_once()
+        self.assertIsNone(interaction.edit_original_response.call_args.kwargs["content"])
+        self.assertIn("embeds",interaction.edit_original_response.call_args.kwargs)
+
     async def test_search_fetches_catalog_once_then_ranks_locally(self):
-        payload={"data":[record("Little Bird Down"),record()],"dataVersion":"2026-11-03T21:05:01Z"};cog=self.make_cog([FakeResponse(200,payload)])
+        payload={"data":[record("Little Bird Down"),record()],"dataVersion":"2026-11-03T21:05:01Z"};cog=self.make_cog([FakeResponse(200,payload),FakeResponse(200,{"data":[]}),FakeResponse(200,{"data":[]})])
         first=await cog.search_quests("First Recon");second=await cog.search_quests("frist recon")
-        self.assertEqual(first[0]["title"],"First Recon");self.assertEqual(second[0]["title"],"First Recon");self.assertEqual(len(cog.session.calls),1)
+        self.assertEqual(first[0]["title"],"First Recon");self.assertEqual(second[0]["title"],"First Recon");self.assertEqual(len(cog.session.calls),3)
         self.assertEqual(cog.session.calls[0][1]["params"],{"page":"1","per_page":"100"})
 
     async def test_search_collects_bounded_catalog_pages(self):
         first={"data":[record("Little Bird Down")],"dataVersion":"2026-11-03T21:05:01Z","totalPages":2}
         second={"data":[record("First Recon")],"dataVersion":"2026-11-03T21:05:01Z","totalPages":2}
-        cog=self.make_cog([FakeResponse(200,first),FakeResponse(200,second)]);pages=await cog.search_quests("First Recon")
+        cog=self.make_cog([FakeResponse(200,first),FakeResponse(200,second),FakeResponse(200,{"data":[]}),FakeResponse(200,{"data":[]})]);pages=await cog.search_quests("First Recon")
         self.assertEqual(pages[0]["title"],"First Recon");self.assertEqual(cog.session.calls[1][1]["params"],{"page":"2","per_page":"100"})
+
+    async def test_catalog_includes_contracts_and_guide_only_quests(self):
+        cog=self.make_cog([
+            FakeResponse(200,{"data":[record()]}),
+            FakeResponse(200,{"data":[record("Fuel Shortage")]}),
+            FakeResponse(200,{"data":[{"name":"Letter From Beyond","content":"[[File:raw markup]]"}]}),
+        ])
+        self.assertEqual((await cog.search_quests("letter from beyond"))[0]["title"],"Letter From Beyond")
+        self.assertEqual((await cog.search_quests("fuel shortage"))[0]["title"],"Fuel Shortage")
+        self.assertEqual([call[0][0].rsplit("/",1)[-1] for call in cog.session.calls],["tasks","contract","task_guides"])
+        result=(await cog.search_quests("letter from beyond"))[0]
+        self.assertEqual(result["guide"],"");self.assertEqual(result["walkthrough"],[])
+        self.assertIn("without structured guidance",GrayZoneWarfare.quest_embed(result).description)
+
+    async def test_catalog_deduplicates_titles_without_overwriting_structured_fields(self):
+        cog=self.make_cog([
+            FakeResponse(200,{"data":[record()],"dataVersion":"task-date"}),
+            FakeResponse(200,{"data":[record("FIRST RECON",vendor="Other",location="",task_type="Contract")]}),
+            FakeResponse(200,{"data":[{"name":"First Recon","content":"unparsed"}]}),
+        ])
+        results=await cog.search_quests("First Recon")
+        self.assertEqual(len(results),1);self.assertEqual(results[0]["vendor"],"Handshake")
+        self.assertEqual(results[0]["type"],"Contract");self.assertEqual(results[0]["updated"],"task-date")
+
+    async def test_failed_supplement_does_not_cache_an_incomplete_catalog(self):
+        cog=self.make_cog([FakeResponse(200,{"data":[record()]}),FakeResponse(503,{})])
+        with self.assertRaises(WikiUnavailable):await cog.search_quests("First Recon")
+        self.assertIsNone(cog.cache.get("__catalog__"))
+
+    async def test_malformed_record_and_excess_pagination_fail_safely(self):
+        for payload in ({"data":[None]},{"data":[],"totalPages":6}):
+            with self.assertRaises(WikiUnavailable):
+                await self.make_cog([FakeResponse(200,payload)]).search_quests("First Recon")
 
     async def test_enrich_guide_uses_section_api_and_caches_result(self):
         sections={"parse":{"sections":[{"line":"Guide","index":"5"}]}}
@@ -98,6 +174,22 @@ class CogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["walkthrough"],["Head north."]);self.assertEqual(len(first["guide_images"]),1)
         self.assertEqual(second["walkthrough"],["Head north."]);self.assertEqual(len(cog.session.calls),2)
         self.assertEqual(cog.session.calls[1][1]["params"]["section"],"5")
+
+    async def test_guide_only_page_without_sections_fetches_article_images(self):
+        cog=self.make_cog([FakeResponse(200,{"parse":{"sections":[]}}),FakeResponse(200,{"parse":{"text":{"*":'<p>Locate the body.</p><img src="https://images.example/map.png" alt="Body 189/163">'}}})])
+        result=await cog.enrich_guide(record_page({"name":"Letter From Beyond","_guide_only":True}))
+        self.assertEqual(result["walkthrough"],["Locate the body."])
+        self.assertEqual(result["guide_images"][0]["caption"],"Body 189/163")
+        self.assertNotIn("section",cog.session.calls[1][1]["params"])
+
+    async def test_ordinary_page_without_guide_does_not_parse_entire_article(self):
+        cog=self.make_cog([FakeResponse(200,{"parse":{"sections":[]}})])
+        result=await cog.enrich_guide(page())
+        self.assertEqual(result["walkthrough"],[]);self.assertEqual(len(cog.session.calls),1)
+
+    def test_all_five_location_images_are_displayed(self):
+        result=attach_guide(page(),{"images":[{"url":f"https://images.example/{i}.png"} for i in range(5)]})
+        self.assertEqual(len(GrayZoneWarfare.quest_embeds(result)),5)
 
     async def test_search_reports_http_and_shape_failures(self):
         with self.assertRaises(WikiUnavailable):await self.make_cog([FakeResponse(503,{})]).search_quests("First Recon")

@@ -11,11 +11,12 @@ from .utils import TTLCache,attach_guide,normalize_text,parse_guide_html,parse_p
 
 
 log=logging.getLogger("red.sick-cogs.GrayZoneWarfare")
-VERSION="1.0.0"
+VERSION="1.0.3"
 WIKI_NAME="Gray Zone Warfare Wiki"
 WIKI_BASE="https://gray-zone-warfare.fandom.com"
 API_NAME="GZW Data API"
 API_URL="https://gzw-data.dev/api/v1/tasks"
+CATALOG_URLS=(API_URL,"https://gzw-data.dev/api/v1/contract","https://gzw-data.dev/api/v1/task_guides")
 FANDOM_API_URL=f"{WIKI_BASE}/api.php"
 USER_AGENT=f"Sick-Cogs-GrayZoneWarfare/{VERSION} (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 
@@ -27,14 +28,15 @@ class WikiUnavailable(RuntimeError):
 class QuestResultSelect(discord.ui.Select):
     def __init__(self,cog,author_id,pages):
         self.cog=cog;self.author_id=author_id;self.pages=pages
-        options=[discord.SelectOption(label=str(page.get("title") or "Quest")[:100],value=str(index)) for index,page in enumerate(pages[:5])]
+        options=[discord.SelectOption(label=str(page.get("title") or "Quest")[:100],value=str(index),description=" • ".join(str(page.get(key) or "") for key in ("vendor","location"))[:100] or None) for index,page in enumerate(pages[:5])]
         super().__init__(placeholder="Choose the matching quest…",options=options)
 
     async def callback(self,interaction):
         if interaction.user.id!=self.author_id:
             await interaction.response.send_message("Run the command yourself to choose a quest.",ephemeral=True);return
+        await interaction.response.defer()
         page=await self.cog.enrich_guide(self.pages[int(self.values[0])])
-        await interaction.response.edit_message(embeds=self.cog.quest_embeds(page),view=self.view)
+        await interaction.edit_original_response(content=None,embeds=self.cog.quest_embeds(page),view=self.view)
 
 
 class QuestResultView(discord.ui.View):
@@ -86,36 +88,52 @@ class GrayZoneWarfare(commands.Cog):
             search_url=f"{WIKI_BASE}/wiki/Special:Search?query={quote(query)}"
             await ctx.send(f"No quest pages matched **{query}**. Try the [full wiki search]({search_url}).");return
         exact=normalize_text(pages[0].get("title"))==normalize_text(query)
-        choices=pages[:5];view=QuestResultView(self,ctx.author.id,choices) if len(choices)>1 and not exact else None
-        selected=await self.enrich_guide(choices[0])
-        message=await ctx.send(embeds=self.quest_embeds(selected),view=view)
-        if view:view.message=message
+        if exact:
+            selected=await self.enrich_guide(pages[0])
+            await ctx.send(embeds=self.quest_embeds(selected))
+            return
+        view=QuestResultView(self,ctx.author.id,pages[:5])
+        search_url=f"{WIKI_BASE}/wiki/Special:Search?query={quote(query)}"
+        view.message=await ctx.send(
+            "No exact quest title matched. These are possible matches, not a confirmed quest. "
+            "Choose the quest you meant below to see its walkthrough. "
+            f"If none is right, try the [full wiki search]({search_url}); the catalog may be missing your quest.",
+            view=view,
+        )
 
     async def search_quests(self,query):
         key=normalize_text(query);cached=self.cache.get(key)
         if cached is not None:return cached
         catalog=self.cache.get("__catalog__")
         if catalog is None:
-            records=[];data_version="";page_number=1
+            merged={}
             try:
-                async with self.request_lock:
+                for url in CATALOG_URLS:
+                    page_number=1
                     while page_number<=5:
-                        delay=max(0.0,0.75-(time.monotonic()-self.last_request))
-                        if delay:await asyncio.sleep(delay)
-                        params={"page":str(page_number),"per_page":"100"}
-                        async with self.session.get(API_URL,params=params) as response:
-                            self.last_request=time.monotonic()
-                            if response.status!=200:raise WikiUnavailable(f"HTTP {response.status}")
-                            payload=await response.json(content_type=None)
-                        page_records=payload.get("data",[])
+                        payload=await self._get_json(url,{"page":str(page_number),"per_page":"100"})
+                        if not isinstance(payload,dict):raise WikiUnavailable("Unexpected API response")
+                        page_records=payload.get("data")
                         if not isinstance(page_records,list):raise WikiUnavailable("Unexpected API response")
-                        records.extend(page_records);data_version=data_version or payload.get("dataVersion","")
+                        for record in page_records:
+                            if not isinstance(record,dict) or not str(record.get("name") or "").strip():
+                                raise WikiUnavailable("Unexpected quest record")
+                            page=record_page(dict(record,_guide_only=url==CATALOG_URLS[2]),payload.get("dataVersion",""))
+                            identity=normalize_text(page["title"])
+                            if identity not in merged:merged[identity]=page
+                            else:
+                                # Prefer structured task fields; supplement only missing values.
+                                existing=merged[identity]
+                                for field,value in page.items():
+                                    if not existing.get(field) and value:existing[field]=value
+                                existing["search_text"]+=" "+page["search_text"]
                         total_pages=max(1,int(payload.get("totalPages",1) or 1))
+                        if total_pages>5:raise WikiUnavailable("Quest catalog exceeds pagination limit")
                         if page_number>=total_pages:break
                         page_number+=1
             except (aiohttp.ClientError,asyncio.TimeoutError,ValueError,TypeError) as exc:
                 raise WikiUnavailable("API request failed") from exc
-            catalog=[record_page(record,data_version) for record in records]
+            catalog=list(merged.values())
             self.cache.set("__catalog__",catalog)
         ranked=rank_pages(query,catalog);self.cache.set(key,ranked);return ranked
 
@@ -127,9 +145,10 @@ class GrayZoneWarfare(commands.Cog):
             sections=await self._get_json(FANDOM_API_URL,params)
             entries=sections.get("parse",{}).get("sections",[])
             guide_section=next((item.get("index") for item in entries if normalize_text(item.get("line"))=="guide"),None)
-            if guide_section is None:guide={"steps":[],"images":[]}
+            if guide_section is None and not page.get("guide_only"):guide={"steps":[],"images":[]}
             else:
-                params.update({"section":str(guide_section),"prop":"text|images|displaytitle"})
+                params.update({"prop":"text|images|displaytitle"})
+                if guide_section is not None:params["section"]=str(guide_section)
                 payload=await self._get_json(FANDOM_API_URL,params)
                 html=payload.get("parse",{}).get("text",{}).get("*","")
                 guide=parse_guide_html(html)
@@ -149,7 +168,7 @@ class GrayZoneWarfare(commands.Cog):
 
     @staticmethod
     def quest_embeds(page):
-        quest=parse_page(page);main=GrayZoneWarfare.quest_embed(page);images=quest["guide_images"][:4]
+        quest=parse_page(page);main=GrayZoneWarfare.quest_embed(page);images=quest["guide_images"][:5]
         if images:main.set_image(url=images[0]["url"])
         embeds=[main]
         for number,item in enumerate(images[1:],start=2):
