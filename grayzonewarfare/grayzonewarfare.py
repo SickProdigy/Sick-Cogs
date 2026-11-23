@@ -11,11 +11,12 @@ from .utils import TTLCache,attach_guide,normalize_text,parse_guide_html,parse_p
 
 
 log=logging.getLogger("red.sick-cogs.GrayZoneWarfare")
-VERSION="1.0.1"
+VERSION="1.0.2"
 WIKI_NAME="Gray Zone Warfare Wiki"
 WIKI_BASE="https://gray-zone-warfare.fandom.com"
 API_NAME="GZW Data API"
 API_URL="https://gzw-data.dev/api/v1/tasks"
+CATALOG_URLS=(API_URL,"https://gzw-data.dev/api/v1/contract","https://gzw-data.dev/api/v1/task_guides")
 FANDOM_API_URL=f"{WIKI_BASE}/api.php"
 USER_AGENT=f"Sick-Cogs-GrayZoneWarfare/{VERSION} (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 
@@ -105,26 +106,34 @@ class GrayZoneWarfare(commands.Cog):
         if cached is not None:return cached
         catalog=self.cache.get("__catalog__")
         if catalog is None:
-            records=[];data_version="";page_number=1
+            merged={}
             try:
-                async with self.request_lock:
+                for url in CATALOG_URLS:
+                    page_number=1
                     while page_number<=5:
-                        delay=max(0.0,0.75-(time.monotonic()-self.last_request))
-                        if delay:await asyncio.sleep(delay)
-                        params={"page":str(page_number),"per_page":"100"}
-                        async with self.session.get(API_URL,params=params) as response:
-                            self.last_request=time.monotonic()
-                            if response.status!=200:raise WikiUnavailable(f"HTTP {response.status}")
-                            payload=await response.json(content_type=None)
-                        page_records=payload.get("data",[])
+                        payload=await self._get_json(url,{"page":str(page_number),"per_page":"100"})
+                        if not isinstance(payload,dict):raise WikiUnavailable("Unexpected API response")
+                        page_records=payload.get("data")
                         if not isinstance(page_records,list):raise WikiUnavailable("Unexpected API response")
-                        records.extend(page_records);data_version=data_version or payload.get("dataVersion","")
+                        for record in page_records:
+                            if not isinstance(record,dict) or not str(record.get("name") or "").strip():
+                                raise WikiUnavailable("Unexpected quest record")
+                            page=record_page(record,payload.get("dataVersion",""))
+                            identity=normalize_text(page["title"])
+                            if identity not in merged:merged[identity]=page
+                            else:
+                                # Prefer structured task fields; supplement only missing values.
+                                existing=merged[identity]
+                                for field,value in page.items():
+                                    if not existing.get(field) and value:existing[field]=value
+                                existing["search_text"]+=" "+page["search_text"]
                         total_pages=max(1,int(payload.get("totalPages",1) or 1))
+                        if total_pages>5:raise WikiUnavailable("Quest catalog exceeds pagination limit")
                         if page_number>=total_pages:break
                         page_number+=1
             except (aiohttp.ClientError,asyncio.TimeoutError,ValueError,TypeError) as exc:
                 raise WikiUnavailable("API request failed") from exc
-            catalog=[record_page(record,data_version) for record in records]
+            catalog=list(merged.values())
             self.cache.set("__catalog__",catalog)
         ranked=rank_pages(query,catalog);self.cache.set(key,ranked);return ranked
 
