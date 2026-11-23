@@ -11,7 +11,7 @@ from .utils import TTLCache,attach_guide,normalize_text,parse_guide_html,parse_p
 
 
 log=logging.getLogger("red.sick-cogs.GrayZoneWarfare")
-VERSION="1.0.2"
+VERSION="1.0.3"
 WIKI_NAME="Gray Zone Warfare Wiki"
 WIKI_BASE="https://gray-zone-warfare.fandom.com"
 API_NAME="GZW Data API"
@@ -118,7 +118,7 @@ class GrayZoneWarfare(commands.Cog):
                         for record in page_records:
                             if not isinstance(record,dict) or not str(record.get("name") or "").strip():
                                 raise WikiUnavailable("Unexpected quest record")
-                            page=record_page(record,payload.get("dataVersion",""))
+                            page=record_page(dict(record,_guide_only=url==CATALOG_URLS[2]),payload.get("dataVersion",""))
                             identity=normalize_text(page["title"])
                             if identity not in merged:merged[identity]=page
                             else:
@@ -145,9 +145,10 @@ class GrayZoneWarfare(commands.Cog):
             sections=await self._get_json(FANDOM_API_URL,params)
             entries=sections.get("parse",{}).get("sections",[])
             guide_section=next((item.get("index") for item in entries if normalize_text(item.get("line"))=="guide"),None)
-            if guide_section is None:guide={"steps":[],"images":[]}
+            if guide_section is None and not page.get("guide_only"):guide={"steps":[],"images":[]}
             else:
-                params.update({"section":str(guide_section),"prop":"text|images|displaytitle"})
+                params.update({"prop":"text|images|displaytitle"})
+                if guide_section is not None:params["section"]=str(guide_section)
                 payload=await self._get_json(FANDOM_API_URL,params)
                 html=payload.get("parse",{}).get("text",{}).get("*","")
                 guide=parse_guide_html(html)
@@ -167,7 +168,7 @@ class GrayZoneWarfare(commands.Cog):
 
     @staticmethod
     def quest_embeds(page):
-        quest=parse_page(page);main=GrayZoneWarfare.quest_embed(page);images=quest["guide_images"][:4]
+        quest=parse_page(page);main=GrayZoneWarfare.quest_embed(page);images=quest["guide_images"][:5]
         if images:main.set_image(url=images[0]["url"])
         embeds=[main]
         for number,item in enumerate(images[1:],start=2):
