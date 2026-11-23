@@ -96,6 +96,9 @@ def page_score(query,page):
     if not wanted or not title:return 0
     wanted_tokens=set(wanted.split());search_tokens=set(search.split());overlap=len(wanted_tokens&search_tokens)/max(1,len(wanted_tokens))
     ratio=SequenceMatcher(None,wanted,title).ratio()
+    # Common connecting words must not make an unrelated title a candidate.
+    meaningful=wanted_tokens-{"a","an","the","from","of","to","in","on","and","for","with"}
+    if not meaningful & search_tokens and ratio<0.8:return 0
     if overlap<0.4 and wanted not in title and title not in wanted and ratio<0.68:return 0
     score=ratio*50+overlap*30
     if title==wanted:score+=100

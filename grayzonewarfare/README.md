@@ -10,7 +10,7 @@ Find Gray Zone Warfare quests, actionable walkthrough steps, and source images w
 [p]gzw task <quest name or keywords>
 ```
 
-Exact titles open directly. Partial terms and common spelling variations use local ranking across the current quest catalog. When several quests are plausible, the requesting user receives a short selection menu. After matching the task, the cog fetches that page's structured Guide section through Fandom's MediaWiki API. Results prioritize the mission check and actionable completion steps, can display up to four sourced guide images, and keep the full wiki page one click away.
+Exact titles open directly. Partial terms and common spelling variations use local ranking across the current quest catalog. Every non-exact search shows up to five possible matches in a requester-only selection menu, including task giver and location. No walkthrough is displayed until the player chooses a quest, even when only one candidate is found. Common connecting words alone do not qualify a match. If none is right, use the provided full wiki search link; the source catalog may be missing a quest. After matching the task, the cog fetches that page's structured Guide section through Fandom's MediaWiki API. Results prioritize the mission check and actionable completion steps, can display up to four sourced guide images, and keep the full wiki page one click away.
 
 ## Source and limitations
 

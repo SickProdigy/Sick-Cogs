@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock,MagicMock
 
 from grayzonewarfare.grayzonewarfare import GrayZoneWarfare,QuestResultView,WikiUnavailable
 from grayzonewarfare.utils import TTLCache,attach_guide,normalize_text,parse_guide_html,parse_page,rank_pages,record_page,source_url
@@ -44,6 +45,9 @@ class UtilityTests(unittest.TestCase):
         self.assertEqual(rank_pages("tanker trucks",pages)[0]["title"],"A Single Drop")
         self.assertEqual(rank_pages("zzzz-no-real-quest-98765",pages),[])
 
+    def test_common_words_do_not_match_a_different_missing_quest(self):
+        self.assertEqual(rank_pages("letter from beyond",[page("Letters from Lamang")]),[])
+
     def test_cache_expires_and_evicts_oldest(self):
         now=[0.0];cache=TTLCache(ttl=10,max_entries=2,clock=lambda:now[0])
         cache.set("one",[1]);cache.set("two",[2]);self.assertEqual(cache.get("one"),[1])
@@ -77,6 +81,38 @@ class FakeSession:
 class CogTests(unittest.IsolatedAsyncioTestCase):
     def make_cog(self,responses):
         cog=GrayZoneWarfare.__new__(GrayZoneWarfare);cog.cache=TTLCache();cog.request_lock=asyncio.Lock();cog.last_request=0;cog.session=FakeSession(responses);return cog
+
+    async def test_non_exact_results_require_selection_before_enrichment(self):
+        for names in (["First Recon"],["First Recon","First Hit"]):
+            cog=self.make_cog([])
+            cog.search_quests=AsyncMock(return_value=[page(name) for name in names])
+            cog.enrich_guide=AsyncMock()
+            ctx=SimpleNamespace(author=SimpleNamespace(id=7),typing=MagicMock(),send=AsyncMock())
+            ctx.typing.return_value.__aenter__=AsyncMock()
+            ctx.typing.return_value.__aexit__=AsyncMock()
+            await GrayZoneWarfare.quest.callback(cog,ctx,query="first")
+            cog.enrich_guide.assert_not_awaited()
+            self.assertNotIn("embeds",ctx.send.call_args.kwargs)
+            self.assertIn("No exact quest title matched",ctx.send.call_args.args[0])
+            self.assertIsInstance(ctx.send.call_args.kwargs["view"],QuestResultView)
+
+    async def test_exact_result_opens_directly(self):
+        cog=self.make_cog([]);result=page()
+        cog.search_quests=AsyncMock(return_value=[result]);cog.enrich_guide=AsyncMock(return_value=result)
+        ctx=SimpleNamespace(typing=MagicMock(),send=AsyncMock())
+        ctx.typing.return_value.__aenter__=AsyncMock();ctx.typing.return_value.__aexit__=AsyncMock()
+        await GrayZoneWarfare.quest.callback(cog,ctx,query="First Recon")
+        cog.enrich_guide.assert_awaited_once_with(result)
+        self.assertIn("embeds",ctx.send.call_args.kwargs)
+
+    async def test_selection_defers_then_replaces_prompt(self):
+        cog=self.make_cog([]);result=page();cog.enrich_guide=AsyncMock(return_value=result)
+        view=QuestResultView(cog,7,[result]);select=view.children[0];select._values=["0"]
+        interaction=SimpleNamespace(user=SimpleNamespace(id=7),response=SimpleNamespace(defer=AsyncMock()),edit_original_response=AsyncMock())
+        await select.callback(interaction)
+        interaction.response.defer.assert_awaited_once()
+        self.assertIsNone(interaction.edit_original_response.call_args.kwargs["content"])
+        self.assertIn("embeds",interaction.edit_original_response.call_args.kwargs)
 
     async def test_search_fetches_catalog_once_then_ranks_locally(self):
         payload={"data":[record("Little Bird Down"),record()],"dataVersion":"2026-11-03T21:05:01Z"};cog=self.make_cog([FakeResponse(200,payload)])
