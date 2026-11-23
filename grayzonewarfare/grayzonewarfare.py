@@ -11,7 +11,7 @@ from .utils import TTLCache,attach_guide,normalize_text,parse_guide_html,parse_p
 
 
 log=logging.getLogger("red.sick-cogs.GrayZoneWarfare")
-VERSION="1.0.0"
+VERSION="1.0.1"
 WIKI_NAME="Gray Zone Warfare Wiki"
 WIKI_BASE="https://gray-zone-warfare.fandom.com"
 API_NAME="GZW Data API"
@@ -27,14 +27,15 @@ class WikiUnavailable(RuntimeError):
 class QuestResultSelect(discord.ui.Select):
     def __init__(self,cog,author_id,pages):
         self.cog=cog;self.author_id=author_id;self.pages=pages
-        options=[discord.SelectOption(label=str(page.get("title") or "Quest")[:100],value=str(index)) for index,page in enumerate(pages[:5])]
+        options=[discord.SelectOption(label=str(page.get("title") or "Quest")[:100],value=str(index),description=" • ".join(str(page.get(key) or "") for key in ("vendor","location"))[:100] or None) for index,page in enumerate(pages[:5])]
         super().__init__(placeholder="Choose the matching quest…",options=options)
 
     async def callback(self,interaction):
         if interaction.user.id!=self.author_id:
             await interaction.response.send_message("Run the command yourself to choose a quest.",ephemeral=True);return
+        await interaction.response.defer()
         page=await self.cog.enrich_guide(self.pages[int(self.values[0])])
-        await interaction.response.edit_message(embeds=self.cog.quest_embeds(page),view=self.view)
+        await interaction.edit_original_response(content=None,embeds=self.cog.quest_embeds(page),view=self.view)
 
 
 class QuestResultView(discord.ui.View):
@@ -86,10 +87,18 @@ class GrayZoneWarfare(commands.Cog):
             search_url=f"{WIKI_BASE}/wiki/Special:Search?query={quote(query)}"
             await ctx.send(f"No quest pages matched **{query}**. Try the [full wiki search]({search_url}).");return
         exact=normalize_text(pages[0].get("title"))==normalize_text(query)
-        choices=pages[:5];view=QuestResultView(self,ctx.author.id,choices) if len(choices)>1 and not exact else None
-        selected=await self.enrich_guide(choices[0])
-        message=await ctx.send(embeds=self.quest_embeds(selected),view=view)
-        if view:view.message=message
+        if exact:
+            selected=await self.enrich_guide(pages[0])
+            await ctx.send(embeds=self.quest_embeds(selected))
+            return
+        view=QuestResultView(self,ctx.author.id,pages[:5])
+        search_url=f"{WIKI_BASE}/wiki/Special:Search?query={quote(query)}"
+        view.message=await ctx.send(
+            "No exact quest title matched. These are possible matches, not a confirmed quest. "
+            "Choose the quest you meant below to see its walkthrough. "
+            f"If none is right, try the [full wiki search]({search_url}); the catalog may be missing your quest.",
+            view=view,
+        )
 
     async def search_quests(self,query):
         key=normalize_text(query);cached=self.cache.get(key)
