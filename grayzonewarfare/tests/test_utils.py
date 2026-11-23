@@ -48,6 +48,13 @@ class UtilityTests(unittest.TestCase):
     def test_common_words_do_not_match_a_different_missing_quest(self):
         self.assertEqual(rank_pages("letter from beyond",[page("Letters from Lamang")]),[])
 
+    def test_guide_only_html_keeps_location_captions_and_filters_broken_markup(self):
+        html='<p>Locate the body.</p><p>[[File:broken.png|thumb|broken</p><p>]]]]</p><figure><img src="https://images.example/map.png/scale-to-width-down/298"><p>Body location 189/163</p></figure><noscript><img src="https://images.example/duplicate.png"></noscript><p>Letter location 189/160</p>'
+        guide=parse_guide_html(html)
+        self.assertEqual(guide["steps"],["Locate the body.","Body location 189/163","Letter location 189/160"])
+        self.assertEqual(len(guide["images"]),1)
+        self.assertIn("/scale-to-width-down/1000",guide["images"][0]["url"])
+
     def test_cache_expires_and_evicts_oldest(self):
         now=[0.0];cache=TTLCache(ttl=10,max_entries=2,clock=lambda:now[0])
         cache.set("one",[1]);cache.set("two",[2]);self.assertEqual(cache.get("one"),[1])
@@ -167,6 +174,22 @@ class CogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["walkthrough"],["Head north."]);self.assertEqual(len(first["guide_images"]),1)
         self.assertEqual(second["walkthrough"],["Head north."]);self.assertEqual(len(cog.session.calls),2)
         self.assertEqual(cog.session.calls[1][1]["params"]["section"],"5")
+
+    async def test_guide_only_page_without_sections_fetches_article_images(self):
+        cog=self.make_cog([FakeResponse(200,{"parse":{"sections":[]}}),FakeResponse(200,{"parse":{"text":{"*":'<p>Locate the body.</p><img src="https://images.example/map.png" alt="Body 189/163">'}}})])
+        result=await cog.enrich_guide(record_page({"name":"Letter From Beyond","_guide_only":True}))
+        self.assertEqual(result["walkthrough"],["Locate the body."])
+        self.assertEqual(result["guide_images"][0]["caption"],"Body 189/163")
+        self.assertNotIn("section",cog.session.calls[1][1]["params"])
+
+    async def test_ordinary_page_without_guide_does_not_parse_entire_article(self):
+        cog=self.make_cog([FakeResponse(200,{"parse":{"sections":[]}})])
+        result=await cog.enrich_guide(page())
+        self.assertEqual(result["walkthrough"],[]);self.assertEqual(len(cog.session.calls),1)
+
+    def test_all_five_location_images_are_displayed(self):
+        result=attach_guide(page(),{"images":[{"url":f"https://images.example/{i}.png"} for i in range(5)]})
+        self.assertEqual(len(GrayZoneWarfare.quest_embeds(result)),5)
 
     async def test_search_reports_http_and_shape_failures(self):
         with self.assertRaises(WikiUnavailable):await self.make_cog([FakeResponse(503,{})]).search_quests("First Recon")

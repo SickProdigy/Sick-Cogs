@@ -1,4 +1,5 @@
 import time
+import re
 import unicodedata
 from collections import OrderedDict
 from difflib import SequenceMatcher
@@ -30,13 +31,14 @@ class GuideHTMLParser(HTMLParser):
     def handle_starttag(self,tag,attrs):
         values=dict(attrs);classes=values.get("class","")
         if self._skip:
-            self._skip+=1;return
-        if values.get("id")=="toc" or "mw-editsection" in classes:
+            if tag not in ("img","br","hr","input","meta","link","source","wbr"):self._skip+=1
+            return
+        if tag in ("noscript","script","style") or values.get("id")=="toc" or "mw-editsection" in classes:
             self._skip=1;return
         if tag in ("h3","h4","p","li"):
             self._flush();self._tag=tag;self._parts=[];self._block_has_image=False
         if tag=="img":
-            url=(values.get("data-src") or values.get("src") or "").replace("/scale-to-width-down/300","/scale-to-width-down/1000")
+            url=re.sub(r"/scale-to-width-down/\d+", "/scale-to-width-down/1000",values.get("data-src") or values.get("src") or "")
             if url.startswith("https://") and url not in self._seen_images:
                 self._seen_images.add(url);self.images.append({"url":url,"caption":clean_text(values.get("alt"))})
             self._block_has_image=True
@@ -51,7 +53,7 @@ class GuideHTMLParser(HTMLParser):
 
     def _flush(self):
         text=clean_text(" ".join(self._parts))
-        if text and not (self._tag=="li" and self._block_has_image):
+        if text and "[[" not in text and "]]" not in text and not (self._tag=="li" and self._block_has_image):
             if self._tag in ("h3","h4"):text=f"**{text}**"
             if text not in self.blocks:self.blocks.append(text)
         self._tag="";self._parts=[];self._block_has_image=False
@@ -75,6 +77,7 @@ def record_page(record,data_version=""):
     search_text=" ".join(clean_text(record.get(key)) for key in ("name","alternate","vendor","location","briefing","objectives"))
     return {
         "title":name,
+        "guide_only":bool(record.get("_guide_only")),
         "fullurl":source_url(name),
         "vendor":clean_text(record.get("vendor")),
         "location":clean_text(record.get("location")),
