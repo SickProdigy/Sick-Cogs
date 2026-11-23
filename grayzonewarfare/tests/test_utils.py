@@ -115,16 +115,49 @@ class CogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("embeds",interaction.edit_original_response.call_args.kwargs)
 
     async def test_search_fetches_catalog_once_then_ranks_locally(self):
-        payload={"data":[record("Little Bird Down"),record()],"dataVersion":"2026-11-03T21:05:01Z"};cog=self.make_cog([FakeResponse(200,payload)])
+        payload={"data":[record("Little Bird Down"),record()],"dataVersion":"2026-11-03T21:05:01Z"};cog=self.make_cog([FakeResponse(200,payload),FakeResponse(200,{"data":[]}),FakeResponse(200,{"data":[]})])
         first=await cog.search_quests("First Recon");second=await cog.search_quests("frist recon")
-        self.assertEqual(first[0]["title"],"First Recon");self.assertEqual(second[0]["title"],"First Recon");self.assertEqual(len(cog.session.calls),1)
+        self.assertEqual(first[0]["title"],"First Recon");self.assertEqual(second[0]["title"],"First Recon");self.assertEqual(len(cog.session.calls),3)
         self.assertEqual(cog.session.calls[0][1]["params"],{"page":"1","per_page":"100"})
 
     async def test_search_collects_bounded_catalog_pages(self):
         first={"data":[record("Little Bird Down")],"dataVersion":"2026-11-03T21:05:01Z","totalPages":2}
         second={"data":[record("First Recon")],"dataVersion":"2026-11-03T21:05:01Z","totalPages":2}
-        cog=self.make_cog([FakeResponse(200,first),FakeResponse(200,second)]);pages=await cog.search_quests("First Recon")
+        cog=self.make_cog([FakeResponse(200,first),FakeResponse(200,second),FakeResponse(200,{"data":[]}),FakeResponse(200,{"data":[]})]);pages=await cog.search_quests("First Recon")
         self.assertEqual(pages[0]["title"],"First Recon");self.assertEqual(cog.session.calls[1][1]["params"],{"page":"2","per_page":"100"})
+
+    async def test_catalog_includes_contracts_and_guide_only_quests(self):
+        cog=self.make_cog([
+            FakeResponse(200,{"data":[record()]}),
+            FakeResponse(200,{"data":[record("Fuel Shortage")]}),
+            FakeResponse(200,{"data":[{"name":"Letter From Beyond","content":"[[File:raw markup]]"}]}),
+        ])
+        self.assertEqual((await cog.search_quests("letter from beyond"))[0]["title"],"Letter From Beyond")
+        self.assertEqual((await cog.search_quests("fuel shortage"))[0]["title"],"Fuel Shortage")
+        self.assertEqual([call[0][0].rsplit("/",1)[-1] for call in cog.session.calls],["tasks","contract","task_guides"])
+        result=(await cog.search_quests("letter from beyond"))[0]
+        self.assertEqual(result["guide"],"");self.assertEqual(result["walkthrough"],[])
+        self.assertIn("without structured guidance",GrayZoneWarfare.quest_embed(result).description)
+
+    async def test_catalog_deduplicates_titles_without_overwriting_structured_fields(self):
+        cog=self.make_cog([
+            FakeResponse(200,{"data":[record()],"dataVersion":"task-date"}),
+            FakeResponse(200,{"data":[record("FIRST RECON",vendor="Other",location="",task_type="Contract")]}),
+            FakeResponse(200,{"data":[{"name":"First Recon","content":"unparsed"}]}),
+        ])
+        results=await cog.search_quests("First Recon")
+        self.assertEqual(len(results),1);self.assertEqual(results[0]["vendor"],"Handshake")
+        self.assertEqual(results[0]["type"],"Contract");self.assertEqual(results[0]["updated"],"task-date")
+
+    async def test_failed_supplement_does_not_cache_an_incomplete_catalog(self):
+        cog=self.make_cog([FakeResponse(200,{"data":[record()]}),FakeResponse(503,{})])
+        with self.assertRaises(WikiUnavailable):await cog.search_quests("First Recon")
+        self.assertIsNone(cog.cache.get("__catalog__"))
+
+    async def test_malformed_record_and_excess_pagination_fail_safely(self):
+        for payload in ({"data":[None]},{"data":[],"totalPages":6}):
+            with self.assertRaises(WikiUnavailable):
+                await self.make_cog([FakeResponse(200,payload)]).search_quests("First Recon")
 
     async def test_enrich_guide_uses_section_api_and_caches_result(self):
         sections={"parse":{"sections":[{"line":"Guide","index":"5"}]}}
