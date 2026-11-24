@@ -7,11 +7,13 @@ import aiohttp
 import discord
 from redbot.core import commands
 
+from .announcements import SteamAnnouncements
+
 from .utils import TTLCache,attach_guide,normalize_text,parse_guide_html,parse_page,rank_pages,record_page
 
 
 log=logging.getLogger("red.sick-cogs.GrayZoneWarfare")
-VERSION="1.0.3"
+VERSION="1.1.0"
 WIKI_NAME="Gray Zone Warfare Wiki"
 WIKI_BASE="https://gray-zone-warfare.fandom.com"
 API_NAME="GZW Data API"
@@ -50,12 +52,13 @@ class QuestResultView(discord.ui.View):
             except discord.HTTPException:pass
 
 
-class GrayZoneWarfare(commands.Cog):
+class GrayZoneWarfare(SteamAnnouncements):
     """Source-linked Gray Zone Warfare quest assistance."""
 
     __version__=VERSION
 
     def __init__(self,bot):
+        self.init_announcements()
         self.bot=bot;self.cache=TTLCache(ttl=600,max_entries=128);self.request_lock=asyncio.Lock();self.last_request=0.0
         self.session=aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15),headers={"User-Agent":USER_AGENT})
 
@@ -64,12 +67,19 @@ class GrayZoneWarfare(commands.Cog):
         return
 
     def cog_unload(self):
+        self.news_loop.cancel()
         self.cache.clear();asyncio.create_task(self.session.close())
 
     @commands.group(name="grayzonewarfare",aliases=["gzw"],invoke_without_command=True)
     async def grayzonewarfare(self,ctx):
         """Find Gray Zone Warfare quest guidance from the wiki."""
         await ctx.send_help()
+
+    @grayzonewarfare.command(name="updates", aliases=["news"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def updates(self, ctx):
+        """Show the latest official Steam announcement. Configure autopost with gzwset."""
+        await self.show_news(ctx)
 
     @grayzonewarfare.command(name="quest",aliases=["task","mission"])
     @commands.bot_has_permissions(embed_links=True)

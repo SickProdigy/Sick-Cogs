@@ -27,3 +27,20 @@ Search terms are matched locally against the cached GZW Data quest catalog. Task
 ## Attribution
 
 Quest records are supplied by the GZW Data API from Gray Zone Warfare Wiki community data. Gray Zone Warfare is developed by MADFINGER Games. This cog is unofficial and is not affiliated with MADFINGER Games or Fandom.
+
+## Official Steam announcements
+
+Optional automatic posting uses Steam directly, independently of the third-party quest API. Server administrators can configure:
+
+```text
+[p]gzw updates
+[p]gzwset channel #updates
+[p]gzwset autopost start
+[p]gzwset autopost stop
+[p]gzwset interval 10
+[p]gzwset
+```
+
+Only official Steam community announcements are accepted. Polling defaults to every 10 minutes (configurable from 5 to 1440). Setting a channel or starting marks existing posts as seen, preventing an old-post flood. Omit the channel to stop and clear it. Delivery uses an embed with the Steam article link, excerpt, and artwork when available; no roles or members are mentioned. Send Messages and Embed Links permissions are required.
+
+Server settings, up to 500 posted item IDs, and polling timestamps persist across restarts. No member data is stored. Failed sends remain pending for a later check; as with the sibling Steam cogs, a crash between sending and saving its ID can cause a duplicate. The bounded latest-50 feed cannot guarantee recovery of every post after extended downtime. Steam API access requires outbound HTTPS to `api.steampowered.com`.
