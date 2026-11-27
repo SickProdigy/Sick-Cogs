@@ -4,7 +4,7 @@ import unicodedata
 from collections import OrderedDict
 from difflib import SequenceMatcher
 from html.parser import HTMLParser
-from urllib.parse import quote
+from urllib.parse import quote,unquote,urlsplit
 
 
 def normalize_text(value):
@@ -19,6 +19,25 @@ def clean_text(value):
 def source_url(title):
     slug=quote(str(title or "").replace(" ","_"),safe="")
     return f"https://gray-zone-warfare.fandom.com/wiki/{slug}"
+
+
+def is_guide_image(url,caption="",attrs=None):
+    """Keep walkthrough scenes; omit inventory art and wiki decorations."""
+    attrs=attrs or {}
+    filename=unquote(urlsplit(url).path).split("/revision/",1)[0].rsplit("/",1)[-1]
+    filename=re.sub(r"\.(?:png|jpe?g|webp|gif|svg)$","",filename,flags=re.I)
+    name=normalize_text(filename)
+    label=normalize_text(caption)
+    words=set((name+" "+label).split())
+    if attrs.get("role")=="presentation" or attrs.get("aria-hidden")=="true":return False
+    if words & {"placeholder","missing","broken","transparent","spacer","logo","favicon","checkmark"}:return False
+    if name in {"x","cross","red x","red cross","x mark","no image","noimage","image not found"}:return False
+    if label in {"x","cross","red x","red cross","x mark","no image","noimage"}:return False
+    if words & {"icon","inventory"}:return False
+    # A key/sample *location* screenshot is useful; the inventory item itself is not.
+    if words & {"map","location","spawn","entrance","entry","screenshot","dovecot","building"}:return True
+    if words & {"key","keys","sample","samples"}:return False
+    return True
 
 
 class GuideHTMLParser(HTMLParser):
@@ -39,7 +58,7 @@ class GuideHTMLParser(HTMLParser):
             self._flush();self._tag=tag;self._parts=[];self._block_has_image=False
         if tag=="img":
             url=re.sub(r"/scale-to-width-down/\d+", "/scale-to-width-down/1000",values.get("data-src") or values.get("src") or "")
-            if url.startswith("https://") and url not in self._seen_images:
+            if url.startswith("https://") and url not in self._seen_images and is_guide_image(url,values.get("alt",""),values):
                 self._seen_images.add(url);self.images.append({"url":url,"caption":clean_text(values.get("alt"))})
             self._block_has_image=True
 

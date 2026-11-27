@@ -9,7 +9,7 @@ import aiohttp
 APP_ID = 2479810
 API_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
 ANNOUNCEMENTS_URL = f"https://steamcommunity.com/app/{APP_ID}/announcements/"
-USER_AGENT = "Sick-Cogs-GrayZoneWarfare/1.1.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-GrayZoneWarfare/1.1.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 STEAM_CLAN_IMAGE_ROOT = "https://clan.steamstatic.com/images"
 
 CATEGORIES = ("updates", "hotfixes", "community", "events", "wipes", "releases", "promotions")
