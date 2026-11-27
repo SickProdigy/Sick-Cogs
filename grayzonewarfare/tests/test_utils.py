@@ -55,6 +55,33 @@ class UtilityTests(unittest.TestCase):
         self.assertEqual(len(guide["images"]),1)
         self.assertIn("/scale-to-width-down/1000",guide["images"][0]["url"])
 
+    def test_quest_images_exclude_items_and_decorations_before_image_limit(self):
+        names=["Avian_tissue_sample.png","BP_Elders_Room_Key.png","Red_X.svg",
+               "Placeholder.png","Quest_icon.png","Fandom_logo.png",
+               "Ban_Pa_north_entrance.jpg","Ban_Pa_south_entrance.jpg",
+               "Ground_samples_location.jpg","Elders_key_spawn.jpg","Dovecot.jpg"]
+        html='<p>Bring the samples and the BP Elder room key.</p>'+"".join(
+            f'<img data-src="https://images.example/{name}/revision/latest/scale-to-width-down/200" alt="{name}">'
+            for name in names)
+        guide=parse_guide_html(html)
+        self.assertEqual(guide["steps"],["Bring the samples and the BP Elder room key."])
+        self.assertEqual(len(guide["images"]),5)
+        self.assertIn("Ban_Pa_north_entrance",guide["images"][0]["url"])
+        self.assertIn("Ground_samples_location",guide["images"][2]["url"])
+        embeds=GrayZoneWarfare.quest_embeds(attach_guide(page(),guide))
+        self.assertEqual(len(embeds),5)
+        self.assertTrue(all("/scale-to-width-down/1000" in embed.image.url for embed in embeds))
+
+    def test_image_filter_uses_encoded_filename_alt_and_decorative_role(self):
+        html=('<img src="https://images.example/BP%20Elder%20Key.png/revision/latest" alt="">'
+              '<img src="https://images.example/a.png" alt="Red X">'
+              '<img src="https://images.example/b.png" role="presentation">'
+              '<figure><img src="https://images.example/c.jpg" alt="Key location 205/137">'
+              '<p>Key location 205/137</p></figure>')
+        guide=parse_guide_html(html)
+        self.assertEqual(guide["images"],[{"url":"https://images.example/c.jpg","caption":"Key location 205/137"}])
+        self.assertEqual(guide["steps"],["Key location 205/137"])
+
     def test_cache_expires_and_evicts_oldest(self):
         now=[0.0];cache=TTLCache(ttl=10,max_entries=2,clock=lambda:now[0])
         cache.set("one",[1]);cache.set("two",[2]);self.assertEqual(cache.get("one"),[1])
